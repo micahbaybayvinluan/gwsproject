@@ -1,0 +1,54 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
+import { api } from '@/lib/api';
+import { Badge, Button, Card, ErrorBox, Field, Input, Select } from '@/components/ui/primitives';
+import { DataTable } from '@/components/ui/table';
+
+interface User { id: string; username: string; email: string; fullName: string; active: boolean; totpEnabled: boolean; role: { key: string; name: string }; assignments: { location: { id: string; name: string } }[]; permissionOverrides: { permissionKey: string; granted: boolean }[] }
+
+/** §5 users, roles, per-user permission overrides ("tick which information can be shared and which approvals are needed"). */
+export function UsersPage() {
+  const qc = useQueryClient();
+  const users = useQuery({ queryKey: ['users'], queryFn: () => api.get<User[]>('/api/users') });
+  const roles = useQuery({ queryKey: ['roles'], queryFn: () => api.get<{ key: string; name: string; permissions: string[] }[]>('/api/roles') });
+  const keys = useQuery({ queryKey: ['permission-keys'], queryFn: () => api.get<string[]>('/api/users/permission-keys') });
+  const locations = useQuery({ queryKey: ['locations-all'], queryFn: () => api.get<{ id: string; name: string }[]>('/api/locations?all=1') });
+  const [f, setF] = useState({ username: '', email: '', fullName: '', roleKey: 'SALES_ASSOCIATE', password: '', locationIds: [] as string[] });
+  const create = useMutation({ mutationFn: () => api.post('/api/users', f), onSuccess: () => { setF({ ...f, username: '', email: '', fullName: '', password: '' }); void qc.invalidateQueries({ queryKey: ['users'] }); } });
+  const [sel, setSel] = useState<User | null>(null); const [ov, setOv] = useState<Record<string, boolean | undefined>>({});
+  const saveOv = useMutation({ mutationFn: () => api.put(`/api/users/${sel!.id}/overrides`, { overrides: Object.entries(ov).filter(([, v]) => v !== undefined).map(([permissionKey, granted]) => ({ permissionKey, granted })) }), onSuccess: () => void qc.invalidateQueries({ queryKey: ['users'] }) });
+  const patch = useMutation({ mutationFn: (p: Record<string, unknown>) => api.patch(`/api/users/${sel!.id}`, p), onSuccess: () => void qc.invalidateQueries({ queryKey: ['users'] }) });
+  const rolePerms = new Set(roles.data?.find((r) => r.key === sel?.role.key)?.permissions ?? []);
+  return <div className="space-y-4">
+    <h1 className="text-xl font-semibold">Users & Roles</h1>
+    <Card title="New user"><div className="grid gap-2 md:grid-cols-6"><Input placeholder="username" value={f.username} onChange={(e) => setF({ ...f, username: e.target.value })} /><Input placeholder="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /><Input placeholder="full name" value={f.fullName} onChange={(e) => setF({ ...f, fullName: e.target.value })} /><Select value={f.roleKey} onChange={(e) => setF({ ...f, roleKey: e.target.value })}>{roles.data?.map((r) => <option key={r.key} value={r.key}>{r.name}</option>)}</Select><Input type="password" placeholder="temp password (10+)" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /><select multiple className="rounded-md border border-slate-300 text-sm" value={f.locationIds} onChange={(e) => setF({ ...f, locationIds: [...e.target.selectedOptions].map((o) => o.value) })}>{locations.data?.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</select></div><Button className="mt-2" disabled={!f.username || !f.email || !f.fullName || f.password.length < 10} onClick={() => create.mutate()}>Create</Button><ErrorBox error={create.error} /></Card>
+    <DataTable exportName="Users" data={users.data ?? []} onRowClick={(u) => { setSel(u); setOv(Object.fromEntries(u.permissionOverrides.map((o) => [o.permissionKey, o.granted]))); }} columns={[{ header: 'Username', accessorKey: 'username' }, { header: 'Name', accessorKey: 'fullName' }, { header: 'Role', accessorFn: (r) => r.role.name }, { header: 'Locations', accessorFn: (r) => r.assignments.map((a) => a.location.name).join(', ') }, { header: '2FA', cell: (c) => c.row.original.totpEnabled ? <Badge tone="green">enrolled</Badge> : <Badge>none</Badge> }, { header: 'Active', cell: (c) => <Badge tone={c.row.original.active ? 'green' : 'red'}>{c.row.original.active ? 'yes' : 'no'}</Badge> }, { header: 'Overrides', accessorFn: (r) => r.permissionOverrides.length }]} />
+    {sel && <Card title={`${sel.fullName} — permissions (role ${sel.role.name} ± overrides)`} actions={<><Button size="sm" variant="outline" onClick={() => patch.mutate({ active: !sel.active })}>{sel.active ? 'Deactivate' : 'Activate'}</Button><Button size="sm" variant="outline" onClick={() => patch.mutate({ resetTotp: true })}>Reset 2FA</Button><Button size="sm" variant="outline" onClick={() => { const p = prompt('New temporary password (10+ chars)'); if (p) patch.mutate({ resetPassword: p }); }}>Reset password</Button><Button size="sm" onClick={() => saveOv.mutate()}>Save overrides</Button></>}>
+      <div className="grid gap-1 md:grid-cols-3 lg:grid-cols-4">{keys.data?.map((k) => { const fromRole = rolePerms.has(k); const o = ov[k]; const eff = o ?? fromRole; return <label key={k} className={`flex items-center gap-2 rounded px-2 py-1 text-xs ${o !== undefined ? 'bg-amber-50' : ''}`}><input type="checkbox" checked={eff} onChange={(e) => setOv({ ...ov, [k]: e.target.checked === fromRole ? undefined : e.target.checked })} /><span className={fromRole ? '' : 'text-slate-500'}>{k}</span>{o !== undefined && <Badge tone="amber">{o ? 'granted' : 'revoked'}</Badge>}</label>; })}</div>
+      <ErrorBox error={saveOv.error || patch.error} />
+    </Card>}
+  </div>;
+}
+
+export function AuditLogPage() {
+  const [f, setF] = useState({ entityType: '', userId: '', from: '', to: '' });
+  const q = useQuery({ queryKey: ['audit', f], queryFn: () => api.get<{ id: string; at: string; action: string; entityType: string; entityId: string | null; ip: string | null; before: unknown; after: unknown; user: { username: string } | null }[]>(`/api/audit-log?entityType=${f.entityType}&userId=${f.userId}&from=${f.from}&to=${f.to}`) });
+  const [open, setOpen] = useState<string | null>(null);
+  return <div className="space-y-4">
+    <div className="flex flex-wrap items-end gap-2"><h1 className="mr-auto text-xl font-semibold">Audit log</h1><Field label="Entity"><Input value={f.entityType} onChange={(e) => setF({ ...f, entityType: e.target.value })} placeholder="SalesDoc" /></Field><Field label="From"><Input type="date" value={f.from} onChange={(e) => setF({ ...f, from: e.target.value })} /></Field><Field label="To"><Input type="date" value={f.to} onChange={(e) => setF({ ...f, to: e.target.value })} /></Field></div>
+    <Card><ul className="divide-y text-sm">{q.data?.map((l) => <li key={l.id} className="py-1"><button className="flex w-full flex-wrap gap-2 text-left" onClick={() => setOpen(open === l.id ? null : l.id)}><span className="text-slate-500">{new Date(l.at).toLocaleString()}</span><span className="font-medium">{l.user?.username ?? 'system'}</span><Badge>{l.action}</Badge><span>{l.entityType} {l.entityId?.slice(0, 8)}</span><span className="ml-auto text-xs text-slate-400">{l.ip}</span></button>{open === l.id && <div className="grid gap-2 md:grid-cols-2"><pre className="overflow-auto rounded bg-slate-50 p-2 text-xs">before: {JSON.stringify(l.before, null, 1)}</pre><pre className="overflow-auto rounded bg-slate-50 p-2 text-xs">after: {JSON.stringify(l.after, null, 1)}</pre></div>}</li>)}</ul></Card>
+  </div>;
+}
+
+/** §6.1 thresholds, §7.4 consignment setting, Phase 2 posting switch, session timeouts, attachment rules. */
+export function SettingsPage() {
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: ['settings'], queryFn: () => api.get<Record<string, unknown>>('/api/settings') });
+  const [edits, setEdits] = useState<Record<string, string>>({});
+  const save = useMutation({ mutationFn: () => api.put('/api/settings', Object.fromEntries(Object.entries(edits).map(([k, v]) => [k, parse(v)]))), onSuccess: () => { setEdits({}); void qc.invalidateQueries({ queryKey: ['settings'] }); } });
+  const parse = (v: string) => { try { return JSON.parse(v); } catch { return v; } };
+  const HELP: Record<string, string> = { 'approval.cost_unchanged_auto_hours': 'COST_ON_RECEIVING auto-approves after N hours when every product exists with unchanged cost', 'approval.transfer_internal_auto_max': 'Auto-approve restock transfers from warehouse ≤ ₱X at cost (null = off)', 'approval.transfer_franchise_auto_max': 'Auto-approve transfers to franchise ≤ ₱X (null = off)', 'approval.special_price_auto_discount_pct': 'Discount ≤ N% auto-approved (default 0)', consignment_in_on_balance_sheet: 'false = off-balance-sheet until sold (correct accounting); true = legacy treatment', 'gl.auto_posting_enabled': 'Phase 2 switch: post R1–R14 journal entries automatically', 'gl.ni_allocation_basis': 'REVENUE (pro-rata) or EQUAL', 'attachments.required': 'Required-attachment rules per document type', 'alerts.near_expiry_days': 'Sales of batches expiring within N days show a warning', 'discrepancy.window_days': 'Days before a discrepancy case finalizes into a charge form' };
+  return <div className="space-y-4"><h1 className="text-xl font-semibold">Settings</h1>
+    <Card actions={<Button disabled={!Object.keys(edits).length} onClick={() => save.mutate()}>Save</Button>}><table className="w-full text-sm"><tbody>{Object.entries(q.data ?? {}).map(([k, v]) => <tr key={k} className="border-t"><td className="py-2 pr-4 align-top"><div className="font-mono text-xs">{k}</div><div className="text-xs text-slate-500">{HELP[k]}</div></td><td className="py-2"><Input value={edits[k] ?? (typeof v === 'string' ? v : JSON.stringify(v))} onChange={(e) => setEdits({ ...edits, [k]: e.target.value })} /></td></tr>)}</tbody></table><ErrorBox error={save.error} /></Card>
+  </div>;
+}

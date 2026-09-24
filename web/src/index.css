@@ -1,0 +1,8 @@
+@import "tailwindcss";
+@theme {
+  --color-brand: #0f766e;
+  --color-brand-dark: #115e59;
+}
+html, body, #root { height: 100%; }
+input, select, textarea { font-size: 16px; } /* prevents iOS zoom */
+.num { font-variant-numeric: tabular-nums; text-align: right; }

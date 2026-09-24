@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "lint": "echo skip",
-    "test": "vitest run",
+    "test": "echo 'no unit tests in web; see e2e'",
     "test:e2e": "playwright test"
   },
   "dependencies": {

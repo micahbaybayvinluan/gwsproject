@@ -1,0 +1,17 @@
+{
+  "name": "gws-erp",
+  "private": true,
+  "version": "0.1.0",
+  "description": "GWS-ERP — Get Wheysted Supplements internal system (inventory, sales, accounting)",
+  "packageManager": "pnpm@10.0.0",
+  "scripts": {
+    "dev": "pnpm -r --parallel run dev",
+    "build": "pnpm -r run build",
+    "lint": "pnpm -r run lint",
+    "test": "pnpm -r run test",
+    "typecheck": "pnpm -r run typecheck",
+    "db:migrate": "pnpm --filter @gws/api prisma:migrate",
+    "db:seed": "pnpm --filter @gws/api prisma:seed"
+  },
+  "engines": { "node": ">=22" }
+}

@@ -1,0 +1,11 @@
+node_modules
+dist
+coverage
+.env
+*.log
+/api/uploads
+/web/dist
+/api/generated
+.pnpm-store
+playwright-report
+test-results

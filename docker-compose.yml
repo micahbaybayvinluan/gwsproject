@@ -1,0 +1,69 @@
+version: "3.9"
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: gws
+      POSTGRES_PASSWORD: gws
+      POSTGRES_DB: gws
+    ports: ["5432:5432"]
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gws"]
+      interval: 5s
+      retries: 10
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: minio12345
+    ports: ["9000:9000", "9001:9001"]
+    volumes: ["miniodata:/data"]
+  minio-init:
+    image: minio/mc:latest
+    depends_on: [minio]
+    entrypoint: >
+      /bin/sh -c "sleep 3; mc alias set local http://minio:9000 minio minio12345 && mc mb -p local/gws-attachments && mc mb -p local/gws-backups || true"
+  clamav:
+    image: clamav/clamav:stable
+    ports: ["3310:3310"]
+  api:
+    build: { context: ., dockerfile: api/Dockerfile }
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://gws:gws@postgres:5432/gws?schema=public
+      REDIS_URL: redis://redis:6379
+      S3_ENDPOINT: http://minio:9000
+      CLAMAV_HOST: clamav
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_started }
+    ports: ["4000:4000"]
+  web:
+    build: { context: ., dockerfile: web/Dockerfile }
+    environment:
+      VITE_API_URL: http://localhost:4000
+    ports: ["5173:80"]
+    depends_on: [api]
+  backup:
+    image: postgres:16-alpine
+    entrypoint: ["/bin/sh", "/backup.sh"]
+    environment:
+      PGHOST: postgres
+      PGUSER: gws
+      PGPASSWORD: gws
+      PGDATABASE: gws
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET: gws-backups
+      S3_ACCESS_KEY: minio
+      S3_SECRET_KEY: minio12345
+      RETENTION_DAYS: "30"
+    volumes: ["./docs/ops/backup.sh:/backup.sh:ro"]
+    depends_on: [postgres, minio]
+volumes:
+  pgdata: {}
+  miniodata: {}

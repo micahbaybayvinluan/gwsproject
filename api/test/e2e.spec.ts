@@ -35,7 +35,18 @@ const as = (u: string) => ({ get: (p: string) => http.get(p).set('Authorization'
 const has = (o: unknown, re: RegExp): boolean => JSON.stringify(o).match(re) !== null;
 const ok = (r: request.Response) => { if (r.status >= 400) throw new Error(`${r.request?.method} ${r.request?.url} → ${r.status} ${JSON.stringify(r.body)}`); return r; };
 
-beforeAll(async () => { app = await createApp(); await app.init(); http = request(app.getHttpServer()); for (const u of USERS) await login(u); });
+/** The suite is idempotent: transactional tables are truncated before each run (master data + seed users stay). Never run against production. */
+async function resetTransactionalData() {
+  if (process.env.NODE_ENV !== 'test') throw new Error('refusing to reset data outside NODE_ENV=test');
+  await prisma.$executeRawUnsafe(`TRUNCATE stock_ledger, stock_balances, receiving_lines, receiving_docs, transfer_lines, transfer_docs, sales_lines, payment_allocations, payments, sales_docs, expense_docs, count_lines, count_docs, discrepancy_cases, charge_form_allocations, charge_form_lines, charge_forms, expiry_writeoff_lines, expiry_writeoff_docs, approval_decisions, approval_requests, notifications, audit_log, batches, daily_closes, post_close_edits, journal_lines, journal_vouchers, beginning_balances, accounting_periods, voucher_sequences, control_sequences, alert_states, attachments, employee_loans, payroll_lines, payroll_runs, employees, min_stock_levels, revaluation_lines, revaluation_entries, cash_deposits, login_session_records CASCADE`);
+  await prisma.priceList.deleteMany({ where: { product: { name: { startsWith: 'E2E ' } } } });
+  await prisma.productCost.deleteMany({ where: { product: { name: { startsWith: 'E2E ' } } } });
+  await prisma.product.deleteMany({ where: { name: { startsWith: 'E2E ' } } });
+  await prisma.supplier.deleteMany({ where: { name: { startsWith: 'Secret Supplier ' } } });
+  await prisma.setting.deleteMany();
+}
+
+beforeAll(async () => { await resetTransactionalData(); app = await createApp(); await app.init(); http = request(app.getHttpServer()); for (const u of USERS) await login(u); });
 afterAll(async () => { await app.close(); await prisma.$disconnect(); });
 
 describe('auth & 2FA', () => {

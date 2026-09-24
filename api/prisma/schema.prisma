@@ -56,7 +56,6 @@ model Location {
   dailyCloses       DailyClose[]
   franchiseExpenses FranchiseExpense[]
   employees         Employee[]
-  controlSequences  ControlSequence[]
 
   @@map("locations")
 }
@@ -396,15 +395,13 @@ enum DocStatus {
 }
 
 model ControlSequence {
-  id         String  @id @default(uuid())
-  docType    String  @map("doc_type")
-  locationId String? @map("location_id")
-  year       Int?
-  nextNo     Int     @default(1) @map("next_no")
+  id       String @id @default(uuid())
+  docType  String @map("doc_type")
+  scopeKey String @default("") @map("scope_key") // location id or '' (NULLs would defeat ON CONFLICT)
+  year     Int    @default(0)
+  nextNo   Int    @default(1) @map("next_no")
 
-  location Location? @relation(fields: [locationId], references: [id])
-
-  @@unique([docType, locationId, year])
+  @@unique([docType, scopeKey, year])
   @@map("control_sequences")
 }
 

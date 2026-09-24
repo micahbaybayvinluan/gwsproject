@@ -1,6 +1,6 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ApprovalStatus, Prisma } from '@prisma/client';
-import { PrismaService } from '../common/prisma.service';
+import { PrismaService, Tx } from '../common/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AuditService } from '../common/audit.service';
 import { APPROVAL_ROUTING, ApprovalType, RoleKey, editRequestApprovers } from '../common/permissions';
@@ -22,8 +22,8 @@ export class ApprovalsService {
 
   register(type: ApprovalType, handler: ApprovalHandler) { this.handlers.set(type, handler); }
 
-  async request(input: { type: ApprovalType; documentType: string; documentId: string; requestedBy: string; requesterRole?: RoleKey; summary?: unknown; autoApproveAt?: Date | null; extraRoles?: RoleKey[]; discrepancyCaseId?: string | null }, tx: Prisma.TransactionClient | null = null) {
-    const db = (tx ?? this.prisma.db) as Prisma.TransactionClient;
+  async request(input: { type: ApprovalType; documentType: string; documentId: string; requestedBy: string; requesterRole?: RoleKey; summary?: unknown; autoApproveAt?: Date | null; extraRoles?: RoleKey[]; discrepancyCaseId?: string | null }, tx: Tx | null = null) {
+    const db = (tx ?? this.prisma.db);
     const route = APPROVAL_ROUTING[input.type];
     let roles: RoleKey[] = [...route.roles];
     if (input.type === 'EDIT_REQUEST' && input.requesterRole) roles = editRequestApprovers(input.requesterRole);

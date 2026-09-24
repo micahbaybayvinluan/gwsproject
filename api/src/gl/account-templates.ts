@@ -76,6 +76,7 @@ export const GLOBAL_ACCOUNTS: { key: string; code: string; title: string; class:
   { key: 'HDMF_PAYABLE', code: '2212', title: 'HDMF Premium Payable', class: 'CURRENT_LIABILITY' },
   { key: 'SSS_LOAN_PAYABLE', code: '2220', title: 'SSS Loan Payable', class: 'CURRENT_LIABILITY' },
   { key: 'HDMF_LOAN_PAYABLE', code: '2221', title: 'HDMF Loan Payable', class: 'CURRENT_LIABILITY' },
+  { key: 'THIRTEENTH_MONTH_PAYABLE', code: '2230', title: '13th Month Pay Payable', class: 'CURRENT_LIABILITY' },
   { key: 'OUTPUT_TAX', code: '2300', title: 'Output Tax', class: 'CURRENT_LIABILITY' },
   { key: 'ADV_EMPLOYEES', code: '1500', title: 'Advances to Employees', class: 'ADVANCES_TO' },
   { key: 'SALES_WAREHOUSE_FRANCHISE', code: '6900', title: 'Sales – Warehouse Franchise', class: 'REVENUE' },

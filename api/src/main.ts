@@ -9,6 +9,7 @@ import { requestContext } from './common/request-context';
 import { RedactionInterceptor } from './common/redaction';
 import { AuditInterceptor, AuditService } from './common/audit.service';
 import { AuthGuard } from './auth/auth.guard';
+import { AppExceptionFilter } from './common/http-exception.filter';
 
 export async function createApp() {
   const app = await NestFactory.create(AppModule, { logger: ['log', 'warn', 'error'] });
@@ -18,6 +19,7 @@ export async function createApp() {
   });
   app.enableCors({ origin: (process.env.CORS_ORIGIN || 'http://localhost:5173').split(','), credentials: true });
   app.useGlobalGuards(app.get(AuthGuard));
+  app.useGlobalFilters(new AppExceptionFilter());
   app.useGlobalInterceptors(new RedactionInterceptor(), new AuditInterceptor(app.get(AuditService), app.get(Reflector)));
   return app;
 }

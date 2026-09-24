@@ -44,6 +44,8 @@ function hasAllTiers(user: RedactionUser) {
   return ['RETAIL', 'DEALER', 'FRANCHISE', 'AGENT', 'WHOLESALE'].every((t) => has(user, `price.view.${t}`));
 }
 
+function isDecimalLike(v: unknown): boolean { return !!v && typeof v === 'object' && typeof (v as { toFixed?: unknown }).toFixed === 'function' && typeof (v as { toDecimalPlaces?: unknown }).toDecimalPlaces === 'function'; }
+
 interface Ctx { canCost: boolean; canSupplierName: boolean; tierAllowed: (t: string) => boolean }
 
 function walk(value: unknown, parentKey: string | undefined, ctx: Ctx): unknown {
@@ -56,9 +58,9 @@ function walk(value: unknown, parentKey: string | undefined, ctx: Ctx): unknown 
     return arr;
   }
   if (typeof value !== 'object') return value;
-  // Decimal / Date pass through untouched
-  const proto = Object.getPrototypeOf(value);
-  if (value instanceof Date || (proto && proto.constructor && proto.constructor.name === 'Decimal')) return value;
+  // Dates pass through; Decimal-like values (decimal.js / Prisma.Decimal) serialise as strings, matching JSON.stringify's toJSON output
+  if (value instanceof Date) return value;
+  if (isDecimalLike(value)) return (value as { toString(): string }).toString();
 
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(value as Record<string, unknown>)) {

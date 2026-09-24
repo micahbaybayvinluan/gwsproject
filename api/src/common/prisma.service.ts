@@ -22,6 +22,7 @@ function hasScopeFilter(where: Record<string, unknown> | undefined, fields: stri
   if (!where) return false;
   for (const f of fields) if (f in where && where[f] !== undefined) return true;
   if (Array.isArray(where.AND)) return (where.AND as Record<string, unknown>[]).some((w) => hasScopeFilter(w, fields));
+  if (Array.isArray(where.OR) && where.OR.length) return (where.OR as Record<string, unknown>[]).every((w) => hasScopeFilter(w, fields));
   return false;
 }
 
@@ -46,6 +47,8 @@ export function createScopedClient() {
   });
 }
 export type ScopedPrisma = ReturnType<typeof createScopedClient>;
+/** Client usable both outside and inside an interactive transaction. */
+export type Tx = Omit<ScopedPrisma, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
 
 @Injectable()
 export class PrismaService implements OnModuleInit, OnModuleDestroy {

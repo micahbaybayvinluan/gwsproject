@@ -14,6 +14,11 @@ export class ScopeService {
     if (!user.locationScoped) return { OR: [{ fromLocationId: { not: '' } }] };
     return { OR: [{ fromLocationId: { in: user.locationIds } }, { toLocationId: { in: user.locationIds } }] };
   }
+  /** Prisma filter for an optional requested location: asserts scope when given, else the user's scope. */
+  locationFilter(user: SessionUser, requested?: string | null): Record<string, unknown> {
+    if (requested) { this.assertLocation(user, requested); return requested as unknown as Record<string, unknown>; }
+    return user.locationScoped ? { in: user.locationIds } : { not: '' };
+  }
   /** Throw unless the user may act on this location. */
   assertLocation(user: SessionUser, locationId: string) {
     if (user.locationScoped && !user.locationIds.includes(locationId)) throw new ForbiddenException('Location outside your assignment');

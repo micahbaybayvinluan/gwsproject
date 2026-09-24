@@ -1,6 +1,6 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { PrismaService } from '../common/prisma.service';
+import { PrismaService, Tx } from '../common/prisma.service';
 import { AuditService } from '../common/audit.service';
 import type { SessionUser } from '../common/request-context';
 import { D } from '../common/money';
@@ -104,15 +104,15 @@ export class MasterService {
 
   // ── Pricing ──
   /** Price in effect = latest effective_from <= date (§4.2). */
-  async priceFor(productId: string, tier: string, date: Date = todayManila(), tx: Prisma.TransactionClient | null = null): Promise<Prisma.Decimal | null> {
-    const db = (tx ?? this.prisma.db) as Prisma.TransactionClient;
+  async priceFor(productId: string, tier: string, date: Date = todayManila(), tx: Tx | null = null): Promise<Prisma.Decimal | null> {
+    const db = (tx ?? this.prisma.db);
     const row = await db.priceList.findFirst({ where: { productId, tier, effectiveFrom: { lte: date } }, orderBy: { effectiveFrom: 'desc' } });
     if (row) return row.price;
     if (tier === 'AGENT') return this.priceFor(productId, 'DEALER', date, tx); // §18.9 agent defaults to dealer price
     return null;
   }
-  async costFor(productId: string, date: Date = todayManila(), tx: Prisma.TransactionClient | null = null): Promise<Prisma.Decimal | null> {
-    const db = (tx ?? this.prisma.db) as Prisma.TransactionClient;
+  async costFor(productId: string, date: Date = todayManila(), tx: Tx | null = null): Promise<Prisma.Decimal | null> {
+    const db = (tx ?? this.prisma.db);
     const row = await db.productCost.findFirst({ where: { productId, effectiveFrom: { lte: date } }, orderBy: { effectiveFrom: 'desc' } });
     return row?.cost ?? null;
   }

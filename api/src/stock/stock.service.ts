@@ -1,10 +1,9 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { MovementType, Prisma } from '@prisma/client';
-import { PrismaService } from '../common/prisma.service';
+import { PrismaService, Tx } from '../common/prisma.service';
 import { manilaDateStr, toDateOnly, todayManila, dateStr } from '../common/manila';
 import type { SessionUser } from '../common/request-context';
 
-type Tx = Prisma.TransactionClient;
 export const VIRTUAL_CODES = { IN_TRANSIT: 'V-TRANSIT', OPENING: 'V-OPENING', CUSTOMER_RETURNS: 'V-CUSTRET', OFFICE: 'OFFICE', PULLOUT1: 'V-PULLOUT1', PULLOUT2: 'V-PULLOUT2', PULLOUT3: 'V-PULLOUT3', FOR_REPLACEMENT: 'V-REPLACE' } as const;
 
 export interface LedgerPost { locationId: string; productId: string; batchId: string; qtyDelta: number; movementType: MovementType; documentType: string; documentId: string; unitCost: Prisma.Decimal | string | number; businessDate?: Date; createdBy?: string }
@@ -31,7 +30,7 @@ export class StockService {
   }
 
   async locationByCode(tx: Tx | null, code: string) {
-    const db = (tx ?? this.prisma.db) as Prisma.TransactionClient;
+    const db = (tx ?? this.prisma.db);
     const loc = await db.location.findUnique({ where: { code } });
     if (!loc) throw new BadRequestException(`Location ${code} missing; run seed`);
     return loc;
@@ -62,7 +61,7 @@ export class StockService {
   }
 
   async onHand(locationId: string, productId: string, tx: Tx | null = null): Promise<number> {
-    const db = (tx ?? this.prisma.db) as Prisma.TransactionClient;
+    const db = (tx ?? this.prisma.db);
     const r = await db.stockBalance.aggregate({ where: { locationId, productId }, _sum: { qty: true } });
     return r._sum.qty ?? 0;
   }

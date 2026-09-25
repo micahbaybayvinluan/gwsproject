@@ -16,7 +16,7 @@ Two-factor codes are switched off for the simulation (`AUTH_TOTP_OPTIONAL=true` 
 | II | External Auditor (read-only, incl. financial statements & payroll) | `ext.auditor` | All | Yes |
 | III | Head Auditor | `head.auditor` | All | Yes |
 | IV | Asst Auditor | `asst.auditor` | All | Yes |
-| V | Audit Associate (branch reports, edit requests) | `audit.assoc` | All branches, reports only | No |
+| V | Audit Associate (branch reports, corrections approved by the Head Auditor) | `audit.assoc` | All branches, reports only | Yes |
 | VI | Warehouse in Charge | `wh.incharge` | Warehouse | No |
 | VII | Warehouse Associate | `wh.assoc` | Warehouse | No |
 | VIII | Sales Associate – **West Ave** | `sales.westave` | West Ave | No |

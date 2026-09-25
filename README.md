@@ -29,7 +29,7 @@ Prerequisites: Node 22, pnpm 10, Docker (or local Postgres 16 + Redis 7).
 ```bash
 pnpm install
 cp .env.example api/.env                      # edit DATABASE_URL / REDIS_URL if not using compose
-docker compose up -d postgres redis minio minio-init clamav
+docker compose up -d postgres redis            # add "minio minio-init clamav" for S3 storage + virus scanning
 pnpm --filter @gws/api prisma:generate
 pnpm --filter @gws/api prisma:deploy           # applies prisma/migrations
 pnpm --filter @gws/api prisma:seed             # roles, locations, categories, tiers, account templates, test users

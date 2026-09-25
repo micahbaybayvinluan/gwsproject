@@ -5,7 +5,8 @@ import { PostingService } from '../gl/posting.service';
 import { AccountsService } from '../gl/accounts.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AuditService } from '../common/audit.service';
-import { computeNetPay, r11PayrollDeduction, r13PayrollClose, r13PayrollFinalize, r14Depreciation } from '../gl/posting-rules';
+import { computeNetPay, r11PayrollDeduction, r13PayrollClose, r13PayrollFinalize, r13Remittance, r14Depreciation } from '../gl/posting-rules';
+import { DEFAULT_TABLES_EFFECTIVE, HDMF_2024, PHIC_2025, sssRows2025 } from './contribution-tables';
 import { toDateOnly, todayManila } from '../common/manila';
 import { D, ZERO, round2 } from '../common/money';
 import type { SessionUser } from '../common/request-context';
@@ -17,9 +18,10 @@ export class PayrollService {
   constructor(private prisma: PrismaService, private posting: PostingService, private accounts: AccountsService, private notify: NotificationsService, private audit: AuditService) {}
 
   // ── Employees ──
-  employees(active = true) { return this.prisma.db.employee.findMany({ where: { active }, include: { location: { select: { code: true, name: true } }, loans: { where: { active: true } } }, orderBy: { fullName: 'asc' } }); }
+  employees(active = true) { return this.prisma.db.employee.findMany({ where: { active }, include: { location: { select: { code: true, name: true } }, loans: { where: { active: true } }, user: { select: { id: true, username: true, fullName: true } } }, orderBy: { fullName: 'asc' } }); }
   async createEmployee(data: Prisma.EmployeeUncheckedCreateInput, user: SessionUser) { const e = await this.prisma.db.employee.create({ data: { ...data, createdBy: user.id } }); await this.audit.log({ action: 'CREATE', entityType: 'Employee', entityId: e.id, after: e }); return e; }
   async updateEmployee(id: string, data: Prisma.EmployeeUncheckedUpdateInput) { const before = await this.prisma.db.employee.findUniqueOrThrow({ where: { id } }); const after = await this.prisma.db.employee.update({ where: { id }, data }); await this.audit.log({ action: 'UPDATE', entityType: 'Employee', entityId: id, before, after }); return after; }
+  linkableUsers() { return this.prisma.db.user.findMany({ where: { active: true }, select: { id: true, username: true, fullName: true, idNumber: true, role: { select: { name: true } }, employee: { select: { id: true } } }, orderBy: { fullName: 'asc' } }); }
   addLoan(data: { employeeId: string; kind: string; principal: number; perPeriod: number }) { return this.prisma.db.employeeLoan.create({ data: { ...data, principal: D(data.principal).toFixed(2), balance: D(data.principal).toFixed(2), perPeriod: D(data.perPeriod).toFixed(2) } }); }
 
   // ── Contribution tables (editable config) ──
@@ -32,6 +34,52 @@ export class PayrollService {
     const rate = (cfg: { rateEe: number; rateEr: number; min?: number; max?: number } | undefined) => { if (!cfg) return { ee: ZERO, er: ZERO }; const base = Decimal.min(Decimal.max(basic, cfg.min ?? 0), cfg.max ?? basic); return { ee: round2(base.mul(cfg.rateEe)), er: round2(base.mul(cfg.rateEr)) }; };
     const s = bracket(sss?.rows as never), p = rate(phic?.rows as never), h = rate(hdmf?.rows as never);
     return { sssEe: s.ee, sssEr: s.er, phicEe: p.ee, phicEr: p.er, hdmfEe: h.ee, hdmfEr: h.er };
+  }
+
+  /** Loads the default SSS / PhilHealth / Pag-IBIG tables when none exist (HR can replace them any time). */
+  async ensureDefaultTables() {
+    if (await this.prisma.db.contributionTable.count()) return false;
+    const eff = toDateOnly(DEFAULT_TABLES_EFFECTIVE);
+    await this.prisma.db.contributionTable.createMany({ data: [{ kind: 'SSS', effectiveFrom: eff, rows: sssRows2025() as unknown as Prisma.InputJsonValue }, { kind: 'PHIC', effectiveFrom: eff, rows: PHIC_2025 }, { kind: 'HDMF', effectiveFrom: eff, rows: HDMF_2024 }] });
+    return true;
+  }
+
+  // ── Government contributions register & remittances ──
+  /**
+   * Monthly register from finalized/closed payroll runs ending in the month: per employee the employee share deducted from pay and the
+   * employer share, i.e. what is payable to SSS / PhilHealth / Pag-IBIG. Names and ID numbers only for payroll-detail roles (HR,
+   * External Auditor, Accounting Head, Admin); the Accounting Associate gets totals only.
+   */
+  async contributionsRegister(year: number, month: number, user: SessionUser) {
+    const from = new Date(Date.UTC(year, month - 1, 1)); const to = new Date(Date.UTC(year, month, 0));
+    const lines = await this.prisma.db.payrollLine.findMany({ where: { run: { status: { in: ['FINALIZED', 'CLOSED'] }, periodTo: { gte: from, lte: to } } }, include: { employee: { select: { id: true, employeeNo: true, fullName: true, sssNo: true, phicNo: true, hdmfNo: true, location: { select: { name: true } } } } } });
+    const byEmp = new Map<string, { employee: (typeof lines)[number]['employee']; sssEe: Decimal; sssEr: Decimal; phicEe: Decimal; phicEr: Decimal; hdmfEe: Decimal; hdmfEr: Decimal }>();
+    for (const l of lines) {
+      const cur = byEmp.get(l.employeeId) ?? { employee: l.employee, sssEe: ZERO, sssEr: ZERO, phicEe: ZERO, phicEr: ZERO, hdmfEe: ZERO, hdmfEr: ZERO };
+      cur.sssEe = cur.sssEe.plus(l.sssEe); cur.sssEr = cur.sssEr.plus(l.sssEr); cur.phicEe = cur.phicEe.plus(l.phicEe); cur.phicEr = cur.phicEr.plus(l.phicEr); cur.hdmfEe = cur.hdmfEe.plus(l.hdmfEe); cur.hdmfEr = cur.hdmfEr.plus(l.hdmfEr);
+      byEmp.set(l.employeeId, cur);
+    }
+    const rows = [...byEmp.values()].sort((a, b) => a.employee.fullName.localeCompare(b.employee.fullName)).map((r) => ({ employeeId: r.employee.id, employeeNo: r.employee.employeeNo, name: r.employee.fullName, branch: r.employee.location?.name ?? 'Office', sssNo: r.employee.sssNo, phicNo: r.employee.phicNo, hdmfNo: r.employee.hdmfNo, sssEe: r.sssEe, sssEr: r.sssEr, sssTotal: r.sssEe.plus(r.sssEr), phicEe: r.phicEe, phicEr: r.phicEr, phicTotal: r.phicEe.plus(r.phicEr), hdmfEe: r.hdmfEe, hdmfEr: r.hdmfEr, hdmfTotal: r.hdmfEe.plus(r.hdmfEr) }));
+    const t = (k: keyof (typeof rows)[number]) => rows.reduce((acc, r) => acc.plus(r[k] as Decimal), ZERO);
+    const remittances = await this.prisma.db.contributionRemittance.findMany({ where: { year, month } });
+    const agencies = (['SSS', 'PHIC', 'HDMF'] as const).map((kind) => { const k = kind.toLowerCase() as 'sss' | 'phic' | 'hdmf'; const ee = t(`${k}Ee` as never), er = t(`${k}Er` as never); const rem = remittances.find((x) => x.kind === kind); return { kind, label: kind === 'SSS' ? 'SSS' : kind === 'PHIC' ? 'PhilHealth' : 'Pag-IBIG (HDMF)', employeeShare: ee, employerShare: er, total: ee.plus(er), remitted: rem ?? null, payable: rem ? ZERO : ee.plus(er) }; });
+    const detail = user.permissions.has('payroll.view.detail');
+    return { year, month, employees: rows.length, agencies, rows: detail ? rows : undefined };
+  }
+  /** Record the monthly payment to the agency (HR or Accounting Head); with a paying account it posts R13 (Dr payable, Cr bank). */
+  async recordRemittance(input: { kind: 'SSS' | 'PHIC' | 'HDMF'; year: number; month: number; referenceNo: string; paidAt: string; paidFromAccountId?: string | null }, user: SessionUser) {
+    const reg = await this.contributionsRegister(input.year, input.month, { ...user, permissions: new Set([...user.permissions, 'payroll.view.detail']) });
+    const a = reg.agencies.find((x) => x.kind === input.kind)!;
+    if (a.remitted) throw new BadRequestException(`${a.label} for ${input.year}-${String(input.month).padStart(2, '0')} is already recorded as remitted`);
+    if (a.total.lte(0)) throw new BadRequestException('Nothing to remit for that month (no finalized payroll)');
+    const rem = await this.prisma.db.$transaction(async (tx) => {
+      const r = await tx.contributionRemittance.create({ data: { kind: input.kind, year: input.year, month: input.month, amountEe: a.employeeShare.toFixed(2), amountEr: a.employerShare.toFixed(2), total: a.total.toFixed(2), referenceNo: input.referenceNo, paidAt: toDateOnly(input.paidAt), paidFromAccountId: input.paidFromAccountId ?? null, createdBy: user.id } });
+      if (input.paidFromAccountId) { const v = await this.posting.post(tx, { type: 'ContributionRemittance', id: r.id, date: toDateOnly(input.paidAt), createdBy: user.id }, (res) => r13Remittance(res, { kind: input.kind, amount: a.total, paymentAccountId: input.paidFromAccountId!, ref: `${input.year}-${String(input.month).padStart(2, '0')} ${input.referenceNo}` })); if (v[0]) await tx.contributionRemittance.update({ where: { id: r.id }, data: { voucherId: v[0].id } }); }
+      return r;
+    });
+    await this.audit.log({ action: 'REMIT', entityType: 'ContributionRemittance', entityId: rem.id, after: rem });
+    await this.notify.toRoles(['ACCOUNTING_HEAD', 'HR_STAFF'], { type: 'CONTRIBUTION_REMITTED', title: `${a.label} ${input.year}-${String(input.month).padStart(2, '0')} remitted: ₱${a.total.toFixed(2)} (ref ${input.referenceNo})`, link: '/payroll' });
+    return rem;
   }
 
   // ── Runs ──

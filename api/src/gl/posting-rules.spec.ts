@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import Decimal from 'decimal.js';
-import { AccountResolver, MissingAccountError, assertBalanced, computeNetPay, r10Deposit, r10Expense, r11ChargeForm, r11PayrollDeduction, r12Revaluation, r13PayrollClose, r13PayrollFinalize, r14Depreciation, r1Receiving, r3r4Sale, r4Collection, r5CostOfSale, r6Transfer, r7FranchiseTransfer, r8ConsignOut, r8ConsigneeSale, r9Writeoff, Entry } from './posting-rules';
+import { AccountResolver, MissingAccountError, assertBalanced, computeNetPay, r10Deposit, r10Expense, r10FundReplenish, r10FundSetup, r13Remittance, r11ChargeForm, r11PayrollDeduction, r12Revaluation, r13PayrollClose, r13PayrollFinalize, r14Depreciation, r1Receiving, r3r4Sale, r4Collection, r5CostOfSale, r6Transfer, r7FranchiseTransfer, r8ConsignOut, r8ConsigneeSale, r9Writeoff, Entry } from './posting-rules';
 
 /** In-memory resolver: account id = `${template}@${location}` or `G:${key}`. */
 const r: AccountResolver = {
@@ -101,5 +101,15 @@ describe('posting rules §10.4', () => {
     const es = r14Depreciation(r, { assets: [{ accumDepnAccountId: 'ACC_EQUIP', amount: 100, name: 'Rack' }, { accumDepnAccountId: 'ACC_EQUIP', amount: 50, name: 'Bench' }, { accumDepnAccountId: 'ACC_VEH', amount: 300, name: 'Van' }], depreciationExpenseAccountId: 'DEPN', ref: '2026-01' });
     balanced(es); expect(dr(es[0], 'DEPN')).toBe(450); expect(cr(es[0], 'ACC_EQUIP')).toBe(150); expect(cr(es[0], 'ACC_VEH')).toBe(300);
     expect(r14Depreciation(r, { assets: [], depreciationExpenseAccountId: 'DEPN', ref: 'x' })).toEqual([]);
+  });
+
+  it('R11 cash shortage charge: Dr Advances to Employees, Cr Cash on Hand (no product cost)', () => {
+    const [e] = r11ChargeForm(r, { locationId: 'L1', controlNo: 'CHG-9', kind: 'CASH_SHORTAGE', lines: [{ qty: 1, unitCharge: 350, batchCost: 0, amountOnly: true }], allocations: [{ employeeId: 'E1', amount: 200 }, { employeeId: 'E2', amount: 150 }] });
+    assertBalanced(e.lines); expect(cr(e, 'CASH_ON_HAND@L1')).toBe(350); expect(dr(e, 'ADV_EMPLOYEE_CHARGES@L1')).toBe(350);
+  });
+  it('R10 fund replenishment / setup and R13 remittance balance', () => {
+    const [f] = r10FundReplenish(r, { locationId: 'L1', amount: 1200, ref: 'x' }); expect(dr(f, 'PETTY_CASH@L1')).toBe(1200); expect(cr(f, 'CASH_ON_HAND@L1')).toBe(1200);
+    const [g] = r10FundSetup(r, { locationId: 'L1', amount: 5000, fromAccountId: 'BANK', ref: 'setup' }); expect(cr(g, 'BANK')).toBe(5000);
+    const [m] = r13Remittance(r, { kind: 'SSS', amount: 5000, paymentAccountId: 'BANK', ref: '2026-09' }); expect(dr(m, 'G:SSS_PAYABLE')).toBe(5000); expect(cr(m, 'BANK')).toBe(5000);
   });
 });

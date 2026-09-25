@@ -23,11 +23,15 @@ import { DashboardModule } from './dashboard/dashboard.module';
 import { JobsModule } from './jobs/jobs.module';
 import { HealthController } from './health.controller';
 import { EditsModule } from './edits/edits.module';
+import { ChargesModule } from './charges/charges.module';
+import { RevisionsModule } from './revisions/revisions.module';
+import { CashFundModule } from './cashfund/cashfund.module';
+import { InspectionsModule } from './inspections/inspections.module';
 
 @Module({
   imports: [
-    CommonModule, AuthModule, UsersModule, MasterModule, StockModule, NotificationsModule, ApprovalsModule, AttachmentsModule, GlModule,
-    ReceivingModule, TransfersModule, PricingModule, ClosingModule, SalesModule, ExpensesModule, AlertsModule, CountsModule, ReportsModule, ImportsModule, PayrollModule, DashboardModule, JobsModule, EditsModule,
+    CommonModule, ChargesModule, RevisionsModule, AuthModule, UsersModule, MasterModule, StockModule, NotificationsModule, ApprovalsModule, AttachmentsModule, GlModule,
+    ReceivingModule, TransfersModule, PricingModule, ClosingModule, SalesModule, ExpensesModule, AlertsModule, CountsModule, ReportsModule, ImportsModule, PayrollModule, DashboardModule, JobsModule, EditsModule, CashFundModule, InspectionsModule,
   ],
   controllers: [HealthController],
 })

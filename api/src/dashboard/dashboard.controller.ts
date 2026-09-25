@@ -6,6 +6,8 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { SettingsService } from '../common/settings.service';
 import { MasterService } from '../master/master.service';
 import { FinReportsService } from '../gl/fin-reports.service';
+import { CashFundService } from '../cashfund/cashfund.service';
+import { CountsService } from '../counts/counts.service';
 import { CurrentUser, RequirePermission } from '../common/decorators';
 import type { SessionUser } from '../common/request-context';
 import { todayManila, toDateOnly, dateStr } from '../common/manila';
@@ -14,7 +16,7 @@ import { D, ZERO } from '../common/money';
 /** Role dashboards (§20.14), franchise portal (§8.7), Admin settings (§6.1 thresholds etc.). */
 @Controller('api')
 export class DashboardController {
-  constructor(private prisma: PrismaService, private approvals: ApprovalsService, private alerts: AlertsService, private notify: NotificationsService, private settings: SettingsService, private master: MasterService, private fin: FinReportsService) {}
+  constructor(private prisma: PrismaService, private approvals: ApprovalsService, private alerts: AlertsService, private notify: NotificationsService, private settings: SettingsService, private master: MasterService, private fin: FinReportsService, private cashFund: CashFundService, private counts: CountsService) {}
 
   @Get('dashboard') @RequirePermission('dashboard.view')
   async dashboard(@CurrentUser() u: SessionUser) {
@@ -38,6 +40,25 @@ export class DashboardController {
       if (u.permissions.has('discrepancy.view') || u.permissions.has('count.create')) out.openDiscrepancies = await this.prisma.db.discrepancyCase.count({ where: { status: 'OPEN', countDoc: { locationId: locWhere } } });
     }
     if (u.roleKey === 'HR_STAFF' || u.permissions.has('charge_form.finalize')) out.chargeFormsPending = await this.prisma.db.chargeForm.count({ where: { finalizedByHrAt: null } });
+    // branch cash funds: every balance for Admin / auditors / Accounting (and the Field Auditor who checks them); own fund for branch staff
+    if (['cashfund.view.all', 'cashfund.check', 'cashfund.use', 'cashfund.manage'].some((k) => u.permissions.has(k))) out.cashFunds = await this.cashFund.dashboard(u);
+    // discrepancy countdown for branch staff: days left before an open case is charged (shown in bold red)
+    if (u.permissions.has('discrepancy.explain') && u.locationScoped) {
+      const cases = await this.prisma.db.discrepancyCase.findMany({ where: { status: 'OPEN', countDoc: { locationId: { in: u.locationIds } } }, include: { countDoc: { select: { controlNo: true, location: { select: { name: true } }, lines: { where: { variance: { lt: 0 } }, select: { variance: true } } } } }, orderBy: { deadline: 'asc' } });
+      const pendingExpl = await this.prisma.db.approvalRequest.findMany({ where: { type: 'DISCREPANCY_EXPLANATION', status: 'PENDING', documentId: { in: cases.map((c) => c.id) } }, select: { documentId: true } });
+      out.discrepancyDeadlines = cases.map((c) => ({ caseId: c.id, caseNo: c.caseNo, countNo: c.countDoc.controlNo, location: c.countDoc.location.name, deadline: dateStr(c.deadline), daysLeft: Math.max(0, Math.ceil((c.deadline.getTime() - Date.now()) / 86400000)), shortItems: c.countDoc.lines.length, shortUnits: c.countDoc.lines.reduce((t, l) => t - l.variance, 0), explanationPending: pendingExpl.some((p) => p.documentId === c.id) }));
+    }
+    // weekly count sheet reminder for branch associates
+    if (u.permissions.has('count.create') && ['SALES_ASSOCIATE', 'WAREHOUSE_ASSOCIATE'].includes(u.roleKey)) out.weeklyCount = await this.counts.myWeekly(u);
+    // HR: who has not submitted last week's count sheet; inspections waiting for review
+    if (u.permissions.has('inspection.review')) {
+      const wc = await this.counts.weeklyCompliance(2);
+      out.weeklyCountsMissedLastWeek = wc.rows.filter((r) => !r.weeks[0].submitted).map((r) => ({ name: r.name, branch: r.branch }));
+      out.inspectionsToReview = await this.prisma.db.storeInspection.count({ where: { status: 'SUBMITTED' } });
+    }
+    // the signed-in person's own charges (only theirs)
+    const emp = await this.prisma.db.employee.findUnique({ where: { userId: u.id }, select: { id: true } });
+    if (emp) { const al = await this.prisma.db.chargeFormAllocation.findMany({ where: { employeeId: emp.id }, select: { amount: true, deductedToDate: true, acknowledgedAt: true } }); out.myCharges = { toAcknowledge: al.filter((a) => !a.acknowledgedAt).length, openBalance: al.reduce((t, a) => t.plus(a.amount).minus(a.deductedToDate), ZERO) }; }
     if (u.permissions.has('gl.view')) { const y = today.getUTCFullYear(); out.gl = { vouchersThisMonth: await this.prisma.db.journalVoucher.count({ where: { voidedAt: null, date: { gte: new Date(Date.UTC(y, today.getUTCMonth(), 1)) } } }), lockedPeriods: await this.prisma.db.accountingPeriod.count({ where: { year: y, locked: true } }) }; }
     return out;
   }

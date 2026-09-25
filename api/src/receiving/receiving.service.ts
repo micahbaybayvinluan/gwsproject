@@ -51,7 +51,7 @@ export class ReceivingService implements OnModuleInit {
     const today = todayManila();
     const warnings = await this.validateLines(input.lines, user);
     const doc = await this.prisma.db.$transaction(async (tx) => {
-      const controlNo = await this.seq.next(tx, 'RCV', { locationId: wh.id, locationCode: wh.code });
+      const controlNo = await this.seq.form(tx, 'RC', wh.id);
       return tx.receivingDoc.create({
         data: {
           controlNo, docDate: input.docDate ? toDateOnly(input.docDate) : today, locationId: wh.id, supplierId: supplier.id, supplierRef: input.supplierRef, isConsignmentIn: input.isConsignmentIn ?? supplier.isConsignor,

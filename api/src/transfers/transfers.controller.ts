@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Put, Query } from '@nestjs/common';
 import { z } from 'zod';
 import { TransfersService } from './transfers.service';
 import { CurrentUser, RequirePermission, RequireAnyPermission, Audited } from '../common/decorators';
@@ -10,12 +10,15 @@ const Create = z.object({ fromLocationId: z.string().uuid().optional(), toLocati
 const Confirm = z.object({ lines: z.array(z.object({ lineId: z.string().uuid(), checked: z.boolean().optional(), qtyReceived: z.number().int().min(0).optional(), discrepancyNote: z.string().optional() })) });
 const Resolve = z.object({ resolution: z.enum(['TO_SENDER', 'TO_RECEIVER', 'WRITEOFF']) });
 const Void = z.object({ reason: z.string().min(3) });
-const Writeoff = z.object({ locationId: z.string().uuid().optional(), docDate: z.string().optional(), notes: z.string().optional(), lines: z.array(z.object({ productId: z.string().uuid(), batchId: z.string().uuid(), qty: z.number().int().positive(), reason: z.enum(['EXPIRED', 'DAMAGED', 'SPOILED']) })).min(1) });
+const StockRequest = z.object({ locationId: z.string().uuid().optional(), items: z.array(z.object({ productId: z.string().uuid(), qty: z.number().int().positive() })).min(1), notes: z.string().optional() });
+const WriteoffCharge = z.object({ chargeTo: z.enum(['COMPANY', 'STAFF']), employeeIds: z.array(z.string().uuid()).default([]) });
+const Writeoff = z.object({ chargeTo: z.enum(['COMPANY', 'STAFF']).optional(), employeeIds: z.array(z.string().uuid()).optional(), locationId: z.string().uuid().optional(), docDate: z.string().optional(), notes: z.string().optional(), lines: z.array(z.object({ productId: z.string().uuid(), batchId: z.string().uuid(), qty: z.number().int().positive(), reason: z.enum(['EXPIRED', 'DAMAGED', 'SPOILED']) })).min(1) });
 
 @Controller('api/transfers')
 export class TransfersController {
   constructor(private svc: TransfersService) {}
   @Get() @RequireAnyPermission('transfer.create', 'transfer.confirm', 'report.inventory.all', 'report.inventory.own') list(@CurrentUser() u: SessionUser, @Query('direction') direction?: 'out' | 'in', @Query('status') status?: string, @Query('locationId') locationId?: string, @Query('from') from?: string, @Query('to') to?: string) { return this.svc.list(u, { direction, status, locationId, from, to }); }
+  @Post('request-stock') @RequireAnyPermission('transfer.confirm', 'transfer.create') @Audited('Location', 'STOCK_REQUEST') requestStock(@Body(Z(StockRequest)) dto: z.infer<typeof StockRequest>, @CurrentUser() u: SessionUser) { return this.svc.requestStock(dto, u); }
   @Get(':id') @RequireAnyPermission('transfer.create', 'transfer.confirm', 'report.inventory.all', 'report.inventory.own') get(@Param('id') id: string, @CurrentUser() u: SessionUser) { return this.svc.get(id, u); }
   @Post() @RequirePermission('transfer.create') @Audited('TransferDoc', 'CREATE') create(@Body(Z(Create)) dto: z.infer<typeof Create>, @CurrentUser() u: SessionUser) { return this.svc.create(dto, u); }
   @Post(':id/submit') @RequirePermission('transfer.create') @Audited('TransferDoc', 'SUBMIT') submit(@Param('id') id: string, @CurrentUser() u: SessionUser) { return this.svc.submit(id, u); }
@@ -29,4 +32,5 @@ export class WriteoffsController {
   constructor(private svc: TransfersService) {}
   @Get() @RequireAnyPermission('writeoff.create', 'writeoff.approve', 'report.inventory.all') list(@CurrentUser() u: SessionUser) { return this.svc.listWriteoffs(u); }
   @Post() @RequirePermission('writeoff.create') @Audited('ExpiryWriteoffDoc', 'CREATE') create(@Body(Z(Writeoff)) dto: z.infer<typeof Writeoff>, @CurrentUser() u: SessionUser) { return this.svc.createWriteoff(dto, u); }
+  @Put(':id/charge') @RequireAnyPermission('writeoff.approve', 'charge.assign') @Audited('ExpiryWriteoffDoc', 'SET_CHARGE_TO') charge(@Param('id') id: string, @Body(Z(WriteoffCharge)) dto: z.infer<typeof WriteoffCharge>, @CurrentUser() u: SessionUser) { return this.svc.setWriteoffCharge(id, dto.chargeTo, dto.employeeIds, u); }
 }

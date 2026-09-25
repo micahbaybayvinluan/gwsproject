@@ -141,5 +141,14 @@ export class StockService {
     return { location: loc, ...rep };
   }
 
+  /** Expiry breakdown of what is on hand per product at a location (the same item can carry several expiry dates). */
+  async expiriesAt(locationId: string, productIds: string[]) {
+    const rows = await this.prisma.db.stockBalance.findMany({ where: { locationId, productId: { in: productIds }, qty: { gt: 0 } }, include: { batch: { select: { expiryDate: true, batchNo: true } } } });
+    const out = new Map<string, { expiry: string; batchNo: string | null; qty: number }[]>();
+    for (const r of rows) { const a = out.get(r.productId) ?? []; const key = r.batch.expiryDate ? dateStr(r.batch.expiryDate) : 'no expiry'; const cur = a.find((x) => x.expiry === key); if (cur) cur.qty += r.qty; else a.push({ expiry: key, batchNo: r.batch.batchNo, qty: r.qty }); out.set(r.productId, a); }
+    for (const a of out.values()) a.sort((x, y) => x.expiry.localeCompare(y.expiry));
+    return out;
+  }
+
   businessDate(d?: string | Date) { return d ? toDateOnly(d) : toDateOnly(manilaDateStr()); }
 }

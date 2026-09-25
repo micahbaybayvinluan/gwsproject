@@ -2,6 +2,7 @@
 import { PrismaClient } from '@prisma/client';
 import * as argon2 from 'argon2';
 import { ROLE_CATALOGUE } from '../src/common/permissions';
+import { HDMF_2024, PHIC_2025, sssRows2025 } from '../src/payroll/contribution-tables';
 import { ACCOUNT_TEMPLATES } from '../src/gl/account-templates';
 import { seedWorkbooks } from './seed-workbooks';
 import * as path from 'node:path';
@@ -9,33 +10,33 @@ import * as path from 'node:path';
 const prisma = new PrismaClient();
 const DEV_PASSWORD = process.env.SEED_PASSWORD || 'ChangeMe!2026';
 
-const LOCATIONS: { code: string; name: string; type: 'WAREHOUSE' | 'BRANCH' | 'FRANCHISE' | 'OFFICE' | 'CONSIGNEE' | 'VIRTUAL'; isSelling?: boolean }[] = [
-  { code: 'WH', name: 'Warehouse', type: 'WAREHOUSE', isSelling: true },
-  { code: 'WESTAVE', name: 'West Ave', type: 'BRANCH', isSelling: true },
-  { code: 'CSR', name: 'CSR', type: 'BRANCH', isSelling: true },
-  { code: 'IMUS', name: 'Imus Cavite', type: 'BRANCH', isSelling: true },
-  { code: 'LAGUNA', name: 'Laguna', type: 'BRANCH', isSelling: true },
-  { code: 'DASMA', name: 'Dasmariñas', type: 'BRANCH', isSelling: true },
-  { code: 'VITOCRUZ', name: 'Vito Cruz', type: 'BRANCH', isSelling: true },
-  { code: 'OFFICE', name: 'Office', type: 'OFFICE' },
-  { code: '711', name: '7-11 / Lawson', type: 'CONSIGNEE' },
-  { code: 'MAYON', name: 'Mayon', type: 'FRANCHISE', isSelling: true },
-  { code: 'MALOLOS', name: 'Malolos Bulacan', type: 'FRANCHISE', isSelling: true },
-  { code: 'PARANAQUE', name: 'Parañaque', type: 'FRANCHISE', isSelling: true },
-  { code: 'ISABELA', name: 'Isabela', type: 'FRANCHISE', isSelling: true },
-  { code: 'BAGUIO', name: 'Baguio', type: 'FRANCHISE', isSelling: true },
-  { code: 'PANGASINAN', name: 'Pangasinan', type: 'FRANCHISE', isSelling: true },
-  { code: 'NAGA', name: 'Naga', type: 'FRANCHISE', isSelling: true },
-  { code: 'BACOLOD', name: 'Bacolod', type: 'FRANCHISE', isSelling: true },
-  { code: 'CALOOCAN', name: 'Caloocan', type: 'FRANCHISE', isSelling: true },
-  { code: 'RIZAL', name: 'Rizal', type: 'FRANCHISE', isSelling: true },
-  { code: 'V-TRANSIT', name: 'In Transit', type: 'VIRTUAL' },
-  { code: 'V-OPENING', name: 'Opening Stock', type: 'VIRTUAL' },
-  { code: 'V-CUSTRET', name: 'Customer Returns', type: 'VIRTUAL' },
-  { code: 'V-PULLOUT1', name: 'Pull Out 1', type: 'VIRTUAL' },
-  { code: 'V-PULLOUT2', name: 'Pull Out 2', type: 'VIRTUAL' },
-  { code: 'V-PULLOUT3', name: 'Pull Out 3', type: 'VIRTUAL' },
-  { code: 'V-REPLACE', name: 'For Replacement', type: 'VIRTUAL' },
+const LOCATIONS: { code: string; shortCode: string; name: string; type: 'WAREHOUSE' | 'BRANCH' | 'FRANCHISE' | 'OFFICE' | 'CONSIGNEE' | 'VIRTUAL'; isSelling?: boolean }[] = [
+  { code: 'WH', shortCode: 'WH', name: 'Warehouse', type: 'WAREHOUSE', isSelling: true },
+  { code: 'WESTAVE', shortCode: 'WA', name: 'West Ave', type: 'BRANCH', isSelling: true },
+  { code: 'CSR', shortCode: 'CS', name: 'CSR', type: 'BRANCH', isSelling: true },
+  { code: 'IMUS', shortCode: 'IM', name: 'Imus Cavite', type: 'BRANCH', isSelling: true },
+  { code: 'LAGUNA', shortCode: 'LG', name: 'Laguna', type: 'BRANCH', isSelling: true },
+  { code: 'DASMA', shortCode: 'DS', name: 'Dasmariñas', type: 'BRANCH', isSelling: true },
+  { code: 'VITOCRUZ', shortCode: 'VC', name: 'Vito Cruz', type: 'BRANCH', isSelling: true },
+  { code: 'OFFICE', shortCode: 'OF', name: 'Office', type: 'OFFICE' },
+  { code: '711', shortCode: 'SE', name: '7-11 / Lawson', type: 'CONSIGNEE' },
+  { code: 'MAYON', shortCode: 'MY', name: 'Mayon', type: 'FRANCHISE', isSelling: true },
+  { code: 'MALOLOS', shortCode: 'ML', name: 'Malolos Bulacan', type: 'FRANCHISE', isSelling: true },
+  { code: 'PARANAQUE', shortCode: 'PQ', name: 'Parañaque', type: 'FRANCHISE', isSelling: true },
+  { code: 'ISABELA', shortCode: 'IS', name: 'Isabela', type: 'FRANCHISE', isSelling: true },
+  { code: 'BAGUIO', shortCode: 'BG', name: 'Baguio', type: 'FRANCHISE', isSelling: true },
+  { code: 'PANGASINAN', shortCode: 'PG', name: 'Pangasinan', type: 'FRANCHISE', isSelling: true },
+  { code: 'NAGA', shortCode: 'NG', name: 'Naga', type: 'FRANCHISE', isSelling: true },
+  { code: 'BACOLOD', shortCode: 'BC', name: 'Bacolod', type: 'FRANCHISE', isSelling: true },
+  { code: 'CALOOCAN', shortCode: 'CL', name: 'Caloocan', type: 'FRANCHISE', isSelling: true },
+  { code: 'RIZAL', shortCode: 'RZ', name: 'Rizal', type: 'FRANCHISE', isSelling: true },
+  { code: 'V-TRANSIT', shortCode: 'IT', name: 'In Transit', type: 'VIRTUAL' },
+  { code: 'V-OPENING', shortCode: 'OP', name: 'Opening Stock', type: 'VIRTUAL' },
+  { code: 'V-CUSTRET', shortCode: 'CR', name: 'Customer Returns', type: 'VIRTUAL' },
+  { code: 'V-PULLOUT1', shortCode: 'P1', name: 'Pull Out 1', type: 'VIRTUAL' },
+  { code: 'V-PULLOUT2', shortCode: 'P2', name: 'Pull Out 2', type: 'VIRTUAL' },
+  { code: 'V-PULLOUT3', shortCode: 'P3', name: 'Pull Out 3', type: 'VIRTUAL' },
+  { code: 'V-REPLACE', shortCode: 'RP', name: 'For Replacement', type: 'VIRTUAL' },
 ];
 
 const CATEGORIES: { name: string; accountingClass: 'SUPPLEMENT' | 'FREEBIE' | 'PLASTIC' | 'APPAREL' | 'EQUIPMENT' | 'OTHER' | 'REPACKED' | 'BUNDLE' }[] = [
@@ -70,7 +71,7 @@ const TEST_USERS: { username: string; role: string; fullName: string; locations?
   { username: 'acct.head', role: 'ACCOUNTING_HEAD', fullName: 'Accounting Head' },
   { username: 'acct.assoc', role: 'ACCOUNTING_ASSOCIATE', fullName: 'Accounting Associate' },
   { username: 'hr.staff', role: 'HR_STAFF', fullName: 'HR Staff' },
-  { username: 'field.auditor', role: 'FIELD_AUDITOR', fullName: 'Field Auditor', locations: ['WESTAVE', 'CSR'] },
+  { username: 'field.auditor', role: 'FIELD_AUDITOR', fullName: 'Field Auditor', locations: [] }, // inventory of every location
 ];
 
 async function main() {
@@ -106,6 +107,26 @@ async function main() {
       }
     }
   }
+  // Demo employee records linked to the company staff accounts (so charges, payslips and "My Pay & Charges" reach the right person)
+  const STAFF_RATES: Record<string, number> = { SALES_ASSOCIATE: 16000, WAREHOUSE_ASSOCIATE: 16000, WAREHOUSE_IN_CHARGE: 20000, FIELD_AUDITOR: 20000, AUDIT_ASSOCIATE: 18000, ASST_AUDITOR: 25000, HEAD_AUDITOR: 35000, ACCOUNTING_ASSOCIATE: 20000, ACCOUNTING_HEAD: 35000, HR_STAFF: 22000 };
+  for (const u of TEST_USERS.filter((x) => STAFF_RATES[x.role])) {
+    const user = await prisma.user.findUniqueOrThrow({ where: { username: u.username }, include: { employee: true, assignments: true } });
+    if (user.employee) continue;
+    await prisma.employee.create({ data: { employeeNo: user.idNumber ?? u.username, fullName: u.fullName, position: u.role.replace(/_/g, ' ').toLowerCase(), basicRate: STAFF_RATES[u.role].toFixed(2), locationId: user.assignments[0]?.locationId ?? null, userId: user.id, sssNo: `34-${String(1000000 + TEST_USERS.indexOf(u)).slice(-7)}-0`, phicNo: `12-${String(500000000 + TEST_USERS.indexOf(u)).slice(-9)}-1`, hdmfNo: `1211-${String(10000000 + TEST_USERS.indexOf(u)).slice(-8)}` } });
+  }
+  // Default SSS / PhilHealth / Pag-IBIG tables (editable by HR)
+  if (!(await prisma.contributionTable.count())) {
+    const eff = new Date('2025-01-01T00:00:00Z');
+    await prisma.contributionTable.createMany({ data: [{ kind: 'SSS', effectiveFrom: eff, rows: sssRows2025() as never }, { kind: 'PHIC', effectiveFrom: eff, rows: PHIC_2025 }, { kind: 'HDMF', effectiveFrom: eff, rows: HDMF_2024 }] });
+  }
+  // Demo cash funds (₱5,000) at the company branches and the warehouse store — Admin / Accounting Head can change or add funds
+  for (const code of ['WESTAVE', 'CSR', 'IMUS', 'LAGUNA', 'DASMA', 'VITOCRUZ', 'WH']) {
+    const loc = await prisma.location.findUniqueOrThrow({ where: { code } });
+    if (await prisma.cashFund.findUnique({ where: { locationId: loc.id } })) continue;
+    const f = await prisma.cashFund.create({ data: { locationId: loc.id, imprestAmount: '5000.00', balance: '5000.00' } });
+    await prisma.cashFundTxn.create({ data: { fundId: f.id, locationId: loc.id, businessDate: new Date(new Date().toISOString().slice(0, 10) + 'T00:00:00Z'), kind: 'SETUP', amount: '5000.00', balanceAfter: '5000.00', notes: 'Demo fund (seed)' } });
+  }
+
   // Franchise customers mirror franchise locations (AR – Franchise <name>)
   for (const l of LOCATIONS.filter((x) => x.type === 'FRANCHISE')) {
     const loc = await prisma.location.findUniqueOrThrow({ where: { code: l.code } });

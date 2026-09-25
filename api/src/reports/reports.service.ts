@@ -1,6 +1,11 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../common/prisma.service';
 import { XlsxService, type Col } from './xlsx.service';
+import { KIND_LABEL } from '../charges/charges.service';
+import { CHECKLIST } from '../inspections/checklist';
+import { PayrollService } from '../payroll/payroll.service';
+import { AccountsService } from '../gl/accounts.service';
+import { directCostTemplateFor } from '../gl/account-templates';
 import { PdfService } from './pdf.service';
 import { AuditService } from '../common/audit.service';
 import { StockService } from '../stock/stock.service';
@@ -11,12 +16,13 @@ import { D, ZERO } from '../common/money';
 import type { SessionUser } from '../common/request-context';
 
 export type Out = { buffer: Buffer; contentType: string; fileName: string };
+const r2 = (n: number) => Math.round(n * 100) / 100;
 const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
 /** §7.8 / §8.5 / §13 reports and exports. Every export is audit-logged (§14). */
 @Injectable()
 export class ReportsService {
-  constructor(private prisma: PrismaService, private xlsx: XlsxService, private pdf: PdfService, private audit: AuditService, private stock: StockService, private fin: FinReportsService) {}
+  constructor(private prisma: PrismaService, private xlsx: XlsxService, private pdf: PdfService, private audit: AuditService, private stock: StockService, private fin: FinReportsService, private payroll: PayrollService, private accounts: AccountsService) {}
 
   private async logExport(user: SessionUser, report: string, params: unknown) { await this.audit.log({ action: 'EXPORT', entityType: 'Report', entityId: report, after: params, userId: user.id }); }
 
@@ -28,7 +34,9 @@ export class ReportsService {
     const expenses = await this.prisma.db.expenseDoc.findMany({ where: { locationId, docDate: d, voidedAt: null }, include: { account: true } });
     const close = await this.prisma.db.dailyClose.findUnique({ where: { locationId_businessDate: { locationId, businessDate: d } } });
     const rs: RSale[] = sales.map((s) => ({ id: s.id, drSiNo: s.drSiNo, channel: s.channel, channelSub: s.channelSub, paymentMode: s.paymentMode, customerName: s.customer?.name ?? s.customerName, agentName: s.agent?.name ?? null, riderName: s.rider?.name ?? null, deliveryFee: s.deliveryFee, riderIncentive: s.riderIncentive, shippingFee: s.shippingFee, shippingExpense: s.shippingExpense, marketplaceCharges: s.marketplaceCharges, productTotal: s.productTotal, grandTotal: s.grandTotal, cardMid: s.cardMid, cardSlipNo: s.cardSlipNo, cardApprovalCode: s.cardApprovalCode, cardBatchNo: s.cardBatchNo, notes: s.notes, lines: s.lines.map((l) => ({ productName: l.product.name, qty: l.qty, unitPrice: l.unitPrice, amount: l.amount, isFreebie: l.isFreebie, accountingClass: l.product.category.accountingClass })) }));
-    const rep = buildDailySalesReport({ branch: loc.name, date, sales: rs, expenses: expenses.map((e) => ({ accountTitle: e.account.title, payee: e.payee, amount: e.amount, paidFrom: e.paidFrom })), close: close ? { moneyBreakdown: close.moneyBreakdown as Record<string, number> | null, countedCash: close.countedCash, expectedCash: close.expectedCash, cashVariance: close.cashVariance } : null, preparedBy: user.fullName });
+    // cash-fund expenses are listed on the fund's replenishment voucher; the replenishment itself comes out of today's cash (owner request 2026-09-26)
+    const fundRep = await this.prisma.db.cashFundTxn.findMany({ where: { locationId, businessDate: toDateOnly(date), kind: 'REPLENISH' } });
+    const rep = buildDailySalesReport({ branch: loc.name, date, sales: rs, expenses: [...expenses.filter((e) => e.paidFrom !== 'PETTY_CASH').map((e) => ({ accountTitle: e.account.title, payee: e.payee, amount: e.amount, paidFrom: e.paidFrom })), ...fundRep.map((t) => ({ accountTitle: 'Cash Fund Replenishment', payee: t.controlNo, amount: t.amount, paidFrom: 'CASH_DRAWER' }))], close: close ? { moneyBreakdown: close.moneyBreakdown as Record<string, number> | null, countedCash: close.countedCash, expectedCash: close.expectedCash, cashVariance: close.cashVariance } : null, preparedBy: user.fullName });
     if (!withMargin) return rep;
     if (!user.permissions.has('cost.view')) throw new ForbiddenException('Audit summary requires cost.view');
     const cost = sales.flatMap((s) => s.lines).reduce((t, l) => t.plus(l.unitCost.mul(l.qty)), ZERO);
@@ -78,6 +86,103 @@ export class ReportsService {
     await this.logExport(user, 'DailyInventoryReport.xlsx', { locationId, from, to, withCost: canCost });
     return { buffer: await this.xlsx.workbook(sheets), contentType: XLSX, fileName: `DailyInventory_${rep.location.name.replace(/\W+/g, '')}_${from}_${to}.xlsx` };
   }
+  /**
+   * Customer contact list (owner request 2026-09-26): every customer with a name, contact number or email captured on sales —
+   * registered customers (dealers, franchises, agents) and walk-in / online buyers — with purchases, total and last purchase.
+   * Branch users get their own branch; everyone else all branches or the chosen one.
+   */
+  async customerContacts(user: SessionUser, q: { locationId?: string; from?: string; to?: string }) {
+    if (q.locationId && user.locationScoped && !user.locationIds.includes(q.locationId)) throw new ForbiddenException();
+    const sales = await this.prisma.db.salesDoc.findMany({
+      where: { voidedAt: null, locationId: q.locationId ? q.locationId : user.locationScoped ? { in: user.locationIds } : undefined, docDate: q.from || q.to ? { gte: q.from ? toDateOnly(q.from) : undefined, lte: q.to ? toDateOnly(q.to) : undefined } : undefined, OR: [{ customerId: { not: null } }, { customerName: { not: null } }, { customerPhone: { not: null } }, { customerEmail: { not: null } }] },
+      select: { docDate: true, grandTotal: true, channel: true, customerName: true, customerPhone: true, customerEmail: true, customer: { select: { id: true, code: true, name: true, type: true, contact: true, phone: true, email: true } }, location: { select: { name: true } } },
+      orderBy: { docDate: 'asc' },
+    });
+    const map = new Map<string, { name: string; type: string; phone: string; email: string; branches: Set<string>; purchases: number; total: number; first: string; last: string; channels: Set<string> }>();
+    for (const s of sales) {
+      const name = s.customer?.name ?? s.customerName ?? '';
+      const phone = s.customerPhone ?? s.customer?.phone ?? s.customer?.contact ?? '';
+      const email = (s.customerEmail ?? s.customer?.email ?? '').toLowerCase();
+      const key = s.customer?.id ?? (email || phone.replace(/\D/g, '') || name.trim().toLowerCase());
+      if (!key) continue;
+      const cur = map.get(key) ?? { name, type: s.customer?.type ?? 'WALK-IN / ONLINE', phone, email, branches: new Set<string>(), purchases: 0, total: 0, first: dateStr(s.docDate), last: dateStr(s.docDate), channels: new Set<string>() };
+      cur.name = cur.name || name; cur.phone = phone || cur.phone; cur.email = email || cur.email;
+      cur.branches.add(s.location.name); cur.channels.add(s.channel.replace(/_/g, ' ').toLowerCase()); cur.purchases++; cur.total += Number(s.grandTotal); cur.last = dateStr(s.docDate);
+      map.set(key, cur);
+    }
+    return [...map.values()].map((c) => ({ name: c.name, type: c.type, contactNumber: c.phone, email: c.email, branches: [...c.branches].join(', '), channels: [...c.channels].join(', '), purchases: c.purchases, totalPurchases: Math.round(c.total * 100) / 100, firstPurchase: c.first, lastPurchase: c.last })).sort((a, b) => b.totalPurchases - a.totalPurchases);
+  }
+  async customerContactsXlsx(user: SessionUser, q: { locationId?: string; from?: string; to?: string }): Promise<Out> {
+    const rows = await this.customerContacts(user, q);
+    await this.logExport(user, 'CustomerContacts.xlsx', q);
+    return { buffer: await this.xlsx.table('Customers', [{ header: 'Customer', key: 'name', width: 30 }, { header: 'Type', key: 'type', width: 16 }, { header: 'Contact number', key: 'contactNumber', width: 18 }, { header: 'Email', key: 'email', width: 28 }, { header: 'Branch(es)', key: 'branches', width: 24 }, { header: 'Channels', key: 'channels', width: 22 }, { header: 'Purchases', key: 'purchases', width: 10 }, { header: 'Total purchases', key: 'totalPurchases', numFmt: '#,##0.00' }, { header: 'First purchase', key: 'firstPurchase', width: 13 }, { header: 'Last purchase', key: 'lastPurchase', width: 13 }], rows, { title: `Customer contact list${q.from || q.to ? ` ${q.from ?? ''} to ${q.to ?? ''}` : ''}`, totals: ['purchases', 'totalPurchases'] }), contentType: XLSX, fileName: 'CustomerContacts.xlsx' };
+  }
+  /**
+   * Direct cost generated from sales (owner request 2026-09-26): per branch and product category, the batch cost of everything sold in
+   * the month, mapped to the workbook's "Direct Cost" accounts — the same amounts rule R5 posts automatically with every sale.
+   * Accounting uses it instead of keying direct cost by hand; `posted` shows what is already in the ledger.
+   */
+  async directCostFromSales(year: number, month: number) {
+    const from = new Date(Date.UTC(year, month - 1, 1)); const to = new Date(Date.UTC(year, month, 0));
+    const lines = await this.prisma.db.salesLine.findMany({ where: { doc: { voidedAt: null, docDate: { gte: from, lte: to } } }, select: { qty: true, unitCost: true, amount: true, product: { select: { category: { select: { accountingClass: true } } } }, doc: { select: { locationId: true, location: { select: { name: true } } } } } });
+    const r = await this.accounts.resolver();
+    const map = new Map<string, { locationId: string; branch: string; accountingClass: string; accountId: string | null; sales: number; directCost: number }>();
+    for (const l of lines) {
+      const cls = l.product.category.accountingClass; const key = `${l.doc.locationId}|${cls}`;
+      let accountId: string | null = null; try { accountId = r.branch(directCostTemplateFor(cls), l.doc.locationId); } catch { accountId = null; }
+      const cur = map.get(key) ?? { locationId: l.doc.locationId, branch: l.doc.location.name, accountingClass: cls, accountId, sales: 0, directCost: 0 };
+      cur.sales += Number(l.amount); cur.directCost += Number(l.unitCost) * l.qty; map.set(key, cur);
+    }
+    const accts = await this.prisma.db.account.findMany({ where: { id: { in: [...map.values()].map((x) => x.accountId).filter((x): x is string => !!x) } }, select: { id: true, code: true, title: true } });
+    const posted = await this.prisma.db.journalLine.groupBy({ by: ['accountId'], where: { accountId: { in: accts.map((a) => a.id) }, voucher: { voidedAt: null, date: { gte: from, lte: to }, sourceDocumentType: 'SalesDoc' } }, _sum: { debit: true, credit: true } });
+    const rows = [...map.values()].sort((a, b) => a.branch.localeCompare(b.branch) || a.accountingClass.localeCompare(b.accountingClass)).map((x) => { const a = accts.find((y) => y.id === x.accountId); const p = posted.find((y) => y.accountId === x.accountId); return { branch: x.branch, category: x.accountingClass, accountCode: a?.code ?? '', account: a?.title ?? '(direct cost account not set up for this branch)', sales: Math.round(x.sales * 100) / 100, directCost: Math.round(x.directCost * 100) / 100, postedInLedger: p ? Number(p._sum.debit ?? 0) - Number(p._sum.credit ?? 0) : 0 }; });
+    return { year, month, rows, totals: { sales: rows.reduce((t, x) => t + x.sales, 0), directCost: rows.reduce((t, x) => t + x.directCost, 0), postedInLedger: rows.reduce((t, x) => t + x.postedInLedger, 0) } };
+  }
+  async directCostFromSalesXlsx(year: number, month: number, user: SessionUser): Promise<Out> {
+    const d = await this.directCostFromSales(year, month);
+    await this.logExport(user, 'DirectCostFromSales.xlsx', { year, month });
+    const money = '#,##0.00;(#,##0.00);-';
+    return { buffer: await this.xlsx.table('Direct cost', [{ header: 'Branch', key: 'branch', width: 20 }, { header: 'Category', key: 'category', width: 14 }, { header: 'Code', key: 'accountCode', width: 8 }, { header: 'Direct cost account', key: 'account', width: 40 }, { header: 'Sales', key: 'sales', numFmt: money }, { header: 'Direct cost (from sales)', key: 'directCost', numFmt: money }, { header: 'Posted in ledger', key: 'postedInLedger', numFmt: money }], d.rows, { title: `Direct cost generated from sales ${year}-${String(month).padStart(2, '0')}`, totals: ['sales', 'directCost', 'postedInLedger'] }), contentType: XLSX, fileName: `DirectCostFromSales_${year}-${month}.xlsx` };
+  }
+  /**
+   * Inventory cost movements for Accounting (owner request 2026-09-26): per day or per month, per branch (or all), the inventory value
+   * at batch cost — beginning, receiving, transfer-in, customer returns, pull-out, direct cost of sales, freebies/tasting,
+   * adjustments & write-offs, ending. Straight from the stock ledger, so it matches what R1/R5/R6/R9 post.
+   */
+  async inventoryCost(q: { from: string; to: string; groupBy: 'day' | 'month'; locationId?: string }) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(q.from) || !/^\d{4}-\d{2}-\d{2}$/.test(q.to) || q.from > q.to) throw new BadRequestException('from/to must be YYYY-MM-DD and from ≤ to');
+    const from = toDateOnly(q.from), to = toDateOnly(q.to);
+    const locs = await this.prisma.db.location.findMany({ where: { type: { not: 'VIRTUAL' }, id: q.locationId || undefined }, select: { id: true, name: true } });
+    const ids = locs.map((l) => l.id);
+    const unit = q.groupBy === 'month' ? 'month' : 'day';
+    const beg = await this.prisma.db.$queryRaw<{ location_id: string; value: unknown }[]>`SELECT location_id, COALESCE(SUM(qty_delta*unit_cost),0) AS value FROM stock_ledger WHERE business_date < ${from}::date AND location_id = ANY(${ids}) GROUP BY location_id`;
+    const mv = await this.prisma.db.$queryRaw<{ period: Date; location_id: string; movement_type: string; value: unknown; qty: bigint }[]>`SELECT date_trunc(${unit}, business_date)::date AS period, location_id, movement_type::text AS movement_type, COALESCE(SUM(qty_delta*unit_cost),0) AS value, COALESCE(SUM(qty_delta),0)::bigint AS qty FROM stock_ledger WHERE business_date BETWEEN ${from}::date AND ${to}::date AND location_id = ANY(${ids}) GROUP BY 1,2,3 ORDER BY 1`;
+    const bucket = (t: string): Bucket => (t === 'RECEIVE' ? 'receiving' : ['TRANSFER_IN', 'CONSIGN_RETURN', 'BUNDLE_BUILD'].includes(t) ? 'transferIn' : t === 'SALE_RETURN' ? 'returns' : ['TRANSFER_OUT', 'RETURN_TO_WAREHOUSE', 'RETURN_TO_SUPPLIER', 'CONSIGN_OUT', 'BUNDLE_BREAK'].includes(t) ? 'pullOut' : ['SALE', 'CONSIGN_SALE'].includes(t) ? 'directCostOfSales' : ['FREEBIE_ISSUE', 'TASTING'].includes(t) ? 'freebiesTasting' : 'adjustments');
+    type Bucket = 'receiving' | 'transferIn' | 'returns' | 'pullOut' | 'directCostOfSales' | 'freebiesTasting' | 'adjustments';
+    const periods = [...new Set(mv.map((m) => dateStr(m.period)))].sort();
+    const rows: Record<string, string | number>[] = [];
+    for (const l of locs) {
+      let value = Number(beg.find((b) => b.location_id === l.id)?.value ?? 0);
+      const own = mv.filter((m) => m.location_id === l.id);
+      if (!own.length && !value) continue;
+      for (const p of periods) {
+        const b: Record<Bucket, number> = { receiving: 0, transferIn: 0, returns: 0, pullOut: 0, directCostOfSales: 0, freebiesTasting: 0, adjustments: 0 };
+        for (const m of own.filter((x) => dateStr(x.period) === p)) { const k = bucket(m.movement_type); b[k] += k === 'adjustments' ? Number(m.value) : Math.abs(Number(m.value)); }
+        const begin = value;
+        value = begin + b.receiving + b.transferIn + b.returns - b.pullOut - b.directCostOfSales - b.freebiesTasting + b.adjustments;
+        rows.push({ period: unit === 'month' ? p.slice(0, 7) : p, branch: l.name, beginning: r2(begin), ...Object.fromEntries(Object.entries(b).map(([k, v]) => [k, r2(v)])), ending: r2(value) });
+      }
+    }
+    const keys = ['receiving', 'transferIn', 'returns', 'pullOut', 'directCostOfSales', 'freebiesTasting', 'adjustments'] as const;
+    return { from: q.from, to: q.to, groupBy: unit, rows, totals: Object.fromEntries(keys.map((k) => [k, r2(rows.reduce((t, x) => t + Number((x as Record<string, unknown>)[k]), 0))])) };
+  }
+  async inventoryCostXlsx(q: { from: string; to: string; groupBy: 'day' | 'month'; locationId?: string }, user: SessionUser): Promise<Out> {
+    const d = await this.inventoryCost(q);
+    await this.logExport(user, 'InventoryCostMovements.xlsx', q);
+    const money = '#,##0.00;(#,##0.00);-';
+    const cols: Col[] = [{ header: d.groupBy === 'month' ? 'Month' : 'Date', key: 'period', width: 12 }, { header: 'Branch', key: 'branch', width: 20 }, { header: 'Beginning value', key: 'beginning', numFmt: money }, { header: 'Receiving', key: 'receiving', numFmt: money }, { header: 'Transfer-in', key: 'transferIn', numFmt: money }, { header: 'Customer returns', key: 'returns', numFmt: money }, { header: 'Pull-out', key: 'pullOut', numFmt: money }, { header: 'Direct cost of sales', key: 'directCostOfSales', numFmt: money }, { header: 'Freebies / tasting', key: 'freebiesTasting', numFmt: money }, { header: 'Adjustments / write-offs', key: 'adjustments', numFmt: money }, { header: 'Ending value', key: 'ending', numFmt: money }];
+    return { buffer: await this.xlsx.table('Inventory cost', cols, d.rows as Record<string, unknown>[], { title: `Inventory cost movements ${q.from} to ${q.to} (per ${d.groupBy})`, totals: ['receiving', 'transferIn', 'returns', 'pullOut', 'directCostOfSales', 'freebiesTasting', 'adjustments'] }), contentType: XLSX, fileName: `InventoryCost_${d.groupBy}_${q.from}_${q.to}.xlsx` };
+  }
   /** Generic list export with current filters (any JSON rows). */
   async genericXlsx(user: SessionUser, name: string, rows: Record<string, unknown>[]): Promise<Out> {
     const keys = [...new Set(rows.flatMap((r) => Object.keys(r)))].filter((k) => typeof rows[0]?.[k] !== 'object' || rows[0]?.[k] === null || (rows[0]?.[k] as { toNumber?: unknown })?.toNumber);
@@ -111,6 +216,7 @@ export class ReportsService {
     const signatures = (f.signatures ?? ['Prepared by', 'Checked by', 'Received by']).map((sig) => (/^prepared/i.test(sig) && f.preparedBy ? `${sig}: ${nameOf(f.preparedBy)}` : /^received/i.test(sig) && f.receivedBy ? `${sig}: ${nameOf(f.receivedBy)}` : sig));
     return { ...f, title: watermark ? `${f.title} (${watermark})` : f.title, header, signatures, watermark };
   }
+  private async myEmployeeId(user: SessionUser) { return (await this.prisma.db.employee.findUnique({ where: { userId: user.id }, select: { id: true } }))?.id ?? null; }
   private async formData(type: string, id: string, user: SessionUser): Promise<{ status?: string; docType?: string; preparedBy?: string | null; receivedBy?: string | null; title: string; header: [string, unknown][]; columns: string[]; rows: unknown[][]; footer?: [string, unknown][]; signatures?: string[] }> {
     const db = this.prisma.db; const canCost = user.permissions.has('cost.view');
     const scope = (locationId: string) => { if (user.locationScoped && !user.locationIds.includes(locationId)) throw new ForbiddenException(); };
@@ -120,27 +226,87 @@ export class ReportsService {
         // the sending side drafts and prints the Pull-Out; the receiving side gets the Transfer-In copy once the transfer is submitted
         const sender = !user.locationScoped || user.locationIds.includes(t.fromLocationId) || t.createdBy === user.id;
         if (!sender && (t.status === 'DRAFT' || type === 'pull-out')) throw new ForbiddenException(t.status === 'DRAFT' ? 'This transfer has not been sent yet' : 'The Pull-Out form is printed by the sending location; print the Transfer-In copy');
-        return { status: t.status, docType: 'TransferDoc', preparedBy: t.preparedBy ?? t.createdBy, receivedBy: t.receivedBy, title: type === 'pull-out' ? 'Pull-Out Form' : 'Transfer-In Form', header: [['Control #', t.controlNo], ['Date', dateStr(t.docDate)], ['From', t.fromLocation.name], ['Trans. To', t.toLocation.name], ['Type', t.transferType], ['Notes', t.notes ?? '']], columns: ['Qty Out', 'Items', 'Batch / Expiry', "Checker's", 'Received Qty', 'Remarks', 'Type'], rows: t.lines.map((l) => [l.qtySent, l.product.name, `${l.batch.batchNo ?? ''} ${l.batch.expiryDate ? dateStr(l.batch.expiryDate) : ''}`, l.checkerRemarks ?? '', l.qtyReceived ?? '', l.discrepancyNote ?? '', t.transferType]), signatures: ['Prepared by', 'Checked by', 'Received by'] };
+        return { status: t.status, docType: 'TransferDoc', preparedBy: t.preparedBy ?? t.createdBy, receivedBy: t.receivedBy, title: type === 'pull-out' ? 'Pull-Out Form' : 'Transfer-In Form', header: [['Control #', type === 'transfer-in' ? t.transferInNo ?? t.controlNo : t.controlNo], [type === 'transfer-in' ? 'Pull-Out #' : 'Transfer-In #', type === 'transfer-in' ? t.controlNo : t.transferInNo ?? '—'], ['Date', dateStr(t.docDate)], ['From', t.fromLocation.name], ['Trans. To', t.toLocation.name], ['Type', t.transferType], ['Notes', t.notes ?? '']], columns: ['Qty Out', 'Items', 'Batch / Expiry', "Checker's", 'Received Qty', 'Remarks', 'Type'], rows: t.lines.map((l) => [l.qtySent, l.product.name, `${l.batch.batchNo ?? ''} ${l.batch.expiryDate ? dateStr(l.batch.expiryDate) : ''}`, l.checkerRemarks ?? '', l.qtyReceived ?? '', l.discrepancyNote ?? '', t.transferType]), signatures: ['Prepared by', 'Checked by', 'Received by'] };
       }
       case 'dr-sales': {
-        const s = await db.salesDoc.findUnique({ where: { id }, include: { location: true, customer: true, lines: { include: { product: true } } } }); if (!s) throw new NotFoundException(); scope(s.locationId);
-        return { status: s.status, docType: 'SalesDoc', preparedBy: s.createdBy, title: 'Delivery Receipt – Sales', header: [['Control #', s.controlNo], ['DR/SI #', s.drSiNo], ['Date', dateStr(s.docDate)], ['Trans. To', s.location.name], ['Name', s.customer?.name ?? s.customerName ?? ''], ['Mode of Payment', s.paymentMode]], columns: ['Qty', 'Items', 'S. Price/Unit', 'Amount', 'Remarks'], rows: s.lines.map((l) => [l.qty, l.product.name, l.unitPrice, l.amount, l.lineRemarks ?? (l.isFreebie ? 'FREEBIE' : '')]), footer: [['Product total', s.productTotal], ['Delivery fee', s.deliveryFee], ['Shipping fee', s.shippingFee], ['TOTAL', s.grandTotal]] };
+        const s = await db.salesDoc.findUnique({ where: { id }, include: { location: true, customer: true, lines: { include: { product: true, batch: { select: { batchNo: true, expiryDate: true } } } } } }); if (!s) throw new NotFoundException(); scope(s.locationId);
+        return { status: s.status, docType: 'SalesDoc', preparedBy: s.createdBy, title: 'Delivery Receipt – Sales', header: [['Control #', s.controlNo], ['DR/SI #', s.drSiNo], ['Date', dateStr(s.docDate)], ['Trans. To', s.location.name], ['Name', s.customer?.name ?? s.customerName ?? ''], ['Contact no. / email', [s.customerPhone, s.customerEmail].filter(Boolean).join(' / ')], ['Mode of Payment', s.paymentMode]], columns: ['Qty', 'Items', 'Batch / expiry', 'S. Price/Unit', 'Amount', 'Remarks'], rows: s.lines.map((l) => [l.qty, l.product.name, `${l.batch.batchNo ?? ''} ${l.batch.expiryDate ? dateStr(l.batch.expiryDate) : ''}`.trim(), l.unitPrice, l.amount, l.lineRemarks ?? (l.isFreebie ? 'FREEBIE' : '')]), footer: [['Product total', s.productTotal], ['Delivery fee', s.deliveryFee], ['Shipping fee', s.shippingFee], ['TOTAL', s.grandTotal]] };
       }
       case 'supplier-form': {
         const r = await db.receivingDoc.findUnique({ where: { id }, include: { supplier: true, location: true, lines: { include: { product: true } } } }); if (!r) throw new NotFoundException(); scope(r.locationId);
         return { status: r.status, docType: 'ReceivingDoc', preparedBy: r.preparedBy ?? r.createdBy, title: "Supplier's Form (PO / Purchases)", header: [['Control #', r.controlNo], ['Date', dateStr(r.docDate)], ['Supplier', canCost ? `${r.supplier.code} ${r.supplier.name}` : r.supplier.code], ['Supplier Ref', r.supplierRef ?? ''], ['Received at', r.location.name]], columns: ['Qty', 'Free', 'Items', 'Batch', 'Expiry', ...(canCost ? ['Unit Cost', 'Amount'] : []), 'Remarks'], rows: r.lines.map((l) => [l.qty, l.freeQty, l.product.name, l.batchNo ?? '', l.expiryDate ? dateStr(l.expiryDate) : '', ...(canCost ? [l.unitCost ?? '', D(l.unitCost ?? 0).mul(l.qty)] : []), l.remarks ?? '']) };
       }
       case 'count': {
-        const c = await db.countDoc.findUnique({ where: { id }, include: { location: true, lines: { include: { product: true } } } }); if (!c) throw new NotFoundException(); scope(c.locationId);
-        return { status: c.status, docType: 'CountDoc', preparedBy: c.createdBy, title: 'Actual Inventory Count', header: [['Control #', c.controlNo], ['Location', c.location.name], ['Count date', dateStr(c.countDate)]], columns: ['SKU', 'Name', 'System Qty', 'Actual Qty', 'Variance', 'Remarks'], rows: c.lines.map((l) => [l.product.sku, l.product.name, l.systemQty, l.actualQty ?? '', l.variance, l.remarks ?? '']), signatures: ['Counted by', 'Witnessed by', 'Reviewed by'] };
+        const c = await db.countDoc.findUnique({ where: { id }, include: { location: true, lines: { include: { product: true }, orderBy: { product: { name: 'asc' } } } } }); if (!c) throw new NotFoundException(); scope(c.locationId);
+        const exp = await this.stock.expiriesAt(c.locationId, c.lines.map((l) => l.productId));
+        return { status: c.status, docType: 'CountDoc', preparedBy: c.createdBy, title: c.countType === 'WEEKLY' ? 'Weekly Inventory Count Sheet' : 'Actual Inventory Count', header: [['Control #', c.controlNo], ['Location', c.location.name], ['Count date', dateStr(c.countDate)], ['Type', c.countType === 'WEEKLY' ? 'Weekly count (branch staff)' : 'Audit count']], columns: ['SKU', 'Item', 'Expiries on hand (qty)', 'Beginning (start of day)', 'Expected', 'Actual count', 'Variance', 'Remarks'], rows: c.lines.map((l) => [l.product.sku, l.product.name, (exp.get(l.productId) ?? []).map((e) => `${e.expiry} ×${e.qty}`).join(', '), l.beginQty, l.systemQty, l.actualQty ?? '', c.status === 'DRAFT' ? '' : l.variance, l.remarks ?? '']), signatures: ['Counted by', 'Witnessed by', 'Reviewed by'] };
       }
       case 'discrepancy': {
         const c = await db.discrepancyCase.findUnique({ where: { id }, include: { countDoc: { include: { location: true, lines: { include: { product: true } } } } } }); if (!c) throw new NotFoundException(); scope(c.countDoc.locationId);
-        return { title: c.status === 'FINALIZED' ? 'Final Discrepancy Report' : 'Discrepancy Report', header: [['Count #', c.countDoc.controlNo], ['Location', c.countDoc.location.name], ['Count date', dateStr(c.countDoc.countDate)], ['Deadline', dateStr(c.deadline)], ['Status', c.status]], columns: ['SKU', 'Name', 'System Qty', 'Actual Qty', 'Variance', 'Remarks'], rows: c.countDoc.lines.filter((l) => l.variance !== 0).map((l) => [l.product.sku, l.product.name, l.systemQty, l.actualQty ?? '', l.variance, l.remarks ?? '']) };
+        return { title: c.status === 'FINALIZED' ? 'Final Discrepancy Report' : 'Discrepancy Report', header: [['Case #', c.caseNo ?? '—'], ['Count #', c.countDoc.controlNo], ['Location', c.countDoc.location.name], ['Count date', dateStr(c.countDoc.countDate)], ['Deadline', dateStr(c.deadline)], ['Status', c.status], ...(c.resolutionNote ? [['Resolution', c.resolutionNote] as [string, unknown]] : [])], columns: ['SKU', 'Name', 'Expected', 'Actual Qty', 'Variance', 'Remarks'], rows: c.countDoc.lines.filter((l) => l.variance !== 0).map((l) => [l.product.sku, l.product.name, l.systemQty, l.actualQty ?? '', l.variance, l.remarks ?? '']) };
       }
       case 'charge-form': {
         const cf = await db.chargeForm.findUnique({ where: { id }, include: { location: true, lines: { include: { product: true } }, allocations: { include: { employee: true } } } }); if (!cf) throw new NotFoundException();
-        return { title: 'Charge Form', header: [['Control #', cf.controlNo], ['Location', cf.location.name], ['Reason', cf.reason ?? 'Inventory discrepancy'], ['Finalized', cf.finalizedByHrAt ? cf.finalizedByHrAt.toISOString().slice(0, 10) : 'No']], columns: ['Product', 'Qty', 'Unit Charge', 'Amount'], rows: [...cf.lines.map((l) => [l.product.name, l.qty, l.unitCharge, l.amount]), ...cf.allocations.map((a) => [`Charged to: ${a.employee.fullName} (${a.employee.employeeNo})`, '', '', a.amount])], footer: [['TOTAL', cf.totalAmount]], signatures: ['HR', 'Employee acknowledgement', 'Approved by'] };
+        const mine = await this.myEmployeeId(user);
+        const hr = ['charge_form.finalize', 'payroll.view.detail', 'charge.assign', 'discrepancy.resolve'].some((k) => user.permissions.has(k));
+        if (!hr && !cf.allocations.some((a) => a.employeeId === mine)) throw new ForbiddenException('Charge forms are visible only to HR, the Head Auditor and the people charged');
+        const allocs = hr ? cf.allocations : cf.allocations.filter((a) => a.employeeId === mine);
+        return { title: `Charge Form — ${KIND_LABEL[cf.kind]}`, header: [['Control #', cf.controlNo], ['Location', cf.location.name], ['Reason', cf.reason ?? KIND_LABEL[cf.kind]], ['Created', dateStr(cf.createdAt)], ['Finalized by HR', cf.finalizedByHrAt ? dateStr(cf.finalizedByHrAt) : 'Not yet']], columns: ['Item / description', 'Qty', 'Unit charge', 'Amount'], rows: [...cf.lines.map((l) => [l.product ? `${l.product.name}${l.description ? ` (${l.description})` : ''}` : l.description ?? '', l.qty, l.unitCharge, l.amount]), ...allocs.map((a) => [`Charged to: ${a.employee.fullName} (${a.employee.employeeNo})${a.acknowledgedAt ? ` — acknowledged ${a.acknowledgedAt.toISOString().slice(0, 16).replace('T', ' ')}` : ' — not yet acknowledged'}`, '', '', a.amount])], footer: [['TOTAL', cf.totalAmount]], signatures: ['Prepared by (HR)', 'Employee acknowledgement', 'Approved by'] };
+      }
+      case 'deduction-authorization': {
+        const a = await db.chargeFormAllocation.findUnique({ where: { id }, include: { employee: true, chargeForm: { include: { location: true } } } }); if (!a) throw new NotFoundException();
+        const mine = await this.myEmployeeId(user);
+        if (!['charge_form.finalize', 'payroll.view.detail'].some((k) => user.permissions.has(k)) && a.employeeId !== mine) throw new ForbiddenException();
+        const sched = (a.chargeForm.payrollDeductionSchedule as { employeeId: string; periods: number; perPeriod: number }[] | null)?.find((x) => x.employeeId === a.employeeId);
+        return { title: 'Salary Deduction Authorization', header: [['Employee', `${a.employee.fullName} (${a.employee.employeeNo})`], ['Charge form', `${a.chargeForm.controlNo} — ${KIND_LABEL[a.chargeForm.kind]}`], ['Branch', a.chargeForm.location.name], ['Amount charged', a.amount], ['Deduction schedule', sched ? `${sched.periods} payroll period(s) of ₱${sched.perPeriod.toFixed(2)}` : 'Next payroll'], ['Deducted to date', a.deductedToDate], ['Acknowledged in the system', a.acknowledgedAt ? a.acknowledgedAt.toISOString().slice(0, 16).replace('T', ' ') : 'Not yet']], columns: ['Statement'], rows: [[`I, ${a.employee.fullName}, authorize Get Wheysted Supplements to deduct the amount above from my salary for charge form ${a.chargeForm.controlNo}.`]], signatures: ['Employee signature over printed name', 'HR'] };
+      }
+      case 'payslip': {
+        const l = await db.payrollLine.findUnique({ where: { id }, include: { employee: { include: { location: true } }, run: true } }); if (!l) throw new NotFoundException();
+        if (!user.permissions.has('payroll.view.detail') && l.employeeId !== (await this.myEmployeeId(user))) throw new ForbiddenException();
+        const gross = D(l.basic).plus(l.overtime).plus(l.incentives);
+        return { title: 'Payslip', header: [['Employee', `${l.employee.fullName} (${l.employee.employeeNo})`], ['Branch', l.employee.location?.name ?? 'Office'], ['Period', `${dateStr(l.run.periodFrom)} to ${dateStr(l.run.periodTo)}`], ['SSS / PhilHealth / Pag-IBIG no.', [l.employee.sssNo, l.employee.phicNo, l.employee.hdmfNo].map((x) => x ?? '—').join(' / ')]], columns: ['Earnings / deductions', 'Amount'], rows: [['Basic pay', l.basic], ['Overtime', l.overtime], ['Incentives', l.incentives], ['GROSS PAY', gross], ['SSS (employee share)', D(l.sssEe).neg()], ['PhilHealth (employee share)', D(l.phicEe).neg()], ['Pag-IBIG (employee share)', D(l.hdmfEe).neg()], ['Loans / cash advances', D(l.loans).neg()], ['Charges (inventory / cash shortage / others)', D(l.chargeDeductions).neg()], ['Other deductions', D(l.otherDeductions).neg()]], footer: [['NET PAY', l.netPay], ['Employer share (not deducted): SSS / PhilHealth / Pag-IBIG', `${l.sssEr} / ${l.phicEr} / ${l.hdmfEr}`]], signatures: ['Received by (employee)', 'Prepared by (HR)'] };
+      }
+      case 'employee-ledger': {
+        const e = await db.employee.findUnique({ where: { id }, include: { location: true, chargeAllocations: { include: { chargeForm: true } }, loans: true, payrollLines: { include: { run: true }, where: { run: { status: { in: ['FINALIZED', 'CLOSED'] } } }, orderBy: { run: { periodTo: 'asc' } } } } }); if (!e) throw new NotFoundException();
+        if (!['employee.manage', 'payroll.view.detail'].some((k) => user.permissions.has(k)) && e.id !== (await this.myEmployeeId(user))) throw new ForbiddenException();
+        const rows: unknown[][] = [];
+        for (const a of e.chargeAllocations) rows.push([dateStr(a.chargeForm.createdAt), `Charge ${a.chargeForm.controlNo} — ${KIND_LABEL[a.chargeForm.kind]}`, a.amount, '', D(a.amount).minus(a.deductedToDate)]);
+        for (const l of e.loans) rows.push([dateStr(l.createdAt), `${l.kind.replace(/_/g, ' ')} (₱${l.perPeriod}/period)`, l.principal, '', l.balance]);
+        for (const p of e.payrollLines) if (D(p.chargeDeductions).gt(0) || D(p.loans).gt(0)) rows.push([dateStr(p.run.periodTo), `Payroll deduction ${dateStr(p.run.periodFrom)}–${dateStr(p.run.periodTo)}`, '', D(p.chargeDeductions).plus(p.loans), '']);
+        rows.sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+        const open = e.chargeAllocations.reduce((t, a) => t.plus(a.amount).minus(a.deductedToDate), ZERO).plus(e.loans.reduce((t, l) => t.plus(l.balance), ZERO));
+        return { title: 'Employee Ledger (charges, loans, advances)', header: [['Employee', `${e.fullName} (${e.employeeNo})`], ['Branch', e.location?.name ?? 'Office'], ['Position', e.position ?? '']], columns: ['Date', 'Particulars', 'Charged / borrowed', 'Deducted', 'Balance'], rows, footer: [['OUTSTANDING BALANCE', open]], signatures: ['Employee', 'HR'] };
+      }
+      case 'contributions': {
+        if (!user.permissions.has('payroll.view.detail')) throw new ForbiddenException('The contributions register lists names; ask HR or the Accounting Head');
+        const [y, m] = id.split('-').map(Number);
+        const reg = await this.payroll.contributionsRegister(y, m, user);
+        return { title: `Government Contributions Register ${id}`, header: reg.agencies.map((a) => [`${a.label}`, `EE ₱${a.employeeShare.toFixed(2)} + ER ₱${a.employerShare.toFixed(2)} = ₱${a.total.toFixed(2)}${a.remitted ? ` — remitted ${dateStr(a.remitted.paidAt)} ref ${a.remitted.referenceNo}` : ' — payable'}`] as [string, unknown]), columns: ['Employee', 'SSS no.', 'SSS EE', 'SSS ER', 'PhilHealth no.', 'PHIC EE', 'PHIC ER', 'Pag-IBIG no.', 'HDMF EE', 'HDMF ER'], rows: (reg.rows ?? []).map((r) => [`${r.name} (${r.employeeNo})`, r.sssNo ?? '', r.sssEe, r.sssEr, r.phicNo ?? '', r.phicEe, r.phicEr, r.hdmfNo ?? '', r.hdmfEe, r.hdmfEr]), signatures: ['Prepared by (HR)', 'Checked by (Accounting Head)'] };
+      }
+      case 'inspection': {
+        const r = await db.storeInspection.findUnique({ where: { id }, include: { location: true } }); if (!r) throw new NotFoundException();
+        const mine = await this.myEmployeeId(user);
+        if (!['inspection.view', 'inspection.review'].some((k) => user.permissions.has(k)) && r.inspectorId !== user.id && r.staffOnDutyEmployeeId !== mine) throw new ForbiddenException();
+        const people = await db.user.findMany({ where: { id: { in: [r.inspectorId, r.staffAcknowledgedBy, r.hrReviewedBy].filter((x): x is string => !!x) } }, select: { id: true, fullName: true } });
+        const staff = r.staffOnDutyEmployeeId ? await db.employee.findUnique({ where: { id: r.staffOnDutyEmployeeId }, select: { fullName: true } }) : null;
+        const nm = (x: string | null) => people.find((p) => p.id === x)?.fullName ?? '';
+        const answers = r.items as unknown as { key: string; status: string | null; date?: string | null; amount?: number | null; reason?: string | null }[];
+        const rows: unknown[][] = []; let section = '';
+        for (const c of CHECKLIST) {
+          if (c.section !== section) { section = c.section; rows.push([section, '', '', '', '', '']); }
+          const a = answers.find((x) => x.key === c.key);
+          const extra = [a?.date ? `Date updated: ${a.date}` : '', a?.amount != null ? `Amount: ₱${Number(a.amount).toFixed(2)}${r.cashFundSystem != null && c.key === 'cash_fund' ? ` (system ₱${r.cashFundSystem})` : ''}` : '', a?.reason ? `Reason: ${a.reason}` : ''].filter(Boolean).join(' · ');
+          rows.push([c.no, `${c.group ? `${c.group}: ` : ''}${c.label}`, a?.status === 'COMPLIED' ? '✔' : '', a?.status === 'NO' ? '✔' : '', a?.status === 'NA' ? 'N/A' : '', extra]);
+        }
+        return { status: r.status === 'DRAFT' ? 'DRAFT' : 'POSTED', title: 'Store Inspection Report', header: [['Control #', r.controlNo], ['Date', dateStr(r.inspectionDate)], ['Name of inspector', nm(r.inspectorId)], ['Branch', r.location.name], ['Name of staff on duty', staff?.fullName ?? r.staffOnDutyName ?? ''], ['Comments', r.comments ?? ''], ['Staff acknowledged', r.staffAcknowledgedAt ? `${nm(r.staffAcknowledgedBy)} ${r.staffAcknowledgedAt.toISOString().slice(0, 16).replace('T', ' ')}` : 'Not yet'], ['HR review', r.hrReviewedAt ? `${nm(r.hrReviewedBy)} ${dateStr(r.hrReviewedAt)}${r.hrNotes ? ` — ${r.hrNotes}` : ''}` : 'Not yet']], columns: ['No.', 'Item', 'Complied', 'No', 'N/A', 'Details'], rows, signatures: [`Staff: ${staff?.fullName ?? r.staffOnDutyName ?? ''} (signature over printed name)`, `Inspector: ${nm(r.inspectorId)}`] };
+      }
+      case 'fund-replenishment': {
+        const t = await db.cashFundTxn.findUnique({ where: { id }, include: { fund: { include: { location: true } } } }); if (!t || t.kind !== 'REPLENISH') throw new NotFoundException(); scope(t.locationId);
+        if (!['cashfund.view.all', 'cashfund.use', 'cashfund.manage', 'cashfund.check'].some((k) => user.permissions.has(k))) throw new ForbiddenException();
+        const prev = await db.cashFundTxn.findFirst({ where: { fundId: t.fundId, kind: 'REPLENISH', createdAt: { lt: t.createdAt } }, orderBy: { createdAt: 'desc' } });
+        const spent = await db.cashFundTxn.findMany({ where: { fundId: t.fundId, kind: { in: ['EXPENSE', 'EXPENSE_VOID'] }, createdAt: { gt: prev?.createdAt ?? new Date(0), lte: t.createdAt } }, orderBy: { createdAt: 'asc' } });
+        const docs = await db.expenseDoc.findMany({ where: { locationId: t.locationId, id: { in: spent.map((x) => x.expenseDocId).filter((x): x is string => !!x) } }, include: { account: true } });
+        return { title: 'Cash Fund Replenishment Voucher', header: [['Voucher #', t.controlNo ?? t.id.slice(0, 8)], ['Branch', t.fund.location.name], ['Date', dateStr(t.businessDate)], ['Fund amount (imprest)', t.fund.imprestAmount], ['Replenished from cash sales', t.amount]], columns: ['Date', 'Expense #', 'Account', 'Payee / notes', 'Amount'], rows: spent.map((x) => { const d = docs.find((e) => e.id === x.expenseDocId); return [dateStr(x.businessDate), d?.controlNo ?? '', d?.account.title ?? '', d?.payee ?? x.notes ?? '', D(x.amount).neg()]; }), footer: [['TOTAL SPENT FROM FUND', spent.reduce((a, x) => a.minus(x.amount), ZERO)], ['REPLENISHED', t.amount]], signatures: ['Prepared by', 'Checked by', 'Approved by'] };
       }
       case 'credit-note': {
         const p = await db.payment.findUnique({ where: { id }, include: { customer: true, allocations: { include: { salesDoc: true } } } }); if (!p) throw new NotFoundException();

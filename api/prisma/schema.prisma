@@ -25,6 +25,8 @@ enum LocationType {
 model Location {
   id                   String       @id @default(uuid())
   code                 String       @unique
+  /// 2-letter code printed first on every form number of this location, e.g. WA-PO-000012 (West Ave pull-out no. 12)
+  shortCode            String?      @unique @map("short_code")
   name                 String
   type                 LocationType
   isSelling            Boolean      @default(false) @map("is_selling")
@@ -54,6 +56,8 @@ model Location {
   agents            Agent[]
   accounts          Account[]
   dailyCloses       DailyClose[]
+  cashFund          CashFund?
+  storeInspections  StoreInspection[]
   franchiseExpenses FranchiseExpense[]
   employees         Employee[]
 
@@ -500,6 +504,8 @@ enum TransferStatus {
 
 model TransferDoc {
   id                String         @id @default(uuid())
+  /// the receiving location's own number for the same document (Transfer-In), e.g. MY-TI-000003
+  transferInNo      String?        @unique @map("transfer_in_no")
   controlNo         String         @map("control_no")
   docDate           DateTime       @map("doc_date") @db.Date
   status            TransferStatus @default(DRAFT)
@@ -585,6 +591,8 @@ model Customer {
   agentId     String?      @map("agent_id")
   arAccountId String?      @map("ar_account_id")
   contact     String?
+  phone       String?
+  email       String?
   active      Boolean      @default(true)
   createdAt   DateTime     @default(now()) @map("created_at")
   createdBy   String?      @map("created_by")
@@ -641,6 +649,9 @@ model SalesDoc {
   agentId                    String?      @map("agent_id")
   riderId                    String?      @map("rider_id")
   customerName               String?      @map("customer_name")
+  /// walk-in / online customer contact details captured at the sale (for the customer contact list)
+  customerPhone              String?      @map("customer_phone")
+  customerEmail              String?      @map("customer_email")
   drSiNo                     String       @map("dr_si_no")
   paymentMode                PaymentMode  @map("payment_mode")
   paymentAccountId           String?      @map("payment_account_id")
@@ -712,22 +723,27 @@ model SalesLine {
 }
 
 model Payment {
-  id                String      @id @default(uuid())
-  creditNoteNo      String      @unique @map("credit_note_no")
-  customerId        String?     @map("customer_id")
-  amount            Decimal     @db.Decimal(14, 2)
-  discount          Decimal     @default(0) @db.Decimal(14, 2)
-  paymentMode       PaymentMode @map("payment_mode")
-  paymentAccountId  String?     @map("payment_account_id")
-  proofAttachmentId String?     @map("proof_attachment_id")
-  receivedAt        DateTime    @map("received_at")
-  businessDate      DateTime    @map("business_date") @db.Date
-  notes             String?
-  createdAt         DateTime    @default(now()) @map("created_at")
-  createdBy         String?     @map("created_by")
-  voidedAt          DateTime?   @map("voided_at")
-  voidedBy          String?     @map("voided_by")
-  voidReason        String?     @map("void_reason")
+  id                   String      @id @default(uuid())
+  creditNoteNo         String      @unique @map("credit_note_no")
+  customerId           String?     @map("customer_id")
+  amount               Decimal     @db.Decimal(14, 2)
+  discount             Decimal     @default(0) @db.Decimal(14, 2)
+  paymentMode          PaymentMode @map("payment_mode")
+  paymentAccountId     String?     @map("payment_account_id")
+  proofAttachmentId    String?     @map("proof_attachment_id")
+  receivedAt           DateTime    @map("received_at")
+  businessDate         DateTime    @map("business_date") @db.Date
+  notes                String?
+  /// POSTED = applied to the invoices; PENDING = entered by a branch, waiting for Accounting approval; REJECTED
+  status               String      @default("POSTED")
+  approvalRequestId    String?     @map("approval_request_id")
+  requestedSalesDocIds String[]    @default([]) @map("requested_sales_doc_ids")
+  locationId           String?     @map("location_id")
+  createdAt            DateTime    @default(now()) @map("created_at")
+  createdBy            String?     @map("created_by")
+  voidedAt             DateTime?   @map("voided_at")
+  voidedBy             String?     @map("voided_by")
+  voidReason           String?     @map("void_reason")
 
   customer       Customer?           @relation(fields: [customerId], references: [id])
   paymentAccount Account?            @relation(fields: [paymentAccountId], references: [id])
@@ -822,18 +838,22 @@ model FranchiseExpense {
 }
 
 model DailyClose {
-  id               String   @id @default(uuid())
-  locationId       String   @map("location_id")
-  businessDate     DateTime @map("business_date") @db.Date
-  closedAt         DateTime @map("closed_at")
-  closedBy         String?  @map("closed_by") // null = job
-  cashSales        Decimal  @default(0) @map("cash_sales") @db.Decimal(14, 2)
-  cashExpenses     Decimal  @default(0) @map("cash_expenses") @db.Decimal(14, 2)
-  expectedCash     Decimal  @default(0) @map("expected_cash") @db.Decimal(14, 2)
-  countedCash      Decimal? @map("counted_cash") @db.Decimal(14, 2)
-  cashVariance     Decimal? @map("cash_variance") @db.Decimal(14, 2)
-  moneyBreakdown   Json?    @map("money_breakdown") // {1000: n, 500: n, ...}
-  totalCashDeposit Decimal  @default(0) @map("total_cash_deposit") @db.Decimal(14, 2)
+  id                String   @id @default(uuid())
+  locationId        String   @map("location_id")
+  businessDate      DateTime @map("business_date") @db.Date
+  closedAt          DateTime @map("closed_at")
+  closedBy          String?  @map("closed_by") // null = job
+  cashSales         Decimal  @default(0) @map("cash_sales") @db.Decimal(14, 2)
+  cashExpenses      Decimal  @default(0) @map("cash_expenses") @db.Decimal(14, 2)
+  expectedCash      Decimal  @default(0) @map("expected_cash") @db.Decimal(14, 2)
+  countedCash       Decimal? @map("counted_cash") @db.Decimal(14, 2)
+  cashVariance      Decimal? @map("cash_variance") @db.Decimal(14, 2)
+  moneyBreakdown    Json?    @map("money_breakdown") // {1000: n, 500: n, ...}
+  totalCashDeposit  Decimal  @default(0) @map("total_cash_deposit") @db.Decimal(14, 2)
+  /// cash taken from the day's cash sales to replenish the branch cash fund
+  fundReplenishment Decimal  @default(0) @map("fund_replenishment") @db.Decimal(14, 2)
+  /// charge form created when a cash shortage is charged to staff
+  chargeFormId      String?  @map("charge_form_id")
 
   location Location @relation(fields: [locationId], references: [id])
 
@@ -860,6 +880,8 @@ model PostCloseEdit {
 model CountDoc {
   id          String    @id @default(uuid())
   controlNo   String    @map("control_no")
+  /// AUDIT = Field Auditor / auditor count (opens a discrepancy case); WEEKLY = the sales associate's own weekly count (recorded for compliance)
+  countType   String    @default("AUDIT") @map("count_type")
   status      DocStatus @default(DRAFT)
   locationId  String    @map("location_id")
   countDate   DateTime  @map("count_date") @db.Date
@@ -885,6 +907,9 @@ model CountLine {
   id        String  @id @default(uuid())
   docId     String  @map("doc_id")
   productId String  @map("product_id")
+  /// system count at the start of the count date (pre-filled on the sheet)
+  beginQty  Int     @default(0) @map("begin_qty")
+  /// expected on-hand when the count is submitted (beginning ± the day's movements)
   systemQty Int     @map("system_qty")
   actualQty Int?    @map("actual_qty")
   variance  Int     @default(0)
@@ -904,6 +929,7 @@ enum DiscrepancyStatus {
 }
 
 model DiscrepancyCase {
+  caseNo                 String?           @unique @map("case_no")
   id                     String            @id @default(uuid())
   countDocId             String            @unique @map("count_doc_id")
   status                 DiscrepancyStatus @default(OPEN)
@@ -922,19 +948,31 @@ model DiscrepancyCase {
   @@map("discrepancy_cases")
 }
 
+enum ChargeKind {
+  INVENTORY_DISCREPANCY
+  EXPIRED
+  DAMAGED
+  CASH_SHORTAGE
+  OTHER
+}
+
 model ChargeForm {
-  id                       String    @id @default(uuid())
-  controlNo                String    @unique @map("control_no")
-  locationId               String    @map("location_id")
-  discrepancyCaseId        String?   @map("discrepancy_case_id")
+  id                       String     @id @default(uuid())
+  controlNo                String     @unique @map("control_no")
+  /// What the charge is for; set automatically by the source document (write-off, daily close, count) or chosen for manual forms.
+  kind                     ChargeKind @default(INVENTORY_DISCREPANCY)
+  sourceType               String?    @map("source_type") // ExpiryWriteoffDoc | DailyClose | DiscrepancyCase
+  sourceId                 String?    @map("source_id")
+  locationId               String     @map("location_id")
+  discrepancyCaseId        String?    @map("discrepancy_case_id")
   reason                   String? // for manual charge forms
-  totalAmount              Decimal   @default(0) @map("total_amount") @db.Decimal(14, 2)
-  finalizedByHrAt          DateTime? @map("finalized_by_hr_at")
-  finalizedBy              String?   @map("finalized_by")
-  payrollDeductionSchedule Json?     @map("payroll_deduction_schedule") // [{employeeId, periods, perPeriod}]
-  createdAt                DateTime  @default(now()) @map("created_at")
-  createdBy                String?   @map("created_by")
-  updatedAt                DateTime  @updatedAt @map("updated_at")
+  totalAmount              Decimal    @default(0) @map("total_amount") @db.Decimal(14, 2)
+  finalizedByHrAt          DateTime?  @map("finalized_by_hr_at")
+  finalizedBy              String?    @map("finalized_by")
+  payrollDeductionSchedule Json?      @map("payroll_deduction_schedule") // [{employeeId, periods, perPeriod}]
+  createdAt                DateTime   @default(now()) @map("created_at")
+  createdBy                String?    @map("created_by")
+  updatedAt                DateTime   @updatedAt @map("updated_at")
 
   location        Location               @relation(fields: [locationId], references: [id])
   lines           ChargeFormLine[]
@@ -947,24 +985,28 @@ model ChargeForm {
 model ChargeFormLine {
   id           String   @id @default(uuid())
   chargeFormId String   @map("charge_form_id")
-  productId    String   @map("product_id")
+  productId    String?  @map("product_id") // null for amount-only lines (cash shortage, lost equipment…)
+  description  String?
   qty          Int
   unitCharge   Decimal  @map("unit_charge") @db.Decimal(14, 2) // franchise-tier price in effect
   batchCost    Decimal? @map("batch_cost") @db.Decimal(14, 2) // for R11 (never serialized to HR)
   amount       Decimal  @db.Decimal(14, 2)
 
   chargeForm ChargeForm @relation(fields: [chargeFormId], references: [id], onDelete: Cascade)
-  product    Product    @relation(fields: [productId], references: [id])
+  product    Product?   @relation(fields: [productId], references: [id])
 
   @@map("charge_form_lines")
 }
 
 model ChargeFormAllocation {
-  id             String  @id @default(uuid())
-  chargeFormId   String  @map("charge_form_id")
-  employeeId     String  @map("employee_id")
-  amount         Decimal @db.Decimal(14, 2)
-  deductedToDate Decimal @default(0) @map("deducted_to_date") @db.Decimal(14, 2)
+  id             String    @id @default(uuid())
+  chargeFormId   String    @map("charge_form_id")
+  employeeId     String    @map("employee_id")
+  amount         Decimal   @db.Decimal(14, 2)
+  deductedToDate Decimal   @default(0) @map("deducted_to_date") @db.Decimal(14, 2)
+  /// The charged employee acknowledges in the app (Salary Deduction Authorization) — no paper upload.
+  acknowledgedAt DateTime? @map("acknowledged_at")
+  acknowledgedBy String?   @map("acknowledged_by")
 
   chargeForm ChargeForm @relation(fields: [chargeFormId], references: [id], onDelete: Cascade)
   employee   Employee   @relation(fields: [employeeId], references: [id])
@@ -987,6 +1029,10 @@ model ExpiryWriteoffDoc {
   notes             String?
   preparedBy        String    @map("prepared_by")
   approvalRequestId String?   @map("approval_request_id")
+  /// COMPANY = expensed (R9); STAFF = charged to the listed employees (charge form, R11 when HR finalizes)
+  chargeTo          String    @default("COMPANY") @map("charge_to")
+  chargeEmployeeIds String[]  @default([]) @map("charge_employee_ids")
+  chargeFormId      String?   @map("charge_form_id")
   postedAt          DateTime? @map("posted_at")
   voidedAt          DateTime? @map("voided_at")
   voidedBy          String?   @map("voided_by")
@@ -1571,6 +1617,129 @@ model ContributionTable {
   createdAt     DateTime @default(now()) @map("created_at")
 
   @@map("contribution_tables")
+}
+
+/// Branch cash fund (imprest / revolving fund): small expenses are paid from it and it is topped back up from the day's cash sales.
+model CashFund {
+  id            String   @id @default(uuid())
+  locationId    String   @unique @map("location_id")
+  imprestAmount Decimal  @map("imprest_amount") @db.Decimal(14, 2)
+  balance       Decimal  @db.Decimal(14, 2)
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now()) @map("created_at")
+  createdBy     String?  @map("created_by")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  location Location      @relation(fields: [locationId], references: [id])
+  txns     CashFundTxn[]
+
+  @@map("cash_funds")
+}
+
+model CashFundTxn {
+  controlNo    String?  @unique @map("control_no") // replenishment voucher number, e.g. WA-FR-000004
+  id           String   @id @default(uuid())
+  fundId       String   @map("fund_id")
+  locationId   String   @map("location_id")
+  businessDate DateTime @map("business_date") @db.Date
+  kind         String // SETUP | TOP_UP | EXPENSE | EXPENSE_VOID | REPLENISH | ADJUST
+  amount       Decimal  @db.Decimal(14, 2) // signed: + into the fund, − out of it
+  balanceAfter Decimal  @map("balance_after") @db.Decimal(14, 2)
+  expenseDocId String?  @map("expense_doc_id")
+  notes        String?
+  createdBy    String?  @map("created_by")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  fund CashFund @relation(fields: [fundId], references: [id])
+
+  @@index([locationId, businessDate])
+  @@map("cash_fund_txns")
+}
+
+/// Field Auditor's count of the cash fund actually found in the store vs the system balance.
+model CashFundCheck {
+  id            String   @id @default(uuid())
+  locationId    String   @map("location_id")
+  checkedAt     DateTime @default(now()) @map("checked_at")
+  countedAmount Decimal  @map("counted_amount") @db.Decimal(14, 2)
+  systemBalance Decimal  @map("system_balance") @db.Decimal(14, 2)
+  variance      Decimal  @db.Decimal(14, 2)
+  reason        String?
+  inspectionId  String?  @map("inspection_id")
+  checkedBy     String   @map("checked_by")
+
+  @@index([locationId, checkedAt])
+  @@map("cash_fund_checks")
+}
+
+/// Store Inspection Report (the Field Auditor's branch checklist: store, permits, stocks, staff) — submitted to HR, Admin and Head Auditor notified.
+model StoreInspection {
+  id                    String    @id @default(uuid())
+  controlNo             String    @unique @map("control_no")
+  locationId            String    @map("location_id")
+  inspectionDate        DateTime  @map("inspection_date") @db.Date
+  inspectorId           String    @map("inspector_id")
+  staffOnDutyEmployeeId String?   @map("staff_on_duty_employee_id")
+  staffOnDutyName       String?   @map("staff_on_duty_name")
+  items                 Json // [{key, status: COMPLIED|NO|NA, date?, amount?, reason?}]
+  comments              String?
+  cashFundCounted       Decimal?  @map("cash_fund_counted") @db.Decimal(14, 2)
+  cashFundSystem        Decimal?  @map("cash_fund_system") @db.Decimal(14, 2)
+  status                String    @default("DRAFT") // DRAFT | SUBMITTED | REVIEWED
+  submittedAt           DateTime? @map("submitted_at")
+  staffAcknowledgedAt   DateTime? @map("staff_acknowledged_at")
+  staffAcknowledgedBy   String?   @map("staff_acknowledged_by")
+  hrReviewedAt          DateTime? @map("hr_reviewed_at")
+  hrReviewedBy          String?   @map("hr_reviewed_by")
+  hrNotes               String?   @map("hr_notes")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  location Location @relation(fields: [locationId], references: [id])
+
+  @@index([locationId, inspectionDate])
+  @@map("store_inspections")
+}
+
+/// Every approved correction of someone's document (owner request 2026-09-26): who made the original, who asked, who approved, what
+/// changed. Used to see which staff have many errors in their reports.
+model DocumentRevision {
+  id           String   @id @default(uuid())
+  source       String // AUDIT_REVISION | POST_CLOSE_EDIT | WAREHOUSE_EDIT | COUNT_REVISION
+  documentType String   @map("document_type")
+  documentId   String   @map("document_id")
+  controlNo    String?  @map("control_no")
+  locationId   String?  @map("location_id")
+  staffUserId  String?  @map("staff_user_id") // the person whose document was corrected
+  requestedBy  String?  @map("requested_by")
+  approvedBy   String?  @map("approved_by")
+  reason       String?
+  changes      Json?
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([staffUserId, createdAt])
+  @@index([documentType, documentId])
+  @@map("document_revisions")
+}
+
+/// Monthly remittance of government contributions (EE share deducted + ER share) to SSS / PhilHealth / Pag-IBIG.
+model ContributionRemittance {
+  id                String   @id @default(uuid())
+  kind              String // SSS | PHIC | HDMF
+  year              Int
+  month             Int
+  amountEe          Decimal  @map("amount_ee") @db.Decimal(14, 2)
+  amountEr          Decimal  @map("amount_er") @db.Decimal(14, 2)
+  total             Decimal  @db.Decimal(14, 2)
+  referenceNo       String   @map("reference_no")
+  paidAt            DateTime @map("paid_at") @db.Date
+  paidFromAccountId String?  @map("paid_from_account_id")
+  voucherId         String?  @map("voucher_id")
+  createdBy         String?  @map("created_by")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  @@unique([kind, year, month])
+  @@map("contribution_remittances")
 }
 
 // Session store lives in Redis; this table records login devices for audit.

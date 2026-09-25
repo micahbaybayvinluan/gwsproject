@@ -21,7 +21,8 @@ export class AuthService {
     }
     const roleKey = user.role.key as RoleKey;
     // AUTH_TOTP_OPTIONAL=true relaxes the mandatory 2FA for Admin / auditors / Accounting Head (development & simulation only; keep false in production)
-    const totpRequired = (TOTP_REQUIRED_ROLES.includes(roleKey) && process.env.AUTH_TOTP_OPTIONAL !== 'true') || user.totpEnabled;
+    // AUTH_TOTP_OPTIONAL=true (testing / simulation only) skips the code for everyone, even accounts that already enrolled an authenticator
+    const totpRequired = process.env.AUTH_TOTP_OPTIONAL === 'true' ? false : TOTP_REQUIRED_ROLES.includes(roleKey) || user.totpEnabled;
     const idleMinutes = LONG_SESSION_ROLES.includes(roleKey)
       ? await this.settings.get<number>('session.idle_minutes_long')
       : await this.settings.get<number>('session.idle_minutes_default');

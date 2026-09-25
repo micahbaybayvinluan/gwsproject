@@ -7,6 +7,7 @@ import { ReceivingService, type ReceivingEditInput } from '../receiving/receivin
 import { TransfersService, type TransferEditInput } from '../transfers/transfers.service';
 import { requestContext, type SessionUser } from '../common/request-context';
 import { describeChanges, type Snap } from './edit-diff';
+import { RevisionsService } from '../revisions/revisions.service';
 
 export type EditableKind = 'receiving' | 'transfers';
 const DOC_TYPE: Record<EditableKind, 'ReceivingDoc' | 'TransferDoc'> = { receiving: 'ReceivingDoc', transfers: 'TransferDoc' };
@@ -22,7 +23,7 @@ const LABEL: Record<EditableKind, string> = { receiving: "Supplier's Form / rece
 @Injectable()
 export class EditsService implements OnModuleInit {
   private log = new Logger('Edits');
-  constructor(private prisma: PrismaService, private approvals: ApprovalsService, private audit: AuditService, private notify: NotificationsService, private receiving: ReceivingService, private transfers: TransfersService) {}
+  constructor(private prisma: PrismaService, private approvals: ApprovalsService, private audit: AuditService, private notify: NotificationsService, private receiving: ReceivingService, private transfers: TransfersService, private revisions: RevisionsService) {}
 
   onModuleInit() {
     this.approvals.register('WAREHOUSE_EDIT', async (req, outcome, actor) => {
@@ -32,6 +33,8 @@ export class EditsService implements OnModuleInit {
         try {
           await this.apply(s.kind, req.documentId, s.payload, req.requestedBy, null);
           await this.audit.log({ action: 'EDIT_APPLIED', entityType: DOC_TYPE[s.kind], entityId: req.documentId, userId: req.requestedBy, after: { acceptedBy: actor?.id ?? null, changes: s.changes, approvalRequestId: req.id } });
+          const snap = await this.snapshot(s.kind, req.documentId);
+          await this.revisions.record({ source: 'WAREHOUSE_EDIT', documentType: DOC_TYPE[s.kind], documentId: req.documentId, controlNo: s.controlNo, locationId: snap.locationId, staffUserId: snap.createdBy, requestedBy: req.requestedBy, approvedBy: actor?.id ?? null, reason: 'Edit by the Warehouse In-Charge, accepted by the preparer', changes: s.changes, link: `/${s.kind}/${req.documentId}` });
         } catch (e) {
           // The document moved on (approved / posted / voided) before the preparer accepted: nothing is changed.
           this.log.warn(`WAREHOUSE_EDIT ${req.id} not applied: ${(e as Error).message}`);

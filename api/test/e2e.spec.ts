@@ -33,7 +33,7 @@ async function login(username: string): Promise<string> {
   if (!me.body.accountabilityAcceptedAt) await http.post('/api/auth/accept-accountability').set('Authorization', `Bearer ${token}`).expect(201);
   tokens[username] = token; return token;
 }
-const USERS = ['admin', 'ext.auditor', 'head.auditor', 'asst.auditor', 'audit.assoc', 'wh.incharge', 'wh.assoc', 'sales.westave', 'fr.mayon.assoc', 'fr.mayon.owner', 'custom.user', 'acct.head', 'acct.assoc', 'hr.staff', 'field.auditor', 'sales.dasma'];
+const USERS = ['admin', 'ext.auditor', 'head.auditor', 'asst.auditor', 'audit.assoc', 'wh.incharge', 'wh.assoc', 'sales.westave', 'fr.mayon.assoc', 'fr.mayon.owner', 'custom.user', 'acct.head', 'acct.assoc', 'hr.staff', 'field.auditor', 'sales.dasma', 'sales.csr'];
 const as = (u: string) => ({ get: (p: string) => http.get(p).set('Authorization', `Bearer ${tokens[u]}`), post: (p: string) => http.post(p).set('Authorization', `Bearer ${tokens[u]}`), put: (p: string) => http.put(p).set('Authorization', `Bearer ${tokens[u]}`) });
 const has = (o: unknown, re: RegExp): boolean => JSON.stringify(o).match(re) !== null;
 const ok = (r: request.Response) => { if (r.status >= 400) throw new Error(`${r.request?.method} ${r.request?.url} → ${r.status} ${JSON.stringify(r.body)}`); return r; };
@@ -41,7 +41,8 @@ const ok = (r: request.Response) => { if (r.status >= 400) throw new Error(`${r.
 /** The suite is idempotent: transactional tables are truncated before each run (master data + seed users stay). Never run against production. */
 async function resetTransactionalData() {
   if (process.env.NODE_ENV !== 'test') throw new Error('refusing to reset data outside NODE_ENV=test');
-  await prisma.$executeRawUnsafe(`TRUNCATE stock_ledger, stock_balances, receiving_lines, receiving_docs, transfer_lines, transfer_docs, sales_lines, payment_allocations, payments, sales_docs, expense_docs, count_lines, count_docs, discrepancy_cases, charge_form_allocations, charge_form_lines, charge_forms, expiry_writeoff_lines, expiry_writeoff_docs, approval_decisions, approval_requests, notifications, audit_log, batches, daily_closes, post_close_edits, journal_lines, journal_vouchers, beginning_balances, accounting_periods, voucher_sequences, control_sequences, alert_states, attachments, employee_loans, payroll_lines, payroll_runs, employees, min_stock_levels, revaluation_lines, revaluation_entries, cash_deposits, login_session_records CASCADE`);
+  await prisma.$executeRawUnsafe(`TRUNCATE stock_ledger, stock_balances, receiving_lines, receiving_docs, transfer_lines, transfer_docs, sales_lines, payment_allocations, payments, sales_docs, expense_docs, count_lines, count_docs, discrepancy_cases, charge_form_allocations, charge_form_lines, charge_forms, expiry_writeoff_lines, expiry_writeoff_docs, approval_decisions, approval_requests, notifications, audit_log, batches, daily_closes, post_close_edits, journal_lines, journal_vouchers, beginning_balances, accounting_periods, voucher_sequences, control_sequences, alert_states, attachments, employee_loans, payroll_lines, payroll_runs, employees, min_stock_levels, revaluation_lines, revaluation_entries, cash_deposits, login_session_records, cash_fund_txns, cash_fund_checks, store_inspections, contribution_remittances, document_revisions CASCADE`);
+  await prisma.$executeRawUnsafe(`UPDATE cash_funds SET balance = imprest_amount`);
   await prisma.priceList.deleteMany({ where: { product: { name: { startsWith: 'E2E ' } } } });
   await prisma.productCost.deleteMany({ where: { product: { name: { startsWith: 'E2E ' } } } });
   await prisma.product.deleteMany({ where: { name: { startsWith: 'E2E ' } } });
@@ -114,10 +115,13 @@ describe('Phase 1 flow: receive → approve cost → transfer → confirm → FE
     expect((await prisma.receivingDoc.findUniqueOrThrow({ where: { id: r2.id } })).status).toBe('POSTED');
     expect((await prisma.approvalRequest.findUniqueOrThrow({ where: { id: req2.id } })).status).toBe('AUTO_APPROVED');
   });
-  it('branch requests a transfer from warehouse (FEFO picks NEAR first); Asst Auditor alone can approve (any-of); receiver confirms with shortfall', async () => {
-    const t = ok(await as('sales.westave').post('/api/transfers').send({ fromLocationId: whId, toLocationId: branchId, transferType: 'RESTOCK', lines: [{ productId, qty: 12 }] })).body;
+  it('branch sends a stock request; warehouse prepares the transfer (FEFO picks NEAR first); Asst Auditor alone can approve (any-of); receiver confirms with shortfall', async () => {
+    await as('sales.westave').post('/api/transfers').send({ fromLocationId: whId, toLocationId: branchId, transferType: 'RESTOCK', lines: [{ productId, qty: 12 }] }).expect(403); // receiving branch makes no form
+    ok(await as('sales.westave').post('/api/transfers/request-stock').send({ items: [{ productId, qty: 12 }], notes: 'weekend stock' }));
+    const t = ok(await as('wh.assoc').post('/api/transfers').send({ fromLocationId: whId, toLocationId: branchId, transferType: 'RESTOCK', lines: [{ productId, qty: 12 }] })).body;
     transferId = t.id; expect(t.lines.map((l: { batch: { batchNo: string }; qtySent: number }) => [l.batch.batchNo, l.qtySent])).toEqual([['NEAR', 11], ['FAR', 1]]);
-    ok(await as('sales.westave').post(`/api/transfers/${transferId}/submit`));
+    expect(t.controlNo).toMatch(/^WH-PO-\d{6}$/); expect(t.transferInNo).toMatch(/^WA-TI-\d{6}$/);
+    ok(await as('wh.assoc').post(`/api/transfers/${transferId}/submit`));
     const inbox = ok(await as('asst.auditor').get('/api/approvals/inbox?type=TRANSFER_INTERNAL')).body;
     const req = inbox.items.find((i: { documentId: string }) => i.documentId === transferId);
     ok(await as('asst.auditor').post(`/api/approvals/${req.id}/decide`).send({ decision: 'APPROVE' }));
@@ -181,9 +185,18 @@ describe('Phase 1 flow: receive → approve cost → transfer → confirm → FE
     expect(ar.lines[0].priceTier).toBe('DEALER'); expect(ar.grandTotal).toBe('1200');
     const list = ok(await as('sales.westave').get(`/api/ar?locationId=${branchId}&overdue=1`)).body as { id: string; daysOverdue: number }[];
     expect(list.find((x) => x.id === ar.id)!.daysOverdue).toBeGreaterThan(0);
+    // branch-entered AR payment waits for Accounting; nothing is applied until approved
     const pay = ok(await as('sales.westave').post('/api/ar/payments').send({ salesDocIds: [ar.id], amount: 700, paymentMode: 'CASH' })).body;
-    expect(pay.creditNoteNo).toMatch(/^CN-/); expect(pay.allocations[0].amount).toBe('700');
+    expect(pay.creditNoteNo).toMatch(/^WA-CN-\d{6}$/); expect(pay.status).toBe('PENDING'); expect(pay.allocations).toHaveLength(0);
+    expect(ok(await as('sales.westave').get(`/api/sales/${ar.id}`)).body.balance).toBe('1200');
+    await as('sales.westave').post('/api/ar/payments').send({ salesDocIds: [ar.id], amount: 600, paymentMode: 'CASH' }).expect(400); // 700 already pending of 1200
+    const areq = (ok(await as('acct.assoc').get('/api/approvals/inbox?type=AR_PAYMENT')).body.items as { id: string; documentId: string }[]).find((i) => i.documentId === pay.id)!;
+    await as('head.auditor').post(`/api/approvals/${areq.id}/decide`).send({ decision: 'APPROVE' }).expect(403);
+    ok(await as('acct.assoc').post(`/api/approvals/${areq.id}/decide`).send({ decision: 'APPROVE' }));
     expect(ok(await as('sales.westave').get(`/api/sales/${ar.id}`)).body.balance).toBe('500');
+    // Accounting records a payment directly; it applies at once
+    const direct = ok(await as('acct.head').post('/api/ar/payments').send({ salesDocIds: [ar.id], amount: 100, paymentMode: 'CASH' })).body;
+    expect(direct.status).toBe('POSTED'); expect(ok(await as('sales.westave').get(`/api/sales/${ar.id}`)).body.balance).toBe('400');
     const rep = ok(await as('sales.westave').get(`/api/reports/daily-sales?locationId=${branchId}`)).body;
     expect(Number(rep.cash.walkIn)).toBe(4300); expect(has(rep, /cost/i)).toBe(false);
     const x = await as('sales.westave').get(`/api/reports/daily-sales.xlsx?locationId=${branchId}`); expect(x.status).toBe(200); expect(x.headers['content-type']).toContain('spreadsheetml');
@@ -197,7 +210,7 @@ describe('Phase 1 flow: receive → approve cost → transfer → confirm → FE
     const accts = ok(await as('sales.westave').get('/api/expenses/accounts')).body as { id: string; title: string; branchTagId: string }[];
     expect(accts.length).toBeGreaterThan(5); expect(accts.every((a) => a.branchTagId === branchId)).toBe(true);
     const meralco = accts.find((a) => /Meralco/.test(a.title))!;
-    const e = ok(await as('sales.westave').post('/api/expenses').send({ accountId: meralco.id, amount: 300, paidFrom: 'CASH_DRAWER', payee: 'Meralco' })).body; expect(e.controlNo).toMatch(/^EXP-WESTAVE-/);
+    const e = ok(await as('sales.westave').post('/api/expenses').send({ accountId: meralco.id, amount: 300, paidFrom: 'CASH_DRAWER', payee: 'Meralco' })).body; expect(e.controlNo).toMatch(/^WA-EX-\d{6}$/);
     const main = (ok(await as('acct.head').get('/api/expenses/accounts')).body as { id: string; title: string }[]).find((a) => /MDR/.test(a.title))!;
     await as('sales.westave').post('/api/expenses').send({ accountId: main.id, amount: 1, paidFrom: 'CASH_DRAWER' }).expect(403);
     const sum = ok(await as('sales.westave').get(`/api/closing/summary?locationId=${branchId}`)).body; expect(Number(sum.cashExpenses)).toBe(300); expect(Number(sum.expectedCash)).toBe(4300 + 700 - 300);
@@ -218,9 +231,27 @@ describe('Phase 1 flow: receive → approve cost → transfer → confirm → FE
     ok(await as('asst.auditor').post(`/api/approvals/${req.id}/decide`).send({ decision: 'APPROVE' }));
     expect((await prisma.salesDoc.findUniqueOrThrow({ where: { id: saleId } })).drSiNo).toBe(`DR-${run}-1-FIXED`);
   });
+  it('Audit Associate corrections go to the Head Auditor only, the staff member is notified, and the revision is logged against them', async () => {
+    const hasNote = async (u: string, type: string) => JSON.stringify(ok(await as(u).get('/api/notifications')).body).includes(type);
+    const edit = ok(await as('audit.assoc').post('/api/closing/edits').send({ documentType: 'SalesDoc', documentId: saleId, reason: 'DR number keyed wrong', after: { drSiNo: `DR-${run}-1-AUDIT` } })).body;
+    expect(await hasNote('sales.westave', 'REVISION_REQUESTED')).toBe(true);
+    const req = (ok(await as('head.auditor').get('/api/approvals/inbox?type=AUDIT_REVISION')).body.items as { id: string; documentId: string; requiredApproverRoles: string[] }[]).find((i) => i.documentId === edit.id)!;
+    expect(req.requiredApproverRoles).toEqual(['HEAD_AUDITOR']);
+    for (const u of ['asst.auditor', 'admin', 'audit.assoc']) await as(u).post(`/api/approvals/${req.id}/decide`).send({ decision: 'APPROVE' }).expect(403);
+    expect((await prisma.salesDoc.findUniqueOrThrow({ where: { id: saleId } })).drSiNo).not.toBe(`DR-${run}-1-AUDIT`);
+    ok(await as('head.auditor').post(`/api/approvals/${req.id}/decide`).send({ decision: 'APPROVE' }));
+    expect((await prisma.salesDoc.findUniqueOrThrow({ where: { id: saleId } })).drSiNo).toBe(`DR-${run}-1-AUDIT`);
+    expect(await hasNote('sales.westave', 'DOCUMENT_REVISED')).toBe(true);
+    const log = ok(await as('hr.staff').get('/api/revisions')).body as { source: string; staff: string; requestedByName: string; approvedByName: string; documentId: string }[];
+    expect(log.find((r) => r.documentId === saleId && r.source === 'AUDIT_REVISION')).toBeTruthy();
+    const byStaff = ok(await as('head.auditor').get('/api/revisions/by-staff')).body as { staffUserId: string; total: number; bySource: Record<string, number> }[];
+    const me = ok(await as('sales.westave').get('/api/auth/me')).body;
+    const row = byStaff.find((r) => r.staffUserId === (me.user?.id ?? me.id))!; expect(row.total).toBeGreaterThanOrEqual(2); expect(row.bySource.AUDIT_REVISION).toBe(1);
+    for (const u of ['sales.westave', 'acct.assoc']) await as(u).get('/api/revisions').expect(403);
+  });
   it('bulk approve with mixed selection reports per-item results', async () => {
-    const t1 = ok(await as('sales.westave').post('/api/transfers').send({ fromLocationId: whId, toLocationId: branchId, transferType: 'RESTOCK', lines: [{ productId, qty: 1 }] })).body; ok(await as('sales.westave').post(`/api/transfers/${t1.id}/submit`));
-    const t2 = ok(await as('sales.westave').post('/api/transfers').send({ fromLocationId: whId, toLocationId: branchId, transferType: 'RESTOCK', lines: [{ productId, qty: 1 }] })).body; ok(await as('sales.westave').post(`/api/transfers/${t2.id}/submit`));
+    const t1 = ok(await as('wh.assoc').post('/api/transfers').send({ fromLocationId: whId, toLocationId: branchId, transferType: 'RESTOCK', lines: [{ productId, qty: 1 }] })).body; ok(await as('wh.assoc').post(`/api/transfers/${t1.id}/submit`));
+    const t2 = ok(await as('wh.assoc').post('/api/transfers').send({ fromLocationId: whId, toLocationId: branchId, transferType: 'RESTOCK', lines: [{ productId, qty: 1 }] })).body; ok(await as('wh.assoc').post(`/api/transfers/${t2.id}/submit`));
     const inbox = ok(await as('head.auditor').get('/api/approvals/inbox?type=TRANSFER_INTERNAL')).body;
     const ids = inbox.items.filter((i: { documentId: string }) => [t1.id, t2.id].includes(i.documentId)).map((i: { id: string }) => i.id);
     const r = ok(await as('head.auditor').post('/api/approvals/bulk').send({ ids: [...ids, '00000000-0000-0000-0000-000000000000'], decision: 'APPROVE', note: 'bulk' })).body;
@@ -414,6 +445,190 @@ describe('warehouse: transfers to any branch/franchise, In-Charge input, edits a
     await as('sales.westave').post(`/api/transfers/${transferId}/confirm`).send({ lines: lines.map((l) => ({ lineId: l.id, qtyReceived: 0 })) }).expect(400); // short without a note
     const done = ok(await as('sales.westave').post(`/api/transfers/${transferId}/confirm`).send({ lines: lines.map((l) => ({ lineId: l.id, checked: true })) })).body;
     expect(done.status).toBe('RECEIVED');
+  });
+});
+
+describe('HR charges, cash fund, inspections, counts, AR & contacts (owner requests 2026-09-26)', () => {
+  let westId: string; let whId: string; let waEmp: string; let whEmp: string; let casein: string;
+  const notified = async (u: string, type: string) => JSON.stringify(ok(await as(u).get('/api/notifications')).body).includes(type);
+  const fund = async () => (ok(await as('sales.westave').get('/api/cash-funds')).body as { balance: string }[])[0];
+
+  it('setup: staff records linked to their accounts', async () => {
+    const locs = ok(await as('admin').get('/api/locations')).body as { id: string; code: string }[];
+    westId = locs.find((l) => l.code === 'WESTAVE')!.id; whId = locs.find((l) => l.code === 'WH')!.id;
+    const wa = await prisma.user.findUniqueOrThrow({ where: { username: 'sales.westave' } }); const wu = await prisma.user.findUniqueOrThrow({ where: { username: 'wh.assoc' } });
+    waEmp = ok(await as('hr.staff').post('/api/payroll/employees').send({ employeeNo: `WA-${run}`, fullName: 'Sales Associate – West Ave', locationId: westId, basicRate: 18000, userId: wa.id, sssNo: '34-0000001-0' })).body.id;
+    whEmp = ok(await as('hr.staff').post('/api/payroll/employees').send({ employeeNo: `WH-${run}`, fullName: 'Warehouse Associate', locationId: whId, basicRate: 16000, userId: wu.id })).body.id;
+    casein = (await prisma.product.findFirstOrThrow({ where: { name: `E2E Casein ${run}` } })).id;
+    const staff = ok(await as('field.auditor').get(`/api/staff?locationId=${westId}`)).body as { id: string; fullName: string }[];
+    expect(staff.map((x) => x.id)).toContain(waEmp); expect(has(staff, /basicRate/)).toBe(false);
+  });
+
+  it('damaged items charged to staff: charge form auto-created and pre-allocated; staff sees and acknowledges; others see no names; HR finalizes', async () => {
+    const batches = ok(await as('head.auditor').get(`/api/stock/batches/${casein}?locationId=${whId}`)).body as { batchId: string; qty: number }[];
+    const before = batches.reduce((t, b) => t + b.qty, 0);
+    await as('wh.incharge').post('/api/writeoffs').send({ locationId: whId, chargeTo: 'STAFF', employeeIds: [], lines: [{ productId: casein, batchId: batches[0].batchId, qty: 2, reason: 'DAMAGED' }] }).expect(400);
+    const wo = ok(await as('wh.incharge').post('/api/writeoffs').send({ locationId: whId, chargeTo: 'STAFF', employeeIds: [whEmp], lines: [{ productId: casein, batchId: batches[0].batchId, qty: 2, reason: 'DAMAGED' }] })).body;
+    expect(wo.controlNo).toMatch(/^WH-WO-\d{6}$/);
+    const req = (ok(await as('head.auditor').get('/api/approvals/inbox?type=WRITEOFF')).body.items as { id: string; documentId: string; summary: { chargeTo: string } }[]).find((i) => i.documentId === wo.id)!;
+    expect(req.summary.chargeTo).toContain('Warehouse Associate');
+    ok(await as('head.auditor').post(`/api/approvals/${req.id}/decide`).send({ decision: 'APPROVE' }));
+    const after = (ok(await as('head.auditor').get(`/api/stock/batches/${casein}?locationId=${whId}`)).body as { qty: number }[]).reduce((t, b) => t + b.qty, 0);
+    expect(after).toBe(before - 2); // inventory reflects it automatically
+    const doc = await prisma.expiryWriteoffDoc.findUniqueOrThrow({ where: { id: wo.id } });
+    const cf = await prisma.chargeForm.findUniqueOrThrow({ where: { id: doc.chargeFormId! }, include: { allocations: true } });
+    expect(cf.kind).toBe('DAMAGED'); expect(cf.controlNo).toMatch(/^WH-CF-\d{6}$/); expect(cf.allocations.map((a) => a.employeeId)).toEqual([whEmp]);
+    expect(await notified('wh.assoc', 'CHARGE_TO_YOU')).toBe(true); expect(await notified('hr.staff', 'CHARGE_FORM_READY')).toBe(true);
+    const mine = ok(await as('wh.assoc').get('/api/me/hr')).body; expect(mine.charges[0].chargeForm.id).toBe(cf.id); expect(has(mine, /batchCost|unitCost/)).toBe(false);
+    await as('sales.westave').post(`/api/me/charges/${cf.allocations[0].id}/acknowledge`).expect(403);
+    ok(await as('wh.assoc').post(`/api/me/charges/${cf.allocations[0].id}/acknowledge`));
+    const asst = ok(await as('asst.auditor').get(`/api/charge-forms/${cf.id}`)).body; expect(asst.allocations).toEqual([]); expect(asst.allocationsHidden).toBe(1);
+    ok(await as('hr.staff').post(`/api/charge-forms/${cf.id}/finalize`));
+    const ded = await as('wh.assoc').get(`/api/reports/forms/deduction-authorization/${cf.allocations[0].id}.pdf`).expect(200); expect(ded.text || ded.body.toString()).toContain('Salary Deduction Authorization');
+    // expired items the company absorbs: no charge form
+    const b2 = ok(await as('head.auditor').get(`/api/stock/batches/${casein}?locationId=${whId}`)).body as { batchId: string }[];
+    const wo2 = ok(await as('wh.incharge').post('/api/writeoffs').send({ locationId: whId, chargeTo: 'COMPANY', lines: [{ productId: casein, batchId: b2[0].batchId, qty: 1, reason: 'EXPIRED' }] })).body;
+    const r2 = (ok(await as('head.auditor').get('/api/approvals/inbox?type=WRITEOFF')).body.items as { id: string; documentId: string }[]).find((i) => i.documentId === wo2.id)!;
+    ok(await as('head.auditor').post(`/api/approvals/${r2.id}/decide`).send({ decision: 'APPROVE' }));
+    expect((await prisma.expiryWriteoffDoc.findUniqueOrThrow({ where: { id: wo2.id } })).chargeFormId).toBeNull();
+  });
+
+  it('customer contact number and email on sales feed the customer contact list', async () => {
+    ok(await as('sales.westave').post('/api/sales').send({ channel: 'WALK_IN', paymentMode: 'CASH', drSiNo: `DR-${run}-CUST`, customerName: 'Maria Test', customerPhone: '0917 000 1234', customerEmail: 'maria@test.ph', lines: [{ productId: casein, qty: 1 }] }));
+    const list = ok(await as('sales.westave').get('/api/reports/customers')).body as { name: string; contactNumber: string; email: string }[];
+    expect(list.find((c) => c.email === 'maria@test.ph')).toMatchObject({ name: 'Maria Test', contactNumber: '0917 000 1234' });
+    const x = await as('sales.westave').get('/api/reports/customers.xlsx').expect(200); expect(x.headers['content-type']).toContain('spreadsheetml');
+  });
+
+  it('branch cash fund: fund-paid expense lowers it, replenished from cash sales (lowers expected cash), Field Auditor confirms the cash found; balances on dashboards', async () => {
+    expect((ok(await as('sales.westave').get('/api/cash-funds')).body as unknown[]).length).toBe(1);
+    expect((ok(await as('acct.assoc').get('/api/cash-funds')).body as unknown[]).length).toBeGreaterThan(1);
+    const accts = ok(await as('sales.westave').get(`/api/expenses/accounts?locationId=${westId}`)).body as { id: string; class: string; title: string }[];
+    expect(accts.every((a) => a.class === 'OPEX')).toBe(true); // no direct cost for branch staff
+    const dc = await prisma.account.findFirst({ where: { class: 'DIRECT_COST', branchTagId: westId } });
+    if (dc) await as('sales.westave').post('/api/expenses').send({ accountId: dc.id, amount: 10, paidFrom: 'CASH_DRAWER' }).expect(403);
+    const start = Number((await fund()).balance);
+    ok(await as('sales.westave').post('/api/expenses').send({ accountId: accts[0].id, amount: 150, paidFrom: 'PETTY_CASH', payee: 'Water' }));
+    expect(Number((await fund()).balance)).toBe(start - 150);
+    const s1 = ok(await as('sales.westave').get(`/api/closing/summary?locationId=${westId}`)).body;
+    const rep = ok(await as('sales.westave').post(`/api/cash-funds/${westId}/replenish`).send({})).body;
+    expect(rep.controlNo).toMatch(/^WA-FR-\d{6}$/); expect(Number(rep.amount)).toBe(150); expect(Number((await fund()).balance)).toBe(start);
+    const s2 = ok(await as('sales.westave').get(`/api/closing/summary?locationId=${westId}`)).body;
+    expect(Number(s2.expectedCash)).toBe(Number(s1.expectedCash) - 150);
+    await as('sales.westave').post(`/api/cash-funds/${westId}/replenish`).send({}).expect(400);
+    const v = await as('sales.westave').get(`/api/reports/forms/fund-replenishment/${rep.id}.pdf`).expect(200); expect(v.text || v.body.toString()).toContain('Water');
+    const dsr = ok(await as('sales.westave').get(`/api/reports/daily-sales?locationId=${westId}`)).body; expect(JSON.stringify(dsr.expenses)).toContain('Cash Fund Replenishment');
+    ok(await as('field.auditor').post(`/api/cash-funds/${westId}/check`).send({ countedAmount: start }));
+    await as('field.auditor').post(`/api/cash-funds/${westId}/check`).send({ countedAmount: start - 170 }).expect(400);
+    ok(await as('field.auditor').post(`/api/cash-funds/${westId}/check`).send({ countedAmount: start - 170, reason: 'expense 170.00 no receipt yet' }));
+    expect(await notified('admin', 'CASH_FUND_DIFFERENCE')).toBe(true);
+    await as('sales.westave').post(`/api/cash-funds/${westId}/check`).send({ countedAmount: 1 }).expect(403);
+    const dash = ok(await as('acct.assoc').get('/api/dashboard')).body; expect(Number(dash.cashFunds.total)).toBeGreaterThan(0);
+    for (const u of ['admin', 'head.auditor', 'asst.auditor', 'ext.auditor', 'acct.head']) expect(ok(await as(u).get('/api/dashboard')).body.cashFunds).toBeDefined();
+  });
+
+  it('cash shortage at the count is charged to the staff on duty; HR finalizes; payroll deducts it; contributions register (names only for HR/Ext Auditor/Accounting Head); remittance', async () => {
+    ok(await as('sales.westave').post('/api/closing/cash-count').send({ breakdown: { '1': 0 } }));
+    const close = (ok(await as('head.auditor').get(`/api/closing/closes?locationId=${westId}`)).body as { id: string; cashVariance: string; businessDate: string }[]).find((c) => Number(c.cashVariance) < 0)!;
+    await as('sales.westave').post(`/api/closing/closes/${close.id}/charge-shortage`).send({ employeeIds: [waEmp] }).expect(403);
+    const cf = ok(await as('head.auditor').post(`/api/closing/closes/${close.id}/charge-shortage`).send({ employeeIds: [waEmp] })).body;
+    expect(cf.kind).toBe('CASH_SHORTAGE'); expect(Number(cf.totalAmount)).toBe(-Number(close.cashVariance));
+    await as('head.auditor').post(`/api/closing/closes/${close.id}/charge-shortage`).send({ employeeIds: [waEmp] }).expect(400);
+    ok(await as('hr.staff').post(`/api/charge-forms/${cf.id}/finalize`).send({ periods: 2 }));
+    const run_ = ok(await as('hr.staff').post('/api/payroll/runs').send({ periodFrom: '2026-09-01', periodTo: '2026-09-15' })).body;
+    const detail = ok(await as('hr.staff').get(`/api/payroll/runs/${run_.id}`)).body as { lines: { employeeId: string; chargeDeductions: string; sssEe: string; id: string }[] };
+    const line = detail.lines.find((l) => l.employeeId === waEmp)!;
+    expect(Number(line.chargeDeductions)).toBeCloseTo(Number(cf.totalAmount) / 2, 1); expect(Number(line.sssEe)).toBe(450);
+    ok(await as('hr.staff').post(`/api/payroll/runs/${run_.id}/finalize`));
+    expect(ok(await as('acct.assoc').get(`/api/payroll/runs/${run_.id}`)).body.lines).toBeUndefined();
+    const reg = ok(await as('hr.staff').get('/api/payroll/contributions?year=2026&month=9')).body; expect(reg.rows.find((r: { employeeId: string }) => r.employeeId === waEmp).sssEe).toBe('450');
+    for (const u of ['ext.auditor', 'acct.head']) expect(ok(await as(u).get('/api/payroll/contributions?year=2026&month=9')).body.rows).toBeDefined();
+    const tot = ok(await as('acct.assoc').get('/api/payroll/contributions?year=2026&month=9')).body; expect(tot.rows).toBeUndefined(); expect(Number(tot.agencies[0].total)).toBeGreaterThan(0);
+    await as('acct.assoc').get('/api/reports/forms/contributions/2026-09.pdf').expect(403);
+    await as('acct.assoc').post('/api/payroll/remittances').send({ kind: 'SSS', year: 2026, month: 9, referenceNo: 'X', paidAt: '2026-10-05' }).expect(403);
+    ok(await as('acct.head').post('/api/payroll/remittances').send({ kind: 'SSS', year: 2026, month: 9, referenceNo: 'SSS-E2E', paidAt: '2026-10-05' }));
+    await as('acct.head').post('/api/payroll/remittances').send({ kind: 'SSS', year: 2026, month: 9, referenceNo: 'SSS-E2E', paidAt: '2026-10-05' }).expect(400);
+    expect(ok(await as('hr.staff').get('/api/payroll/contributions?year=2026&month=9')).body.agencies.find((a: { kind: string }) => a.kind === 'SSS').payable).toBe('0');
+    await as('sales.westave').get(`/api/reports/forms/payslip/${line.id}.pdf`).expect(200);
+    await as('sales.dasma').get(`/api/reports/forms/payslip/${line.id}.pdf`).expect(403);
+  });
+
+  it('store inspection report: Field Auditor fills and submits; HR, Admin and Head Auditor notified; staff on duty acknowledges; HR reviews', async () => {
+    const list = ok(await as('field.auditor').get('/api/inspections/checklist')).body as { key: string }[];
+    const bal = Number((await fund()).balance);
+    const items = list.map((c) => ({ key: c.key, status: c.key === 'near_expiry' ? 'NO' : 'COMPLIED', ...(c.key === 'cash_fund' ? { amount: bal } : {}), ...(c.key === 'sales_deposit' ? { date: '2026-09-15' } : {}) }));
+    const partial = ok(await as('field.auditor').post('/api/inspections').send({ locationId: westId, staffOnDutyEmployeeId: waEmp, items: items.slice(0, 3) })).body;
+    await as('field.auditor').post(`/api/inspections/${partial.id}/submit`).expect(400);
+    const r = ok(await as('field.auditor').post('/api/inspections').send({ locationId: westId, staffOnDutyEmployeeId: waEmp, items, comments: 'Limited stocks.' })).body;
+    expect(r.controlNo).toMatch(/^WA-SI-\d{6}$/); expect(r.status).toBe('DRAFT');
+    await as('sales.westave').post('/api/inspections').send({ locationId: westId, items }).expect(403);
+    ok(await as('field.auditor').post(`/api/inspections/${r.id}/submit`));
+    for (const u of ['hr.staff', 'admin', 'head.auditor']) expect(await notified(u, 'STORE_INSPECTION')).toBe(true);
+    await as('sales.dasma').get(`/api/inspections/${r.id}`).expect(403);
+    ok(await as('sales.westave').post(`/api/inspections/${r.id}/acknowledge`));
+    await as('field.auditor').post(`/api/inspections/${r.id}/review`).send({ notes: 'x' }).expect(403);
+    expect(ok(await as('hr.staff').post(`/api/inspections/${r.id}/review`).send({ notes: 'Follow up near-expiry items' })).body.status).toBe('REVIEWED');
+    const f = await as('hr.staff').get(`/api/reports/forms/inspection/${r.id}.pdf`).expect(200); expect(f.text || f.body.toString()).toContain('Store Inspection Report');
+    expect(await prisma.cashFundCheck.count({ where: { inspectionId: r.id } })).toBe(1);
+  });
+
+  it('weekly count sheet: pre-filled, submitted by the associate, auditors notified, no discrepancy case; HR sees who complied', async () => {
+    await as('sales.westave').post('/api/counts').send({ countType: 'AUDIT' }).expect(403);
+    const c = ok(await as('sales.westave').post('/api/counts').send({})).body;
+    expect(c.countType).toBe('WEEKLY'); expect(c.controlNo).toMatch(/^WA-IC-\d{6}$/); expect(c.lines.length).toBeGreaterThan(0);
+    expect(c.lines.every((l: { beginQty: number }) => typeof l.beginQty === 'number')).toBe(true);
+    ok(await as('sales.westave').put(`/api/counts/${c.id}/lines`).send({ lines: c.lines.map((l: { productId: string; systemQty: number }, i: number) => ({ productId: l.productId, actualQty: i === 0 ? l.systemQty + 1 : l.systemQty })) }));
+    const sub = ok(await as('sales.westave').post(`/api/counts/${c.id}/submit`)).body; expect(sub.discrepancyCase).toBeNull();
+    for (const u of ['head.auditor', 'asst.auditor', 'audit.assoc']) expect(await notified(u, 'WEEKLY_COUNT_SUBMITTED')).toBe(true);
+    expect(ok(await as('sales.westave').get('/api/counts/my-weekly')).body.submitted).toBe(true);
+    expect(ok(await as('sales.csr').get('/api/dashboard')).body.weeklyCount.submitted).toBe(false);
+    const grid = ok(await as('hr.staff').get('/api/hr/weekly-counts?weeks=4')).body as { weeks: string[]; rows: { username: string; weeks: { current: boolean; submitted: boolean }[] }[] };
+    expect(grid.rows.find((r) => r.username === 'sales.westave')!.weeks.find((w) => w.current)!.submitted).toBe(true);
+    expect(grid.rows.find((r) => r.username === 'sales.csr')!.weeks.find((w) => w.current)!.submitted).toBe(false);
+    await as('hr.staff').get('/api/counts').expect(403);
+  });
+
+  it('audit count: locked after submission; revision only with Head Auditor approval (Admin notified); branch staff explain a discrepancy — HR notified, Head Auditor decides; red countdown on the dashboard', async () => {
+    const mk = async () => { const c = ok(await as('field.auditor').post('/api/counts').send({ locationId: westId })).body; ok(await as('field.auditor').put(`/api/counts/${c.id}/lines`).send({ lines: c.lines.map((l: { productId: string; systemQty: number }, i: number) => ({ productId: l.productId, actualQty: i === 0 ? l.systemQty - 1 : l.systemQty })) })); return ok(await as('field.auditor').post(`/api/counts/${c.id}/submit`)).body; };
+    const a = await mk(); expect(a.countType).toBe('AUDIT'); expect(a.discrepancyCase.caseNo).toMatch(/^WA-DC-\d{6}$/);
+    await as('field.auditor').put(`/api/counts/${a.id}/lines`).send({ lines: [{ productId: a.lines[0].productId, actualQty: 0 }] }).expect(400);
+    ok(await as('field.auditor').post(`/api/counts/${a.id}/revision`).send({ reason: 'Found 1 box behind the counter', lines: [{ productId: a.lines[0].productId, actualQty: a.lines[0].systemQty }] }));
+    expect(await notified('admin', 'COUNT_REVISION_REQUESTED')).toBe(true);
+    const rq = (ok(await as('head.auditor').get('/api/approvals/inbox?type=COUNT_REVISION')).body.items as { id: string; documentId: string }[]).find((i) => i.documentId === a.id)!;
+    await as('admin').post(`/api/approvals/${rq.id}/decide`).send({ decision: 'APPROVE' }).expect(403);
+    ok(await as('head.auditor').post(`/api/approvals/${rq.id}/decide`).send({ decision: 'APPROVE' }));
+    expect((await prisma.discrepancyCase.findUniqueOrThrow({ where: { countDocId: a.id } })).status).toBe('RESOLVED');
+    const b = await mk();
+    const dash = ok(await as('sales.westave').get('/api/dashboard')).body; const dl = dash.discrepancyDeadlines.find((x: { caseId: string }) => x.caseId === b.discrepancyCase.id);
+    expect(dl.daysLeft).toBeGreaterThan(0); expect(dl.shortItems).toBe(1);
+    ok(await as('sales.westave').post(`/api/discrepancies/${b.discrepancyCase.id}/explain`).send({ explanation: 'Sold one unit during the count; DR was keyed late' }));
+    expect(await notified('hr.staff', 'DISCREPANCY_EXPLAINED')).toBe(true);
+    const ex = (ok(await as('head.auditor').get('/api/approvals/inbox?type=DISCREPANCY_EXPLANATION')).body.items as { id: string; documentId: string }[]).find((i) => i.documentId === b.discrepancyCase.id)!;
+    await as('hr.staff').post(`/api/approvals/${ex.id}/decide`).send({ decision: 'APPROVE' }).expect(403);
+    ok(await as('head.auditor').post(`/api/approvals/${ex.id}/decide`).send({ decision: 'APPROVE' }));
+    expect((await prisma.discrepancyCase.findUniqueOrThrow({ where: { id: b.discrepancyCase.id } })).status).toBe('RESOLVED');
+  });
+
+  it('Accounting: inventory cost movements per day / month and direct cost from sales; branch staff and Field Auditor get 403', async () => {
+    const m = ok(await as('acct.head').get('/api/reports/inventory-cost?from=2026-09-01&to=2026-09-30&groupBy=month')).body;
+    expect(m.rows.length).toBeGreaterThan(0); expect(Object.keys(m.rows[0])).toEqual(expect.arrayContaining(['beginning', 'transferIn', 'pullOut', 'directCostOfSales', 'ending']));
+    const d = ok(await as('acct.assoc').get(`/api/reports/inventory-cost?from=2026-09-01&to=2026-09-30&groupBy=day&locationId=${westId}`)).body; expect(d.rows.every((r: { branch: string }) => r.branch === 'West Ave')).toBe(true);
+    await as('acct.assoc').get('/api/reports/inventory-cost.xlsx?from=2026-09-01&to=2026-09-30&groupBy=day').expect(200);
+    for (const u of ['sales.westave', 'field.auditor']) await as(u).get('/api/reports/inventory-cost?from=2026-09-01&to=2026-09-30').expect(403);
+    const dc = ok(await as('acct.assoc').get('/api/reports/direct-cost?year=2026&month=9')).body; expect(dc.rows.length).toBeGreaterThan(0);
+  });
+});
+
+describe('field auditor: inventory of every branch and franchise, no sales, no cost', () => {
+  it('sees stock at any location including franchises, never cost; cannot sell or open sales reports', async () => {
+    const locs = ok(await as('admin').get('/api/locations')).body as { id: string; code: string }[];
+    const mayon = locs.find((l) => l.code === 'MAYON')!.id; const dasma = locs.find((l) => l.code === 'DASMA')!.id; const wh = locs.find((l) => l.code === 'WH')!.id;
+    for (const id of [mayon, dasma, wh]) { const r = ok(await as('field.auditor').get(`/api/stock/on-hand?locationId=${id}`)).body; expect(has(r, /unitCost|valueAtCost/)).toBe(false); }
+    const di = ok(await as('field.auditor').get(`/api/stock/daily-inventory?locationId=${wh}&from=2026-09-01&to=2026-09-30`)).body; expect(has(di, /Cost/)).toBe(false);
+    await as('field.auditor').post('/api/sales').send({ locationId: dasma, channel: 'WALK_IN', paymentMode: 'CASH', drSiNo: `FA-${run}`, lines: [] }).expect(403);
+    await as('field.auditor').get(`/api/reports/daily-sales?locationId=${dasma}`).expect(403);
+    await as('field.auditor').get('/api/sales').expect(403);
+    const me = ok(await as('field.auditor').get('/api/auth/me')).body; expect(me.locationScoped).toBe(false); expect(me.permissions).not.toContain('sale.create');
   });
 });
 

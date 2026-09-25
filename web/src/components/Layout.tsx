@@ -11,12 +11,15 @@ interface NavItem { to: string; label: string; any?: string[]; hideFor?: string[
 const NAV: { group: string; items: NavItem[] }[] = [
   { group: 'Work', items: [
     { to: '/', label: 'Dashboard' },
-    { to: '/approvals', label: 'Approvals', any: ['approval.act.COST_ON_RECEIVING', 'approval.act.TRANSFER_INTERNAL', 'approval.act.SPECIAL_PRICE', 'approval.act.POST_CLOSE_EDIT', 'approval.act.POST_CLOSE_EDIT_FRANCHISE', 'approval.act.WRITEOFF', 'approval.act.PRICE_CHANGE', 'approval.act.DISCREPANCY_RESOLUTION', 'approval.act.PERIOD_LOCK', 'approval.act.WAREHOUSE_EDIT', 'approval.act.TRANSFER_TO_FRANCHISE', 'approval.act.EDIT_REQUEST', 'approval.act.CONSIGNMENT_OUT'] },
+    { to: '/approvals', label: 'Approvals', any: ['approval.act.COST_ON_RECEIVING', 'approval.act.TRANSFER_INTERNAL', 'approval.act.SPECIAL_PRICE', 'approval.act.POST_CLOSE_EDIT', 'approval.act.POST_CLOSE_EDIT_FRANCHISE', 'approval.act.WRITEOFF', 'approval.act.PRICE_CHANGE', 'approval.act.DISCREPANCY_RESOLUTION', 'approval.act.PERIOD_LOCK', 'approval.act.WAREHOUSE_EDIT', 'approval.act.TRANSFER_TO_FRANCHISE', 'approval.act.EDIT_REQUEST', 'approval.act.CONSIGNMENT_OUT', 'approval.act.AR_PAYMENT', 'approval.act.COUNT_REVISION', 'approval.act.DISCREPANCY_EXPLANATION', 'approval.act.WRITEOFF'] },
     { to: '/sales/new', label: 'New Sale', any: ['sale.create'] },
     { to: '/sales', label: 'Sales', any: ['sale.create', 'report.sales.own', 'report.sales.all'] },
     { to: '/ar', label: 'AR / Credit', any: ['ar.view'] },
     { to: '/expenses', label: 'Expenses', any: ['expense.create.branch', 'expense.create.main', 'expense.view'] },
     { to: '/closing', label: 'Daily Close', any: ['sale.create', 'report.sales.own', 'report.sales.all'] },
+    { to: '/cash-fund', label: 'Cash Fund', any: ['cashfund.view.all', 'cashfund.use', 'cashfund.manage', 'cashfund.check'] },
+    { to: '/inspections', label: 'Store Inspections', any: ['inspection.create', 'inspection.view', 'inspection.review'] },
+    { to: '/my-hr', label: 'My Pay & Charges', hideFor: ['ADMIN'] },
   ] },
   { group: 'Inventory', items: [
     { to: '/stock', label: 'Stock on Hand', any: ['report.inventory.own', 'report.inventory.all'] },
@@ -37,6 +40,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
   { group: 'Reports', items: [
     { to: '/reports/daily-sales', label: 'Daily Sales Report', any: ['report.sales.own', 'report.sales.all'] },
     { to: '/reports/inventory', label: 'Inventory Reports', any: ['report.inventory.own', 'report.inventory.all'] },
+    { to: '/reports/customers', label: 'Customer Contacts', any: ['report.sales.own', 'report.sales.all'] },
     { to: '/franchise', label: 'Franchise Portal', any: ['franchise.portal'] },
   ] },
   { group: 'Accounting', items: [
@@ -45,10 +49,12 @@ const NAV: { group: string; items: NavItem[] }[] = [
     { to: '/accounting/trial-balance', label: 'Trial Balance', any: ['gl.view'] },
     { to: '/accounting/statements', label: 'Financial Statements', any: ['fs.income_statement', 'fs.balance_sheet'] },
     { to: '/accounting/periods', label: 'Periods & Opening', any: ['gl.view'] },
+    { to: '/accounting/inventory-cost', label: 'Inventory & Direct Cost', any: ['gl.view'] },
   ] },
   { group: 'HR', items: [
     { to: '/charge-forms', label: 'Charge Forms', any: ['charge_form.finalize', 'discrepancy.view'] },
-    { to: '/payroll', label: 'Payroll', any: ['payroll.view.summary', 'payroll.view.detail', 'payroll.edit'] },
+    { to: '/payroll', label: 'Payroll & Contributions', any: ['payroll.view.summary', 'payroll.view.detail', 'payroll.edit'] },
+    { to: '/hr/weekly-counts', label: 'Weekly Count Compliance', any: ['employee.manage', 'discrepancy.resolve', 'discrepancy.view'] },
   ] },
   { group: 'Admin', items: [
     { to: '/users', label: 'Users & Roles', any: ['user.manage'] },

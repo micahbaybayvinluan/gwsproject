@@ -1,6 +1,6 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { PaymentMode, Prisma, SalesChannel } from '@prisma/client';
-import { PrismaService } from '../common/prisma.service';
+import { PrismaService, Tx } from '../common/prisma.service';
 import { SequenceService } from '../common/sequence.service';
 import { StockService } from '../stock/stock.service';
 import { ApprovalsService } from '../approvals/approvals.service';
@@ -20,7 +20,7 @@ import { ScopeService } from '../common/scope.service';
 
 export interface SalesLineInput { productId: string; qty: number; unitPrice?: number | null; batchId?: string | null; isFreebie?: boolean; lineRemarks?: string; priceTier?: string }
 export interface SalesInput {
-  locationId?: string; docDate?: string; channel: SalesChannel; channelSub?: string | null; customerId?: string | null; agentId?: string | null; riderId?: string | null; customerName?: string | null; drSiNo: string;
+  locationId?: string; docDate?: string; channel: SalesChannel; channelSub?: string | null; customerId?: string | null; agentId?: string | null; riderId?: string | null; customerName?: string | null; customerPhone?: string | null; customerEmail?: string | null; drSiNo: string;
   paymentMode: PaymentMode; paymentAccountId?: string | null; proofOfPaymentAttachmentId?: string | null; cardMid?: string; cardSlipNo?: string; cardApprovalCode?: string; cardBatchNo?: string;
   deliveryFee?: number; riderIncentive?: number; shippingFee?: number; shippingExpense?: number; marketplaceCharges?: number; dueDate?: string | null; pdcBank?: string; pdcChequeNo?: string; pdcDate?: string | null; notes?: string;
   lines: SalesLineInput[];
@@ -33,7 +33,10 @@ export const TIER_BY_CHANNEL: Record<SalesChannel, string> = { WALK_IN: 'RETAIL'
 export class SalesService implements OnModuleInit {
   constructor(private prisma: PrismaService, private seq: SequenceService, private stock: StockService, private approvals: ApprovalsService, private master: MasterService, private notify: NotificationsService, private audit: AuditService, private settings: SettingsService, private attachments: AttachmentsService, private posting: PostingService, private closing: ClosingService, private scope: ScopeService) {}
 
-  onModuleInit() { this.approvals.register('SPECIAL_PRICE', (req, outcome) => this.onSpecialPriceDecision(req.documentId, outcome)); }
+  onModuleInit() {
+    this.approvals.register('SPECIAL_PRICE', (req, outcome) => this.onSpecialPriceDecision(req.documentId, outcome));
+    this.approvals.register('AR_PAYMENT', (req, outcome, actor) => this.onPaymentDecision(req.documentId, outcome, actor?.id ?? null));
+  }
 
   private include = { location: { select: { id: true, code: true, name: true, type: true } }, customer: { select: { id: true, code: true, name: true, type: true } }, agent: { select: { id: true, name: true } }, rider: { select: { id: true, name: true } }, paymentAccount: { select: { id: true, title: true, paymentAccountType: true } }, lines: { include: { product: { select: { id: true, sku: true, name: true, category: { select: { accountingClass: true, name: true } } } }, batch: { select: { id: true, batchNo: true, expiryDate: true, isConsignmentIn: true } } } }, payments: { include: { payment: true } } } as const;
 
@@ -67,7 +70,7 @@ export class SalesService implements OnModuleInit {
     const defaultTier = input.agentId && input.channel !== 'AGENT' ? 'AGENT' : TIER_BY_CHANNEL[input.channel];
 
     const doc = await this.prisma.db.$transaction(async (tx) => {
-      const controlNo = await this.seq.next(tx, 'DR', { locationId, locationCode: loc.code });
+      const controlNo = await this.seq.form(tx, 'DR', locationId);
       const lineRows: Prisma.SalesLineUncheckedCreateWithoutDocInput[] = [];
       let productTotal = ZERO; let special = false;
       for (const l of input.lines) {
@@ -110,7 +113,7 @@ export class SalesService implements OnModuleInit {
       const grandTotal = round2(productTotal.plus(deliveryFee).plus(shippingFee));
       const created = await tx.salesDoc.create({
         data: {
-          controlNo, docDate, locationId, channel: input.channel, channelSub: input.channelSub ?? null, customerId: input.customerId ?? null, agentId: input.agentId ?? null, riderId: input.riderId ?? null, customerName: input.customerName ?? null, drSiNo: input.drSiNo.trim(),
+          controlNo, docDate, locationId, channel: input.channel, channelSub: input.channelSub ?? null, customerId: input.customerId ?? null, agentId: input.agentId ?? null, riderId: input.riderId ?? null, customerName: input.customerName ?? null, customerPhone: input.customerPhone || null, customerEmail: input.customerEmail || null, drSiNo: input.drSiNo.trim(),
           paymentMode: input.paymentMode, paymentAccountId: input.paymentAccountId ?? null, proofOfPaymentAttachmentId: input.proofOfPaymentAttachmentId ?? null, cardMid: input.cardMid, cardSlipNo: input.cardSlipNo, cardApprovalCode: input.cardApprovalCode, cardBatchNo: input.cardBatchNo,
           deliveryFee: deliveryFee.toFixed(2), riderIncentive: D(input.riderIncentive ?? 0).toFixed(2), shippingFee: shippingFee.toFixed(2), shippingExpense: D(input.shippingExpense ?? 0).toFixed(2), marketplaceCharges: D(input.marketplaceCharges ?? 0).toFixed(2),
           productTotal: productTotal.toFixed(2), grandTotal: grandTotal.toFixed(2), amountPaid: input.paymentMode === 'AR_PDC' ? '0.00' : grandTotal.toFixed(2),
@@ -185,40 +188,84 @@ export class SalesService implements OnModuleInit {
       .filter((r) => r.balance.gt(0) && (!q.overdueOnly || r.daysOverdue > 0));
   }
 
+  /**
+   * AR collection (owner request 2026-09-26). Accounting (ar.approve) records a payment and it applies at once; the branch is notified.
+   * Anyone else (a sales associate, any day) records it as PENDING: Accounting Associate or Head approves before the invoices are
+   * credited. Franchise AR stays with the franchise and applies at once.
+   */
   async recordPayment(input: { salesDocIds: string[]; amount: number; discount?: number; paymentMode: PaymentMode; paymentAccountId?: string | null; proofAttachmentId?: string | null; receivedAt?: string; notes?: string }, user: SessionUser) {
     if (!input.salesDocIds.length) throw new BadRequestException('Pick at least one invoice');
     if ((input.paymentMode === 'ONLINE' || input.paymentMode === 'CREDIT_CARD') && (!input.paymentAccountId || !input.proofAttachmentId)) throw new BadRequestException('Online/card collections need a payment account and proof upload');
-    const docs = await this.prisma.db.salesDoc.findMany({ where: { id: { in: input.salesDocIds }, voidedAt: null, locationId: this.scope.locationFilter(user) as never }, include: { customer: true, agent: true } });
-    if (docs.length !== input.salesDocIds.length) throw new BadRequestException('Unknown invoice');
-    for (const d of docs) if (user.locationScoped && !user.locationIds.includes(d.locationId)) throw new ForbiddenException();
-    const customerIds = new Set(docs.map((d) => d.customerId ?? d.agentId));
-    if (customerIds.size > 1) throw new BadRequestException('One payment must belong to one customer');
-    let remaining = D(input.amount).plus(input.discount ?? 0);
-    const open = sum(docs.map((d) => d.grandTotal.minus(d.amountPaid)));
-    if (remaining.gt(open)) throw new BadRequestException(`Payment ${remaining} exceeds open balance ${open}`);
+    const docs = await this.openInvoices(input.salesDocIds, user);
+    const total = D(input.amount).plus(input.discount ?? 0);
+    const pending = await this.pendingFor(input.salesDocIds);
+    const open = sum(docs.map((d) => d.grandTotal.minus(d.amountPaid))).minus(pending);
+    if (total.gt(open)) throw new BadRequestException(`Payment ${total} exceeds open balance ${open}${pending.gt(0) ? ` (after ${pending} already waiting for approval)` : ''}`);
     const receivedAt = input.receivedAt ? new Date(input.receivedAt) : new Date();
+    const loc = await this.prisma.db.location.findUniqueOrThrow({ where: { id: docs[0].locationId } });
+    const direct = user.permissions.has('ar.approve') || loc.type === 'FRANCHISE';
     const payment = await this.prisma.db.$transaction(async (tx) => {
-      const creditNoteNo = await this.seq.next(tx, 'CN', { prefix: 'CN', pad: 6 });
-      const p = await tx.payment.create({ data: { creditNoteNo, customerId: docs[0].customerId, amount: D(input.amount).toFixed(2), discount: D(input.discount ?? 0).toFixed(2), paymentMode: input.paymentMode, paymentAccountId: input.paymentAccountId ?? null, proofAttachmentId: input.proofAttachmentId ?? null, receivedAt, businessDate: toDateOnly(receivedAt), notes: input.notes, createdBy: user.id } });
-      for (const d of docs.sort((a, b) => a.docDate.getTime() - b.docDate.getTime())) {
-        if (remaining.lte(0)) break;
-        const bal = d.grandTotal.minus(d.amountPaid);
-        const alloc = bal.lt(remaining) ? bal : remaining;
-        await tx.paymentAllocation.create({ data: { paymentId: p.id, salesDocId: d.id, amount: alloc.toFixed(2) } });
-        await tx.salesDoc.update({ where: { id: d.id }, data: { amountPaid: { increment: alloc.toFixed(2) } } });
-        remaining = remaining.minus(alloc);
-      }
-      const cp = docs[0].customer ? { type: docs[0].customer.type, id: docs[0].customer.id } : docs[0].agent ? { type: 'AGENT', id: docs[0].agent.id } : null;
-      if (input.paymentAccountId || input.paymentMode === 'CASH') {
-        await this.posting.post(tx, { type: 'Payment', id: p.id, date: toDateOnly(receivedAt), name: docs[0].customer?.name, createdBy: user.id }, (r) => r4Collection(r, { locationId: docs[0].locationId, counterparty: cp, amount: input.amount, discount: input.discount ?? 0, paymentAccountId: input.paymentAccountId ?? r.branch('CASH_ON_HAND', docs[0].locationId), creditNoteNo }));
-      }
+      const creditNoteNo = await this.seq.form(tx, 'CN', loc.id);
+      const p = await tx.payment.create({ data: { creditNoteNo, customerId: docs[0].customerId, amount: D(input.amount).toFixed(2), discount: D(input.discount ?? 0).toFixed(2), paymentMode: input.paymentMode, paymentAccountId: input.paymentAccountId ?? null, proofAttachmentId: input.proofAttachmentId ?? null, receivedAt, businessDate: toDateOnly(receivedAt), notes: input.notes, createdBy: user.id, status: direct ? 'POSTED' : 'PENDING', requestedSalesDocIds: docs.map((d) => d.id), locationId: loc.id } });
+      if (direct) await this.applyPayment(tx, p, docs, user.id);
       return p;
     });
-    await this.audit.log({ action: 'CREATE', entityType: 'Payment', entityId: payment.id, after: payment });
+    await this.audit.log({ action: direct ? 'CREATE' : 'CREATE_PENDING', entityType: 'Payment', entityId: payment.id, after: payment });
+    const who = docs[0].customer?.name ?? docs[0].agent?.name ?? docs[0].customerName ?? '';
+    if (direct) {
+      await this.notify.toLocation(loc.id, { type: 'AR_PAYMENT_RECORDED', title: `AR payment ${payment.creditNoteNo} recorded by ${user.fullName}: ₱${payment.amount} from ${who}`, body: `Applied to ${docs.map((d) => d.drSiNo).join(', ')}`, link: '/ar' });
+    } else {
+      const req = await this.approvals.request({ type: 'AR_PAYMENT', documentType: 'Payment', documentId: payment.id, requestedBy: user.id, summary: { controlNo: payment.creditNoteNo, locationId: loc.id, locationName: loc.name, customer: who, total: payment.amount, discount: payment.discount, paymentMode: payment.paymentMode, receivedAt: receivedAt.toISOString().slice(0, 10), invoices: docs.map((d) => d.drSiNo).join(', '), enteredBy: user.fullName } });
+      await this.prisma.db.payment.update({ where: { id: payment.id }, data: { approvalRequestId: req.id } });
+    }
     return this.prisma.db.payment.findUniqueOrThrow({ where: { id: payment.id }, include: { allocations: { include: { salesDoc: { select: { drSiNo: true, grandTotal: true, amountPaid: true } } } }, customer: true } });
   }
+
+  private async openInvoices(ids: string[], user: SessionUser | null) {
+    const docs = await this.prisma.db.salesDoc.findMany({ where: { id: { in: ids }, voidedAt: null, ...(user ? { locationId: this.scope.locationFilter(user) as never } : {}) }, include: { customer: true, agent: true } });
+    if (docs.length !== ids.length) throw new BadRequestException('Unknown invoice');
+    if (user) for (const d of docs) if (user.locationScoped && !user.locationIds.includes(d.locationId)) throw new ForbiddenException();
+    if (new Set(docs.map((d) => d.customerId ?? d.agentId)).size > 1) throw new BadRequestException('One payment must belong to one customer');
+    return docs;
+  }
+  private async pendingFor(docIds: string[], exceptPaymentId?: string) {
+    const rows = await this.prisma.db.payment.findMany({ where: { status: 'PENDING', voidedAt: null, requestedSalesDocIds: { hasSome: docIds }, id: exceptPaymentId ? { not: exceptPaymentId } : undefined }, select: { amount: true, discount: true } });
+    return sum(rows.map((r) => D(r.amount).plus(r.discount)));
+  }
+  /** Allocates oldest invoice first and posts R4. */
+  private async applyPayment(tx: Tx, p: { id: string; amount: Prisma.Decimal; discount: Prisma.Decimal; paymentMode: PaymentMode; paymentAccountId: string | null; receivedAt: Date; creditNoteNo: string }, docs: Awaited<ReturnType<SalesService['openInvoices']>>, actorId: string | null) {
+    let remaining = D(p.amount).plus(p.discount);
+    for (const d of [...docs].sort((a, b) => a.docDate.getTime() - b.docDate.getTime())) {
+      if (remaining.lte(0)) break;
+      const fresh = await tx.salesDoc.findUniqueOrThrow({ where: { id: d.id }, select: { grandTotal: true, amountPaid: true } });
+      const bal = fresh.grandTotal.minus(fresh.amountPaid);
+      const alloc = bal.lt(remaining) ? bal : remaining;
+      if (alloc.lte(0)) continue;
+      await tx.paymentAllocation.create({ data: { paymentId: p.id, salesDocId: d.id, amount: alloc.toFixed(2) } });
+      await tx.salesDoc.update({ where: { id: d.id }, data: { amountPaid: { increment: alloc.toFixed(2) } } });
+      remaining = remaining.minus(alloc);
+    }
+    if (remaining.gt(0)) throw new BadRequestException(`Payment exceeds the open balance by ${remaining}`);
+    const cp = docs[0].customer ? { type: docs[0].customer.type, id: docs[0].customer.id } : docs[0].agent ? { type: 'AGENT', id: docs[0].agent.id } : null;
+    if (p.paymentAccountId || p.paymentMode === 'CASH') {
+      await this.posting.post(tx, { type: 'Payment', id: p.id, date: toDateOnly(p.receivedAt), name: docs[0].customer?.name, createdBy: actorId }, (r) => r4Collection(r, { locationId: docs[0].locationId, counterparty: cp, amount: p.amount, discount: p.discount, paymentAccountId: p.paymentAccountId ?? r.branch('CASH_ON_HAND', docs[0].locationId), creditNoteNo: p.creditNoteNo }));
+    }
+  }
+  private async onPaymentDecision(paymentId: string, outcome: 'APPROVED' | 'REJECTED', actorId: string | null) {
+    await requestContext.runSystem(async () => {
+      const p = await this.prisma.db.payment.findUniqueOrThrow({ where: { id: paymentId } });
+      if (p.status !== 'PENDING') return;
+      if (outcome === 'REJECTED') { await this.prisma.db.payment.update({ where: { id: paymentId }, data: { status: 'REJECTED' } }); }
+      else {
+        const docs = await this.openInvoices(p.requestedSalesDocIds, null);
+        await this.prisma.db.$transaction(async (tx) => { await this.applyPayment(tx, p, docs, actorId); await tx.payment.update({ where: { id: paymentId }, data: { status: 'POSTED' } }); });
+      }
+      if (p.locationId) await this.notify.toLocation(p.locationId, { type: 'AR_PAYMENT_DECIDED', title: `AR payment ${p.creditNoteNo} (₱${p.amount}) ${outcome === 'APPROVED' ? 'approved and applied' : 'rejected'} by Accounting`, link: '/ar' });
+    });
+  }
+
   creditNotes(user: SessionUser, q: { from?: string; to?: string }) {
-    return this.prisma.db.payment.findMany({ where: { voidedAt: null, businessDate: q.from || q.to ? { gte: q.from ? toDateOnly(q.from) : undefined, lte: q.to ? toDateOnly(q.to) : undefined } : undefined, allocations: user.locationScoped ? { some: { salesDoc: { locationId: { in: user.locationIds } } } } : undefined }, include: { customer: true, allocations: { include: { salesDoc: { select: { drSiNo: true, locationId: true } } } } }, orderBy: { receivedAt: 'desc' } });
+    return this.prisma.db.payment.findMany({ where: { voidedAt: null, businessDate: q.from || q.to ? { gte: q.from ? toDateOnly(q.from) : undefined, lte: q.to ? toDateOnly(q.to) : undefined } : undefined, ...(user.locationScoped ? { OR: [{ allocations: { some: { salesDoc: { locationId: { in: user.locationIds } } } } }, { locationId: { in: user.locationIds } }] } : {}) }, include: { customer: true, allocations: { include: { salesDoc: { select: { drSiNo: true, locationId: true } } } } }, orderBy: { receivedAt: 'desc' } });
   }
 
   /** §8.2 Agent sales report per agent per period with totals by payment mode. */
@@ -262,7 +309,7 @@ export class SalesService implements OnModuleInit {
     const periodTo = toDateOnly(input.periodTo);
     const result = await this.prisma.db.$transaction(async (tx) => {
       const report = await tx.consignmentSaleReport.create({ data: { agreementId: ag.id, periodFrom: toDateOnly(input.periodFrom), periodTo, notes: input.notes, createdBy: user.id, lines: { create: input.lines } } });
-      const controlNo = await this.seq.next(tx, 'DR', { locationId: wh.id, locationCode: wh.code });
+      const controlNo = await this.seq.form(tx, 'DR', wh.id);
       const lineRows: Prisma.SalesLineUncheckedCreateWithoutDocInput[] = []; let total = ZERO; const costLines: { accountingClass: string; qty: number; unitCost: Prisma.Decimal }[] = [];
       for (const l of input.lines) {
         const picks = await this.stock.pickFefo(tx, consignee.id, l.productId, l.qty, { allowExpired: true });

@@ -24,6 +24,10 @@ export const APPROVAL_TYPES = [
   'PERIOD_UNLOCK',
   'CONSIGNMENT_OUT',
   'WAREHOUSE_EDIT',
+  'COUNT_REVISION',
+  'AR_PAYMENT',
+  'DISCREPANCY_EXPLANATION',
+  'AUDIT_REVISION',
 ] as const;
 export type ApprovalType = (typeof APPROVAL_TYPES)[number];
 
@@ -35,9 +39,9 @@ const BASE_KEYS = [
   'receiving.create', 'receiving.approve_cost', 'warehouse.edit_others',
   'transfer.create', 'transfer.confirm', 'transfer.approve.internal', 'transfer.approve.franchise', 'transfer.resolve_discrepancy',
   'sale.create', 'sale.edit.sameday', 'sale.edit.postclose', 'sale.special_price.approve', 'sale.void',
-  'ar.view', 'ar.collect',
+  'ar.view', 'ar.collect', 'ar.approve',
   'expense.create.branch', 'expense.create.main', 'expense.view',
-  'count.create', 'discrepancy.view', 'discrepancy.resolve',
+  'count.create', 'discrepancy.view', 'discrepancy.resolve', 'discrepancy.explain',
   'writeoff.create', 'writeoff.approve',
   'consignment.manage',
   'report.sales.own', 'report.sales.all', 'report.inventory.own', 'report.inventory.all', 'report.margin',
@@ -48,6 +52,14 @@ const BASE_KEYS = [
   'franchise.portal', 'franchise.expense', 'franchise.pnl',
   'dashboard.view',
   'notification.view',
+  // branch cash fund (imprest): view all balances, set up / change the fund, spend & replenish at own branch, count & confirm in the store
+  'cashfund.view.all', 'cashfund.manage', 'cashfund.use', 'cashfund.check',
+  // store inspection report (Field Auditor), HR review
+  'inspection.create', 'inspection.view', 'inspection.review',
+  // charge a cash shortage to staff; record SSS / PhilHealth / Pag-IBIG remittances
+  'charge.assign', 'contribution.remit',
+  // corrections of reports: request (Audit Associate) and the per-staff revision log
+  'revision.request', 'revision.view',
 ] as const;
 
 export const PERMISSION_KEYS: readonly string[] = [
@@ -65,7 +77,7 @@ export type RoleKey = (typeof ROLE_KEYS)[number];
 
 /** Roles whose data access is limited to their assigned location(s) (§5.4). */
 export const LOCATION_SCOPED_ROLES: RoleKey[] = [
-  'SALES_ASSOCIATE', 'FRANCHISE_SALES_ASSOCIATE', 'FRANCHISE_OWNER', 'WAREHOUSE_IN_CHARGE', 'WAREHOUSE_ASSOCIATE', 'FIELD_AUDITOR',
+  'SALES_ASSOCIATE', 'FRANCHISE_SALES_ASSOCIATE', 'FRANCHISE_OWNER', 'WAREHOUSE_IN_CHARGE', 'WAREHOUSE_ASSOCIATE',
 ];
 /** Roles that must have exactly one location assignment. */
 export const SINGLE_LOCATION_ROLES: RoleKey[] = ['SALES_ASSOCIATE', 'FRANCHISE_SALES_ASSOCIATE', 'FRANCHISE_OWNER'];
@@ -106,7 +118,7 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
     description: 'Read-only everything incl. balance sheet, payroll, supplier names. No edits, no approvals.',
     permissions: [
       ...READ_ALL, ...COST_BUNDLE, 'gl.view', 'fs.income_statement', 'fs.balance_sheet',
-      'payroll.view.summary', 'payroll.view.detail', 'audit_log.view',
+      'payroll.view.summary', 'payroll.view.detail', 'audit_log.view', 'cashfund.view.all', 'inspection.view', 'revision.view',
     ],
   },
   {
@@ -118,7 +130,9 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
       'receiving.create', 'receiving.approve_cost', 'transfer.create', 'transfer.confirm', 'transfer.approve.internal', 'transfer.resolve_discrepancy',
       'sale.create', 'sale.edit.sameday', 'sale.edit.postclose', 'sale.void', 'ar.collect', 'expense.create.branch',
       'count.create', 'discrepancy.resolve', 'writeoff.create', 'writeoff.approve', 'consignment.manage', 'gl.view', 'audit_log.view',
-      ...approvals('COST_ON_RECEIVING', 'TRANSFER_INTERNAL', 'POST_CLOSE_EDIT', 'WRITEOFF', 'DISCREPANCY_RESOLUTION', 'EDIT_REQUEST'),
+      'cashfund.view.all', 'cashfund.check', 'inspection.view', 'inspection.create', 'charge.assign',
+      ...approvals('COST_ON_RECEIVING', 'TRANSFER_INTERNAL', 'POST_CLOSE_EDIT', 'WRITEOFF', 'DISCREPANCY_RESOLUTION', 'EDIT_REQUEST', 'COUNT_REVISION', 'DISCREPANCY_EXPLANATION', 'AUDIT_REVISION'),
+      'revision.view',
     ],
   },
   {
@@ -128,14 +142,15 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
     permissions: [
       ...READ_ALL, ...COST_BUNDLE, 'receiving.create', 'transfer.create', 'transfer.confirm', 'transfer.approve.internal',
       'sale.create', 'sale.edit.sameday', 'ar.collect', 'expense.create.branch', 'count.create', 'writeoff.create', 'gl.view',
+      'cashfund.view.all', 'cashfund.check', 'inspection.view', 'inspection.create', 'revision.view',
       ...approvals('TRANSFER_INTERNAL', 'POST_CLOSE_EDIT', 'EDIT_REQUEST'),
     ],
   },
   {
     key: 'AUDIT_ASSOCIATE',
     name: 'Audit Associate',
-    description: 'Views branch reports. Can request edits (routed to Admin + Head + Asst). No cost.',
-    permissions: [...READ_ALL, 'price.view.RETAIL'],
+    description: 'Views branch reports including supplier cost. Requests corrections (revisions) of branch documents; the Head Auditor approves; the staff involved are notified and the revision is logged.',
+    permissions: [...READ_ALL, ...COST_BUNDLE, 'inspection.view', 'revision.request', 'revision.view'],
   },
   {
     key: 'WAREHOUSE_IN_CHARGE',
@@ -143,14 +158,14 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
     description: 'Inputs warehouse receiving, transfers (to any branch or franchise), counts and write-offs through the same approvals as the associate; costs are entered and approved by the Head Auditor. Can edit an associate\'s entry, which takes effect only after that associate accepts it. No cost.',
     permissions: [
       'product.view', 'supplier.view.code', 'location.view.own', 'receiving.create', 'transfer.create', 'transfer.confirm', 'warehouse.edit_others', 'approval.act.WAREHOUSE_EDIT',
-      'count.create', 'writeoff.create', 'report.inventory.own', 'dashboard.view', 'notification.view', 'price.view.RETAIL',
+      'count.create', 'writeoff.create', 'report.inventory.own', 'dashboard.view', 'notification.view', 'price.view.RETAIL', 'cashfund.use', 'discrepancy.explain',
     ],
   },
   {
     key: 'WAREHOUSE_ASSOCIATE',
     name: 'Warehouse Associate',
     description: 'Creates receiving docs (qty, expiry, batch) and transfers from the warehouse to any branch or franchise. Accepts or rejects the In-Charge\'s edits to own entries. Cost hidden.',
-    permissions: ['product.view', 'supplier.view.code', 'location.view.own', 'receiving.create', 'transfer.create', 'transfer.confirm', 'report.inventory.own', 'dashboard.view', 'notification.view', 'approval.act.WAREHOUSE_EDIT'],
+    permissions: ['product.view', 'supplier.view.code', 'location.view.own', 'receiving.create', 'transfer.create', 'transfer.confirm', 'report.inventory.own', 'dashboard.view', 'notification.view', 'approval.act.WAREHOUSE_EDIT', 'discrepancy.explain'],
   },
   {
     key: 'SALES_ASSOCIATE',
@@ -159,7 +174,7 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
     permissions: [
       'product.view', 'location.view.own', 'price.view.RETAIL', 'price.view.DEALER', 'price.view.AGENT',
       'transfer.create', 'transfer.confirm', 'sale.create', 'sale.edit.sameday', 'ar.view', 'ar.collect',
-      'expense.create.branch', 'expense.view', 'count.create', 'report.sales.own', 'report.inventory.own', 'dashboard.view', 'notification.view',
+      'expense.create.branch', 'expense.view', 'count.create', 'report.sales.own', 'report.inventory.own', 'dashboard.view', 'notification.view', 'writeoff.create', 'cashfund.use', 'discrepancy.explain',
     ],
   },
   {
@@ -190,26 +205,27 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
     description: 'Ledger, vouchers, main expenses, payroll (per employee), closes payroll. TB and ledgers; no IS/BS pages.',
     permissions: [
       ...READ_ALL, ...COST_BUNDLE, ...ACCOUNTING_BASE, 'gl.period.lock', 'gl.beginning_balance',
-      'payroll.view.summary', 'payroll.view.detail', 'payroll.close', 'expense.view',
+      'payroll.view.summary', 'payroll.view.detail', 'payroll.close', 'expense.view', 'cashfund.view.all', 'cashfund.manage', 'contribution.remit',
+      'ar.collect', 'ar.approve', ...approvals('AR_PAYMENT'),
     ],
   },
   {
     key: 'ACCOUNTING_ASSOCIATE',
     name: 'Accounting Associate',
     description: 'Ledger, vouchers, main expenses. Payroll totals only.',
-    permissions: [...READ_ALL, ...COST_BUNDLE, ...ACCOUNTING_BASE, 'payroll.view.summary'],
+    permissions: [...READ_ALL, ...COST_BUNDLE, ...ACCOUNTING_BASE, 'payroll.view.summary', 'cashfund.view.all', 'ar.collect', 'ar.approve', ...approvals('AR_PAYMENT')],
   },
   {
     key: 'HR_STAFF',
     name: 'HR Staff',
     description: 'Payroll runs, employee master, loans/advances, charge-form allocation. Zero access to inventory/sales.',
-    permissions: ['payroll.view.summary', 'payroll.view.detail', 'payroll.edit', 'employee.manage', 'charge_form.finalize', 'dashboard.view', 'notification.view'],
+    permissions: ['payroll.view.summary', 'payroll.view.detail', 'payroll.edit', 'employee.manage', 'charge_form.finalize', 'dashboard.view', 'notification.view', 'inspection.view', 'inspection.review', 'contribution.remit', 'revision.view'],
   },
   {
     key: 'FIELD_AUDITOR',
     name: 'Field Auditor',
-    description: 'Read-only sales & inventory for assigned branches; creates Actual Inventory Count.',
-    permissions: ['product.view', 'location.view.own', 'price.view.RETAIL', 'count.create', 'discrepancy.view', 'report.sales.own', 'report.inventory.own', 'dashboard.view', 'notification.view'],
+    description: 'View-only inventory of every branch, warehouse and franchise (stock, expiry, movements, counts); records Actual Inventory Counts, confirms the cash fund found in the store and submits the Store Inspection Report to HR. No sales, no cost, no edits.',
+    permissions: ['product.view', 'location.view.all', 'price.view.RETAIL', 'count.create', 'discrepancy.view', 'report.inventory.all', 'dashboard.view', 'notification.view', 'cashfund.check', 'inspection.create'],
   },
 ];
 
@@ -245,6 +261,14 @@ export const APPROVAL_ROUTING: Record<ApprovalType, { roles: RoleKey[]; anyOf?: 
   CONSIGNMENT_OUT: { roles: ['ADMIN'] },
   /** Person-targeted: the user who entered the document must accept an edit made by someone else (Warehouse In-Charge). */
   WAREHOUSE_EDIT: { roles: [], dynamic: true },
+  /** A submitted inventory count sheet is locked; a revision needs the Head Auditor only (Admin is notified, not an approver). */
+  COUNT_REVISION: { roles: ['HEAD_AUDITOR'] },
+  /** AR payment entered by a branch: either Accounting Associate or Accounting Head approves before it is applied. */
+  AR_PAYMENT: { roles: ['ACCOUNTING_ASSOCIATE', 'ACCOUNTING_HEAD'], anyOf: true },
+  /** Branch staff explain an inventory discrepancy before it is charged to them: HR is notified, the Head Auditor decides. */
+  DISCREPANCY_EXPLANATION: { roles: ['HEAD_AUDITOR'] },
+  /** Correction requested by the Audit Associate: Head Auditor only; the staff involved are notified; recorded in the revision log. */
+  AUDIT_REVISION: { roles: ['HEAD_AUDITOR'] },
 };
 
 /** EDIT_REQUEST approvers depend on who asks (§6.1). */

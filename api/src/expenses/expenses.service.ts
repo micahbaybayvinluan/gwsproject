@@ -8,6 +8,7 @@ import { PostingService } from '../gl/posting.service';
 import { r10Deposit, r10Expense } from '../gl/posting-rules';
 import { AttachmentsService } from '../attachments/attachments.service';
 import { ClosingService } from '../closing/closing.service';
+import { CashFundService } from '../cashfund/cashfund.service';
 import { ScopeService } from '../common/scope.service';
 import { toDateOnly, todayManila } from '../common/manila';
 import { D } from '../common/money';
@@ -16,14 +17,14 @@ import type { SessionUser } from '../common/request-context';
 /** §8.6 Branch expenses (associates), main expenses (accounting), franchise-local expenses, cash deposits. */
 @Injectable()
 export class ExpensesService {
-  constructor(private prisma: PrismaService, private seq: SequenceService, private audit: AuditService, private accounts: AccountsService, private posting: PostingService, private attachments: AttachmentsService, private closing: ClosingService, private scope: ScopeService) {}
+  constructor(private prisma: PrismaService, private seq: SequenceService, private audit: AuditService, private accounts: AccountsService, private posting: PostingService, private attachments: AttachmentsService, private closing: ClosingService, private scope: ScopeService, private cashFund: CashFundService) {}
 
   accountsFor(user: SessionUser, locationId?: string) {
     if (user.permissions.has('expense.create.main') && !locationId) return this.accounts.mainExpenseAccounts();
     const loc = locationId ?? user.locationIds[0];
     if (!loc) throw new BadRequestException('locationId required');
     if (user.locationScoped && !user.locationIds.includes(loc)) throw new ForbiddenException();
-    return this.accounts.branchExpenseAccounts(loc);
+    return this.accounts.branchExpenseAccounts(loc, user.permissions.has('expense.create.main'));
   }
 
   list(user: SessionUser, q: { locationId?: string; from?: string; to?: string; main?: boolean }) {
@@ -36,6 +37,7 @@ export class ExpensesService {
     const account = await this.accounts.get(input.accountId);
     const isMain = account.entryScope === 'MAIN' || (account.entryScope === 'BOTH' && !account.branchTagId);
     if (isMain && !user.permissions.has('expense.create.main')) throw new ForbiddenException('This is a main/office expense account');
+    if (account.class === 'DIRECT_COST' && !user.permissions.has('expense.create.main')) throw new ForbiddenException('Direct cost is posted automatically from sales; only Accounting can enter it manually');
     const locationId = input.locationId ?? account.branchTagId ?? user.locationIds[0] ?? (await this.prisma.db.location.findFirstOrThrow({ where: { code: 'OFFICE' } })).id;
     if (user.locationScoped && !user.locationIds.includes(locationId)) throw new ForbiddenException();
     if (!isMain && account.branchTagId && account.branchTagId !== locationId) throw new BadRequestException('Expense account belongs to another branch');
@@ -46,8 +48,10 @@ export class ExpensesService {
     await this.posting.assertPeriodOpen(null, docDate);
     const loc = await this.prisma.db.location.findUniqueOrThrow({ where: { id: locationId } });
     const doc = await this.prisma.db.$transaction(async (tx) => {
-      const controlNo = await this.seq.next(tx, 'EXP', { locationId, locationCode: loc.code });
+      const controlNo = await this.seq.form(tx, 'EX', locationId);
       const d = await tx.expenseDoc.create({ data: { controlNo, docDate, locationId, accountId: account.id, payee: input.payee, amount: D(input.amount).toFixed(2), paidFrom: input.paidFrom, paidFromAccountId: input.paidFromAccountId ?? null, notes: input.notes, preparedBy: user.id, createdBy: user.id, isMain } });
+      // paid from the branch cash fund: the fund balance goes down (it is topped back up from cash sales)
+      if (input.paidFrom === 'PETTY_CASH' && !isMain) await this.cashFund.spend(tx, { locationId, amount: input.amount, expenseDocId: d.id, businessDate: docDate, createdBy: user.id, notes: `${account.title}${input.payee ? ` – ${input.payee}` : ''}` });
       await this.posting.post(tx, { type: 'ExpenseDoc', id: d.id, date: docDate, name: input.payee, createdBy: user.id }, (r) => r10Expense(r, { locationId, expenseAccountId: account.id, amount: input.amount, paidFrom: input.paidFrom, paidFromAccountId: input.paidFromAccountId, controlNo, payee: input.payee }));
       return d;
     });
@@ -61,6 +65,7 @@ export class ExpensesService {
     await this.posting.assertPeriodOpen(null, doc.docDate);
     await this.prisma.db.$transaction(async (tx) => {
       await tx.expenseDoc.update({ where: { id }, data: { status: 'VOIDED', voidedAt: new Date(), voidedBy: user.id, voidReason: reason } });
+      if (doc.paidFrom === 'PETTY_CASH' && !doc.isMain) await this.cashFund.unspend(tx, { locationId: doc.locationId, amount: doc.amount, expenseDocId: id, createdBy: user.id });
       const vouchers = await tx.journalVoucher.findMany({ where: { sourceDocumentType: 'ExpenseDoc', sourceDocumentId: id, voidedAt: null }, include: { lines: true } });
       for (const v of vouchers) await this.posting.persist(tx, { rule: 'R10', book: v.book, remarks: `Reversal of ${v.voucherNo}: ${reason}`, lines: v.lines.map((l) => ({ accountId: l.accountId, debit: D(l.credit), credit: D(l.debit) })) }, { type: 'ExpenseDoc', id, date: todayManila(), createdBy: user.id });
     });

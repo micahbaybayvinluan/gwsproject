@@ -40,7 +40,7 @@ export class PriceChangeService implements OnModuleInit {
       lines.push({ productId: l.productId, tier: l.tier ?? null, oldPrice, newPrice: l.newPrice != null ? D(l.newPrice).toFixed(2) : null, costOld, costNew: l.costNew != null ? D(l.costNew).toFixed(2) : null });
     }
     const doc = await this.prisma.db.$transaction(async (tx) => {
-      const controlNo = await this.seq.next(tx, 'PC', { year: effectiveFrom.getUTCFullYear() });
+      const controlNo = await this.seq.form(tx, 'PC', null);
       const d = await tx.priceChangeDoc.create({ data: { controlNo, effectiveFrom, notes: input.notes, preparedBy: user.id, createdBy: user.id, status: 'SUBMITTED', lines: { create: lines } } });
       const req = await this.approvals.request({ type: 'PRICE_CHANGE', documentType: 'PriceChangeDoc', documentId: d.id, requestedBy: user.id, summary: { controlNo, effectiveFrom: dateStr(effectiveFrom), lines: lines.length } }, tx);
       return tx.priceChangeDoc.update({ where: { id: d.id }, data: { approvalRequestId: req.id } });

@@ -8,17 +8,18 @@ import { toDateOnly, todayManila, yesterdayManila, dateStr } from '../common/man
 import { D, sum, ZERO } from '../common/money';
 import type { SessionUser } from '../common/request-context';
 import { requestContext } from '../common/request-context';
+import { ChargesService } from '../charges/charges.service';
+import { RevisionsService } from '../revisions/revisions.service';
 
 export const DENOMINATIONS = [1000, 500, 200, 100, 50, 20, 10, 5, 1] as const;
 
 /** §8.4 Daily close at 00:00 Manila, cash count, post-close edit requests (diff stored, applied on approval). */
 @Injectable()
 export class ClosingService implements OnModuleInit {
-  constructor(private prisma: PrismaService, private approvals: ApprovalsService, private audit: AuditService, private notify: NotificationsService) {}
+  constructor(private prisma: PrismaService, private approvals: ApprovalsService, private audit: AuditService, private notify: NotificationsService, private charges: ChargesService, private revisions: RevisionsService) {}
 
   onModuleInit() {
-    this.approvals.register('POST_CLOSE_EDIT', (req, outcome, actor) => this.onEditDecision(req.documentId, outcome, actor?.id ?? null));
-    this.approvals.register('POST_CLOSE_EDIT_FRANCHISE', (req, outcome, actor) => this.onEditDecision(req.documentId, outcome, actor?.id ?? null));
+    for (const t of ['POST_CLOSE_EDIT', 'POST_CLOSE_EDIT_FRANCHISE', 'AUDIT_REVISION'] as const) this.approvals.register(t, (req, outcome, actor) => this.onEditDecision(req.documentId, outcome, actor?.id ?? null, t));
   }
 
   async isClosed(locationId: string, businessDate: Date, tx: Tx | null = null): Promise<boolean> {
@@ -37,12 +38,18 @@ export class ClosingService implements OnModuleInit {
     const expenses = await this.prisma.db.expenseDoc.findMany({ where: { locationId, docDate: businessDate, voidedAt: null } });
     const cashSalesOnly = sum(sales.filter((s) => s.paymentMode === 'CASH').map((s) => s.grandTotal));
     // cash AR collections received at this location on the day also land in the drawer
-    const collections = await this.prisma.db.paymentAllocation.findMany({ where: { payment: { paymentMode: 'CASH', voidedAt: null, businessDate }, salesDoc: { locationId } }, select: { amount: true } });
-    const cashCollections = sum(collections.map((c) => c.amount));
+    // cash AR collections received at this branch by branch staff (pending approval included: the cash is already in the drawer);
+    // collections recorded by Accounting at the office are not in the branch drawer
+    const pays = await this.prisma.db.payment.findMany({ where: { locationId, paymentMode: 'CASH', voidedAt: null, businessDate, status: { in: ['PENDING', 'POSTED'] } }, select: { amount: true, createdBy: true } });
+    const branchStaff = new Set((await this.prisma.db.userLocationAssignment.findMany({ where: { locationId, userId: { in: pays.map((p) => p.createdBy).filter((x): x is string => !!x) } }, select: { userId: true } })).map((a) => a.userId));
+    const cashCollections = sum(pays.filter((p) => p.createdBy && branchStaff.has(p.createdBy)).map((p) => p.amount));
     const cashSales = cashSalesOnly.plus(cashCollections);
     const cashExpenses = sum(expenses.filter((e) => e.paidFrom === 'CASH_DRAWER').map((e) => e.amount));
+    // cash taken from today's cash sales to top the branch cash fund back up leaves the drawer too
+    const fundReplenishment = sum((await this.prisma.db.cashFundTxn.findMany({ where: { locationId, businessDate, kind: 'REPLENISH' }, select: { amount: true } })).map((t) => t.amount));
     const close = await this.prisma.db.dailyClose.findUnique({ where: { locationId_businessDate: { locationId, businessDate } } });
-    return { locationId, businessDate: dateStr(businessDate), cashSalesOnly, cashCollections, cashSales, cashExpenses, expectedCash: cashSales.minus(cashExpenses), totalCashDeposit: cashSales.minus(cashExpenses), salesCount: sales.length, expenseCount: expenses.length, closed: !!close, close };
+    const expectedCash = cashSales.minus(cashExpenses).minus(fundReplenishment);
+    return { locationId, businessDate: dateStr(businessDate), cashSalesOnly, cashCollections, cashSales, cashExpenses, fundReplenishment, expectedCash, totalCashDeposit: expectedCash, salesCount: sales.length, expenseCount: expenses.length, closed: !!close, close };
   }
 
   /** Associate fills the Money Breakdown; variance recorded, not blocking (§18.3). */
@@ -53,8 +60,8 @@ export class ClosingService implements OnModuleInit {
     const s = await this.summary(locationId, businessDate);
     const row = await this.prisma.db.dailyClose.upsert({
       where: { locationId_businessDate: { locationId, businessDate } },
-      create: { locationId, businessDate, closedAt: new Date(0), closedBy: null, cashSales: s.cashSales.toFixed(2), cashExpenses: s.cashExpenses.toFixed(2), expectedCash: s.expectedCash.toFixed(2), countedCash: counted.toFixed(2), cashVariance: counted.minus(s.expectedCash).toFixed(2), moneyBreakdown: breakdown, totalCashDeposit: s.totalCashDeposit.toFixed(2) },
-      update: { countedCash: counted.toFixed(2), cashVariance: counted.minus(s.expectedCash).toFixed(2), moneyBreakdown: breakdown, cashSales: s.cashSales.toFixed(2), cashExpenses: s.cashExpenses.toFixed(2), expectedCash: s.expectedCash.toFixed(2), totalCashDeposit: s.totalCashDeposit.toFixed(2) },
+      create: { locationId, businessDate, closedAt: new Date(0), closedBy: null, cashSales: s.cashSales.toFixed(2), cashExpenses: s.cashExpenses.toFixed(2), fundReplenishment: s.fundReplenishment.toFixed(2), expectedCash: s.expectedCash.toFixed(2), countedCash: counted.toFixed(2), cashVariance: counted.minus(s.expectedCash).toFixed(2), moneyBreakdown: breakdown, totalCashDeposit: s.totalCashDeposit.toFixed(2) },
+      update: { countedCash: counted.toFixed(2), cashVariance: counted.minus(s.expectedCash).toFixed(2), moneyBreakdown: breakdown, cashSales: s.cashSales.toFixed(2), cashExpenses: s.cashExpenses.toFixed(2), fundReplenishment: s.fundReplenishment.toFixed(2), expectedCash: s.expectedCash.toFixed(2), totalCashDeposit: s.totalCashDeposit.toFixed(2) },
     });
     await this.audit.log({ action: 'CASH_COUNT', entityType: 'DailyClose', entityId: row.id, after: row });
     return row;
@@ -70,14 +77,35 @@ export class ClosingService implements OnModuleInit {
       const s = await this.summary(loc.id, businessDate);
       await this.prisma.db.dailyClose.upsert({
         where: { locationId_businessDate: { locationId: loc.id, businessDate } },
-        create: { locationId: loc.id, businessDate, closedAt: new Date(), cashSales: s.cashSales.toFixed(2), cashExpenses: s.cashExpenses.toFixed(2), expectedCash: s.expectedCash.toFixed(2), totalCashDeposit: s.totalCashDeposit.toFixed(2) },
-        update: { closedAt: new Date(), cashSales: s.cashSales.toFixed(2), cashExpenses: s.cashExpenses.toFixed(2), expectedCash: s.expectedCash.toFixed(2), totalCashDeposit: s.totalCashDeposit.toFixed(2) },
+        create: { locationId: loc.id, businessDate, closedAt: new Date(), cashSales: s.cashSales.toFixed(2), cashExpenses: s.cashExpenses.toFixed(2), fundReplenishment: s.fundReplenishment.toFixed(2), expectedCash: s.expectedCash.toFixed(2), totalCashDeposit: s.totalCashDeposit.toFixed(2) },
+        update: { closedAt: new Date(), cashSales: s.cashSales.toFixed(2), cashExpenses: s.cashExpenses.toFixed(2), fundReplenishment: s.fundReplenishment.toFixed(2), expectedCash: s.expectedCash.toFixed(2), totalCashDeposit: s.totalCashDeposit.toFixed(2) },
       });
       n++;
     }
     return { closed: n, businessDate: dateStr(businessDate) };
   }
   closes(user: SessionUser, locationId?: string) { if (locationId && user.locationScoped && !user.locationIds.includes(locationId)) throw new ForbiddenException(); return this.prisma.db.dailyClose.findMany({ where: { locationId: locationId ?? (user.locationScoped ? { in: user.locationIds } : { not: '' }) }, include: { location: { select: { code: true, name: true } } }, orderBy: { businessDate: 'desc' }, take: 120 }); }
+
+  /**
+   * Cash shortage at the count (counted < expected) charged to the staff on duty (owner request 2026-09-26): creates a CASH_SHORTAGE
+   * charge form pre-allocated to them; HR finalizes (R11: Advances to Employees / Cash on Hand) and payroll deducts it.
+   */
+  async chargeShortage(closeId: string, employeeIds: string[], user: SessionUser) {
+    const close = await this.prisma.db.dailyClose.findUnique({ where: { id: closeId }, include: { location: true } });
+    if (!close) throw new NotFoundException();
+    if (close.chargeFormId) throw new BadRequestException('This shortage is already charged');
+    if (close.cashVariance == null || D(close.cashVariance).gte(0)) throw new BadRequestException('There is no cash shortage on this day');
+    await this.charges.assertEmployees(employeeIds);
+    const shortage = D(close.cashVariance).abs();
+    const cf = await this.prisma.db.$transaction(async (tx) => {
+      const cf = await this.charges.create(tx, { kind: 'CASH_SHORTAGE', locationId: close.locationId, sourceType: 'DailyClose', sourceId: close.id, reason: `Cash shortage ${close.location.name} ${dateStr(close.businessDate)}`, lines: [{ description: `Cash count short on ${dateStr(close.businessDate)} (expected ${close.expectedCash}, counted ${close.countedCash})`, qty: 1, unitCharge: shortage.toFixed(2) }], employeeIds, createdBy: user.id });
+      await tx.dailyClose.update({ where: { id: closeId }, data: { chargeFormId: cf.id } });
+      return cf;
+    });
+    await this.charges.announce(cf.id);
+    await this.audit.log({ action: 'CHARGE_SHORTAGE', entityType: 'DailyClose', entityId: closeId, after: { chargeFormId: cf.id, amount: shortage, employeeIds } });
+    return cf;
+  }
 
   // ── Post-close edit requests ──
   /** Stores before/after diff; nothing changes until approved. Company branch → Head AND Asst; franchise → Owner (+ Admin if it touches a warehouse Transfer-In). */
@@ -94,10 +122,14 @@ export class ClosingService implements OnModuleInit {
     }
     const edit = await this.prisma.db.$transaction(async (tx) => {
       const e = await tx.postCloseEdit.create({ data: { documentType: input.documentType, documentId: input.documentId, locationId, requestedBy: user.id, reason: input.reason, before: JSON.parse(JSON.stringify(before)), after: input.after as Prisma.InputJsonValue, approvalRequestId: '' } });
-      const req = await this.approvals.request({ type: isFranchise ? 'POST_CLOSE_EDIT_FRANCHISE' : 'POST_CLOSE_EDIT', documentType: 'PostCloseEdit', documentId: e.id, requestedBy: user.id, extraRoles, summary: { controlNo: (before as { controlNo?: string }).controlNo, locationId, locationName: loc.name, documentType: input.documentType, reason: input.reason, before: pick(before as Record<string, unknown>, Object.keys(input.after)), after: input.after } }, tx);
+      // the Audit Associate's corrections go to the Head Auditor only (owner rule); branch staff follow the post-close edit routing
+      const type = user.roleKey === 'AUDIT_ASSOCIATE' ? 'AUDIT_REVISION' : isFranchise ? 'POST_CLOSE_EDIT_FRANCHISE' : 'POST_CLOSE_EDIT';
+      const req = await this.approvals.request({ type, documentType: 'PostCloseEdit', documentId: e.id, requestedBy: user.id, extraRoles, summary: { controlNo: (before as { controlNo?: string }).controlNo, locationId, locationName: loc.name, documentType: input.documentType, reason: input.reason, before: pick(before as Record<string, unknown>, Object.keys(input.after)), after: input.after } }, tx);
       return tx.postCloseEdit.update({ where: { id: e.id }, data: { approvalRequestId: req.id } });
     });
     await this.audit.log({ action: 'EDIT_REQUEST', entityType: input.documentType, entityId: input.documentId, before, after: input.after });
+    const staffId = (before as { createdBy?: string | null; preparedBy?: string | null }).createdBy ?? (before as { preparedBy?: string | null }).preparedBy ?? null;
+    if (staffId && staffId !== user.id) await this.notify.toUsers([staffId], { type: 'REVISION_REQUESTED', title: `${user.fullName} asked to correct your ${input.documentType.replace(/Doc$/, '').toLowerCase()} ${(before as { controlNo?: string }).controlNo ?? ''}`, body: input.reason, link: '/closing' });
     return edit;
   }
   listEdits(user: SessionUser) { return this.prisma.db.postCloseEdit.findMany({ where: user.locationScoped ? { locationId: { in: user.locationIds } } : {}, orderBy: { createdAt: 'desc' }, take: 200 }); }
@@ -110,7 +142,7 @@ export class ClosingService implements OnModuleInit {
   }
 
   /** Apply the approved diff. Only header-level scalar fields are patched (qty/price changes must be done via void + re-entry, which is itself an edit request). */
-  private async onEditDecision(editId: string, outcome: 'APPROVED' | 'REJECTED', actorId: string | null) {
+  private async onEditDecision(editId: string, outcome: 'APPROVED' | 'REJECTED', actorId: string | null, source: 'POST_CLOSE_EDIT' | 'POST_CLOSE_EDIT_FRANCHISE' | 'AUDIT_REVISION' = 'POST_CLOSE_EDIT') {
     await requestContext.runSystem(async () => {
       const e = await this.prisma.db.postCloseEdit.findUniqueOrThrow({ where: { id: editId } });
       if (outcome === 'REJECTED' || e.appliedAt) return;
@@ -132,6 +164,8 @@ export class ClosingService implements OnModuleInit {
       else await this.prisma.db.transferDoc.update({ where: { id: e.documentId }, data: { ...(data as Prisma.TransferDocUncheckedUpdateInput), updatedBy: actorId } });
       await this.prisma.db.postCloseEdit.update({ where: { id: editId }, data: { appliedAt: new Date() } });
       await this.audit.log({ action: 'POST_CLOSE_EDIT_APPLIED', entityType: e.documentType, entityId: e.documentId, before: e.before, after: data, userId: actorId });
+      const b = e.before as { controlNo?: string; createdBy?: string | null; preparedBy?: string | null };
+      await this.revisions.record({ source: source === 'AUDIT_REVISION' ? 'AUDIT_REVISION' : 'POST_CLOSE_EDIT', documentType: e.documentType, documentId: e.documentId, controlNo: b.controlNo ?? null, locationId: e.locationId, staffUserId: b.createdBy ?? b.preparedBy ?? null, requestedBy: e.requestedBy, approvedBy: actorId, reason: e.reason, changes: { before: pick(e.before as Record<string, unknown>, Object.keys(after)), after }, link: e.documentType === 'SalesDoc' ? `/sales/${e.documentId}` : e.documentType === 'TransferDoc' ? `/transfers/${e.documentId}` : '/expenses' });
     });
   }
 }

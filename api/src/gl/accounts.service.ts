@@ -22,8 +22,9 @@ export class AccountsService {
   async get(id: string) { const a = await this.prisma.db.account.findUnique({ where: { id }, include: { branchTag: true, template: true } }); if (!a) throw new NotFoundException(); return a; }
 
   /** Expense accounts a branch user may pick (§8.6): BRANCH/BOTH scope tagged to the location. */
-  branchExpenseAccounts(locationId: string) {
-    return this.prisma.db.account.findMany({ where: { active: true, class: { in: ['OPEX', 'DIRECT_COST'] }, branchTagId: locationId, entryScope: { in: ['BRANCH', 'BOTH'] } }, orderBy: { title: 'asc' } });
+  /** Branch expense accounts. Direct-cost accounts only for Accounting (owner rule: branch staff do not touch direct cost; sales post it automatically, R5). */
+  branchExpenseAccounts(locationId: string, includeDirectCost = false) {
+    return this.prisma.db.account.findMany({ where: { active: true, class: { in: includeDirectCost ? ['OPEX', 'DIRECT_COST'] : ['OPEX'] }, branchTagId: locationId, entryScope: { in: ['BRANCH', 'BOTH'] } }, orderBy: { title: 'asc' } });
   }
   mainExpenseAccounts() { return this.prisma.db.account.findMany({ where: { active: true, class: { in: ['OPEX', 'DIRECT_COST'] }, entryScope: { in: ['MAIN', 'BOTH'] } }, orderBy: { title: 'asc' } }); }
   /** Payment accounts (cash/bank/GCash/platform) selectable on a sale at a location. */

@@ -157,15 +157,36 @@ export function r10Expense(r: AccountResolver, e: { locationId: string; expenseA
   const entry: Entry = { rule: 'R10', book: 'GASTOS_OPEX', lines: [dr(e.expenseAccountId, e.amount), cr(credit, e.amount)], remarks: `Expense ${e.controlNo}`, name: e.payee ?? undefined };
   assertBalanced(entry.lines); return [entry];
 }
+/** Cash fund (petty cash) funded or topped up from a chosen account. */
+export function r10FundSetup(r: AccountResolver, e: { locationId: string; amount: Decimal.Value; fromAccountId: string; ref: string }): Entry[] {
+  const entry: Entry = { rule: 'R10', book: 'GENERAL', lines: [dr(r.branch('PETTY_CASH', e.locationId), e.amount), cr(e.fromAccountId, e.amount)], remarks: `Cash fund ${e.ref}` };
+  assertBalanced(entry.lines); return [entry];
+}
+/** Cash fund replenished from the day's cash sales: cash leaves the drawer (Cash on Hand) and returns to the fund. */
+export function r10FundReplenish(r: AccountResolver, e: { locationId: string; amount: Decimal.Value; ref: string }): Entry[] {
+  const entry: Entry = { rule: 'R10', book: 'GENERAL', lines: [dr(r.branch('PETTY_CASH', e.locationId), e.amount), cr(r.branch('CASH_ON_HAND', e.locationId), e.amount)], remarks: `Cash fund replenishment ${e.ref}` };
+  assertBalanced(entry.lines); return [entry];
+}
 export function r10Deposit(r: AccountResolver, e: { locationId: string; bankAccountId: string; amount: Decimal.Value; ref: string }): Entry[] {
   const entry: Entry = { rule: 'R10', book: 'GENERAL', lines: [dr(e.bankAccountId, e.amount), cr(r.branch('CASH_ON_HAND', e.locationId), e.amount)], remarks: `Cash deposit ${e.ref}` };
   assertBalanced(entry.lines); return [entry];
 }
 // ── R11 charge form finalized ──
-export function r11ChargeForm(r: AccountResolver, e: { locationId: string; controlNo: string; lines: { accountingClass: string; qty: number; unitCharge: Decimal.Value; batchCost: Decimal.Value }[]; allocations: { employeeId: string; amount: Decimal.Value }[] }): Entry[] {
+export interface ChargeLineEvent { accountingClass?: string | null; qty: number; unitCharge: Decimal.Value; batchCost: Decimal.Value; amountOnly?: boolean }
+/**
+ * R11: a finalized charge form moves the loss to Advances to Employees.
+ * Product lines credit inventory at batch cost (difference to the franchise-price charge → recovery income / spoilage).
+ * Amount-only lines: a cash shortage credits the branch Cash on Hand; other amount-only charges credit recovery income.
+ */
+export function r11ChargeForm(r: AccountResolver, e: { locationId: string; controlNo: string; kind?: string; lines: ChargeLineEvent[]; allocations: { employeeId: string; amount: Decimal.Value }[] }): Entry[] {
   const lines: Line[] = [];
   let totalCharge = D(0); let totalCost = D(0);
-  for (const l of e.lines) { const cost = D(l.batchCost).mul(l.qty); totalCost = totalCost.plus(cost); totalCharge = totalCharge.plus(D(l.unitCharge).mul(l.qty)); lines.push(cr(r.branch(inventoryTemplateFor(l.accountingClass), e.locationId), cost)); }
+  for (const l of e.lines) {
+    const charge = D(l.unitCharge).mul(l.qty);
+    if (l.amountOnly || !l.accountingClass) { lines.push(cr(e.kind === 'CASH_SHORTAGE' ? r.branch('CASH_ON_HAND', e.locationId) : r.global('OTHER_INCOME_DISCREPANCY_RECOVERY'), charge)); continue; }
+    const cost = D(l.batchCost).mul(l.qty); totalCost = totalCost.plus(cost); totalCharge = totalCharge.plus(charge);
+    lines.push(cr(r.branch(inventoryTemplateFor(l.accountingClass), e.locationId), cost));
+  }
   for (const a of e.allocations) lines.push(dr(r.branch('ADV_EMPLOYEE_CHARGES', e.locationId), a.amount, `Employee ${a.employeeId}`));
   const diff = totalCharge.minus(totalCost);
   if (diff.gt(0)) lines.push(cr(r.global('OTHER_INCOME_DISCREPANCY_RECOVERY'), diff));
@@ -175,6 +196,12 @@ export function r11ChargeForm(r: AccountResolver, e: { locationId: string; contr
 }
 export function r11PayrollDeduction(r: AccountResolver, e: { locationId: string; amount: Decimal.Value; ref: string }): Entry[] {
   const entry: Entry = { rule: 'R11', book: 'ADVANCES', lines: [dr(r.global('AP_SALARY'), e.amount), cr(r.branch('ADV_EMPLOYEE_CHARGES', e.locationId), e.amount)], remarks: `Charge deduction ${e.ref}` };
+  assertBalanced(entry.lines); return [entry];
+}
+/** R13 remittance of SSS / PhilHealth / Pag-IBIG contributions (EE deducted + ER share) to the agency. */
+export function r13Remittance(r: AccountResolver, e: { kind: 'SSS' | 'PHIC' | 'HDMF'; amount: Decimal.Value; paymentAccountId: string; ref: string }): Entry[] {
+  const payable = r.global(e.kind === 'SSS' ? 'SSS_PAYABLE' : e.kind === 'PHIC' ? 'PHIC_PAYABLE' : 'HDMF_PAYABLE');
+  const entry: Entry = { rule: 'R13', book: 'GENERAL', lines: [dr(payable, e.amount), cr(e.paymentAccountId, e.amount)], remarks: `${e.kind} remittance ${e.ref}` };
   assertBalanced(entry.lines); return [entry];
 }
 // ── R12 revaluation (cost increase only) ──

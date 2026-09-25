@@ -26,6 +26,10 @@ import { FranchisePage } from './pages/Franchise';
 import { AccountsPage, VouchersPage, TrialBalancePage, StatementsPage, PeriodsPage } from './pages/Accounting';
 import { ChargeFormsPage, PayrollPage } from './pages/Hr';
 import { UsersPage, AuditLogPage, SettingsPage } from './pages/Admin';
+import { MyHrPage, WeeklyCompliancePage } from './pages/HrExtra';
+import { CashFundPage } from './pages/CashFund';
+import { InspectionDetailPage, InspectionFormPage, InspectionsPage } from './pages/Inspections';
+import { CustomersReportPage, InventoryCostPage } from './pages/ReportsExtra';
 
 const qc = new QueryClient({ defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false, staleTime: 10000 } } });
 
@@ -84,6 +88,15 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
               <Route path="/charge-forms" element={<ChargeFormsPage />} />
               <Route path="/charge-forms/:id" element={<ChargeFormsPage />} />
               <Route path="/payroll" element={<PayrollPage />} />
+              <Route path="/my-hr" element={<MyHrPage />} />
+              <Route path="/hr/weekly-counts" element={<WeeklyCompliancePage />} />
+              <Route path="/cash-fund" element={<CashFundPage />} />
+              <Route path="/inspections" element={<InspectionsPage />} />
+              <Route path="/inspections/new" element={<InspectionFormPage />} />
+              <Route path="/inspections/:id/edit" element={<InspectionFormPage />} />
+              <Route path="/inspections/:id" element={<InspectionDetailPage />} />
+              <Route path="/reports/customers" element={<CustomersReportPage />} />
+              <Route path="/accounting/inventory-cost" element={<InventoryCostPage />} />
               <Route path="/payroll/:id" element={<PayrollPage />} />
               <Route path="/users" element={<UsersPage />} />
               <Route path="/audit-log" element={<AuditLogPage />} />

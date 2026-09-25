@@ -8,6 +8,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { AuditService } from '../common/audit.service';
 import { SettingsService } from '../common/settings.service';
 import { MasterService } from '../master/master.service';
+import { ChargesService } from '../charges/charges.service';
 import { PostingService } from '../gl/posting.service';
 import { r6Transfer, r7FranchiseTransfer, r8ConsignOut, r9Writeoff } from '../gl/posting-rules';
 import { dateStr, toDateOnly, todayManila } from '../common/manila';
@@ -23,7 +24,7 @@ export interface TransferInput { fromLocationId?: string; toLocationId: string; 
 /** §7.3 Transfers: one document, two views (Pull-Out for sender, Transfer-In for receiver). In-transit until receiver confirms. */
 @Injectable()
 export class TransfersService implements OnModuleInit {
-  constructor(private prisma: PrismaService, private seq: SequenceService, private stock: StockService, private approvals: ApprovalsService, private notify: NotificationsService, private audit: AuditService, private settings: SettingsService, private master: MasterService, private posting: PostingService) {}
+  constructor(private prisma: PrismaService, private seq: SequenceService, private stock: StockService, private approvals: ApprovalsService, private notify: NotificationsService, private audit: AuditService, private settings: SettingsService, private master: MasterService, private posting: PostingService, private charges: ChargesService) {}
 
   onModuleInit() {
     for (const t of ['TRANSFER_INTERNAL', 'TRANSFER_TO_FRANCHISE', 'CONSIGNMENT_OUT'] as ApprovalType[]) this.approvals.register(t, (req, outcome, actor) => this.onDecision(req.documentId, outcome, actor?.id ?? null));
@@ -67,9 +68,10 @@ export class TransfersService implements OnModuleInit {
     this.assertRoute(user, fromLoc, toLoc, input.transferType);
     if (!input.lines.length) throw new BadRequestException('At least one line is required');
     const doc = await this.prisma.db.$transaction(async (tx) => {
-      const controlNo = await this.seq.next(tx, 'PO', { locationId: from, locationCode: fromLoc.code, prefix: input.transferType === 'RETURN' ? 'RET' : input.transferType === 'CONSIGNMENT_OUT' ? 'CSG' : 'PO' });
+      const controlNo = await this.seq.form(tx, 'PO', from);
+      const transferInNo = await this.seq.form(tx, 'TI', toLoc.id);
       const lines = await this.buildLines(tx, fromLoc, input.transferType, input.lines);
-      return tx.transferDoc.create({ data: { controlNo, docDate: input.docDate ? toDateOnly(input.docDate) : todayManila(), fromLocationId: from, toLocationId: toLoc.id, transferType: input.transferType, returnReason: input.returnReason, notes: input.notes, preparedBy: user.id, createdBy: user.id, lines: { create: lines } }, include: TransfersService.INCLUDE });
+      return tx.transferDoc.create({ data: { controlNo, transferInNo, docDate: input.docDate ? toDateOnly(input.docDate) : todayManila(), fromLocationId: from, toLocationId: toLoc.id, transferType: input.transferType, returnReason: input.returnReason, notes: input.notes, preparedBy: user.id, createdBy: user.id, lines: { create: lines } }, include: TransfersService.INCLUDE });
     });
     await this.audit.log({ action: 'CREATE', entityType: 'TransferDoc', entityId: doc.id, after: doc });
     return doc;
@@ -78,8 +80,8 @@ export class TransfersService implements OnModuleInit {
   /** Who may send what where (§7.3): location-scoped users send from their own location, or request from the warehouse to their own location. */
   assertRoute(user: SessionUser, fromLoc: { id: string; type: string }, toLoc: { id: string; type: string }, transferType: string) {
     if (fromLoc.id === toLoc.id) throw new BadRequestException('From and To must differ');
-    const isRequest = user.locationScoped && !user.locationIds.includes(fromLoc.id);
-    if (isRequest && !(fromLoc.type === 'WAREHOUSE' && user.locationIds.includes(toLoc.id))) throw new ForbiddenException('You may only send from your branch or request from the warehouse');
+    // Forms are prepared by the sending location only (owner rule): a branch receiving stock just gets the copy; to ask for stock it sends a Stock Request
+    if (user.locationScoped && !user.locationIds.includes(fromLoc.id)) throw new ForbiddenException('Transfer forms are prepared by the sending location. To get stock, send a Stock Request to the warehouse.');
     if (transferType === 'CONSIGNMENT_OUT' && toLoc.type !== 'CONSIGNEE') throw new BadRequestException('Consignment out must target a CONSIGNEE location');
   }
 
@@ -100,6 +102,19 @@ export class TransfersService implements OnModuleInit {
       for (const p of picks) lines.push({ productId: l.productId, batchId: p.batchId, qtySent: p.qty, checkerRemarks: l.checkerRemarks });
     }
     return lines;
+  }
+
+  /** Branch asks the warehouse for stock (no form is made by the receiving branch); the warehouse prepares the Pull-Out / Transfer-In. */
+  async requestStock(input: { locationId?: string; items: { productId: string; qty: number }[]; notes?: string }, user: SessionUser) {
+    const locationId = input.locationId ?? user.locationIds[0];
+    if (!locationId) throw new BadRequestException('locationId required');
+    if (user.locationScoped && !user.locationIds.includes(locationId)) throw new ForbiddenException();
+    const loc = await this.prisma.db.location.findUniqueOrThrow({ where: { id: locationId } });
+    const products = await this.prisma.db.product.findMany({ where: { id: { in: input.items.map((i) => i.productId) } }, select: { id: true, name: true } });
+    const list = input.items.map((i) => `${i.qty}× ${products.find((p) => p.id === i.productId)?.name ?? i.productId}`).join(', ');
+    await this.notify.toRoles(['WAREHOUSE_IN_CHARGE', 'WAREHOUSE_ASSOCIATE'], { type: 'STOCK_REQUEST', title: `Stock request from ${loc.name} (${user.fullName})`, body: `${list}${input.notes ? ` — ${input.notes}` : ''}`, link: `/transfers?to=${loc.id}` });
+    await this.audit.log({ action: 'STOCK_REQUEST', entityType: 'Location', entityId: loc.id, after: { items: input.items, notes: input.notes } });
+    return { ok: true, sentTo: 'Warehouse', items: list };
   }
 
   /** Snapshot for edit proposals: header + qty per product (batches are re-picked FEFO on apply). */
@@ -127,7 +142,8 @@ export class TransfersService implements OnModuleInit {
     await this.prisma.db.$transaction(async (tx) => {
       const lines = await this.buildLines(tx, doc.fromLocation, transferType, input.lines);
       await tx.transferLine.deleteMany({ where: { docId: id } });
-      await tx.transferDoc.update({ where: { id }, data: { toLocationId: toLoc.id, transferType, returnReason: input.returnReason === undefined ? undefined : input.returnReason, notes: input.notes === undefined ? undefined : input.notes, docDate: input.docDate ? toDateOnly(input.docDate) : undefined, status: 'DRAFT', approvalRequestId: null, updatedBy: actorId, lines: { create: lines } } });
+      const transferInNo = toLoc.id !== doc.toLocationId ? await this.seq.form(tx, 'TI', toLoc.id) : undefined;
+      await tx.transferDoc.update({ where: { id }, data: { transferInNo, toLocationId: toLoc.id, transferType, returnReason: input.returnReason === undefined ? undefined : input.returnReason, notes: input.notes === undefined ? undefined : input.notes, docDate: input.docDate ? toDateOnly(input.docDate) : undefined, status: 'DRAFT', approvalRequestId: null, updatedBy: actorId, lines: { create: lines } } });
     });
     if (wasSubmitted) await this.submitDoc(id, doc.preparedBy ?? doc.createdBy ?? actorId);
   }
@@ -284,19 +300,37 @@ export class TransfersService implements OnModuleInit {
   }
 
   // ── Write-offs (§7.6) ──
-  async createWriteoff(input: { locationId?: string; docDate?: string; notes?: string; lines: { productId: string; batchId: string; qty: number; reason: 'EXPIRED' | 'DAMAGED' | 'SPOILED' }[] }, user: SessionUser) {
+  /**
+   * Expired / damaged / spoiled stock taken out of saleable inventory. `chargeTo` decides who bears it (owner request 2026-09-26):
+   * COMPANY = expensed (R9 Expired Items); STAFF = charged to the named employees — on approval a charge form is created with them
+   * pre-allocated, HR finalizes it with one click and payroll deducts it. Either way the stock leaves the books on approval.
+   */
+  async createWriteoff(input: { locationId?: string; docDate?: string; notes?: string; chargeTo?: 'COMPANY' | 'STAFF'; employeeIds?: string[]; lines: { productId: string; batchId: string; qty: number; reason: 'EXPIRED' | 'DAMAGED' | 'SPOILED' }[] }, user: SessionUser) {
+    const chargeTo = input.chargeTo ?? 'COMPANY';
+    const staff = chargeTo === 'STAFF' ? await this.charges.assertEmployees(input.employeeIds ?? []) : [];
     const locationId = input.locationId ?? user.locationIds[0];
     if (!locationId) throw new BadRequestException('locationId required');
     if (user.locationScoped && !user.locationIds.includes(locationId)) throw new ForbiddenException();
     const loc = await this.prisma.db.location.findUniqueOrThrow({ where: { id: locationId } });
     const doc = await this.prisma.db.$transaction(async (tx) => {
       for (const l of input.lines) { const bal = await tx.stockBalance.findUnique({ where: { locationId_productId_batchId: { locationId, productId: l.productId, batchId: l.batchId } } }); if (!bal || bal.qty < l.qty) throw new BadRequestException('Write-off qty exceeds on-hand for batch'); }
-      const controlNo = await this.seq.next(tx, 'WO', { locationId, locationCode: loc.code });
-      return tx.expiryWriteoffDoc.create({ data: { controlNo, docDate: input.docDate ? toDateOnly(input.docDate) : todayManila(), locationId, notes: input.notes, preparedBy: user.id, createdBy: user.id, status: 'SUBMITTED', lines: { create: input.lines } }, include: { lines: { include: { product: { select: { name: true, sku: true } }, batch: true } } } });
+      const controlNo = await this.seq.form(tx, 'WO', locationId);
+      return tx.expiryWriteoffDoc.create({ data: { controlNo, docDate: input.docDate ? toDateOnly(input.docDate) : todayManila(), locationId, notes: input.notes, chargeTo, chargeEmployeeIds: staff.map((e) => e.id), preparedBy: user.id, createdBy: user.id, status: 'SUBMITTED', lines: { create: input.lines } }, include: { lines: { include: { product: { select: { name: true, sku: true } }, batch: true } } } });
     });
-    const req = await this.approvals.request({ type: 'WRITEOFF', documentType: 'ExpiryWriteoffDoc', documentId: doc.id, requestedBy: user.id, summary: { controlNo: doc.controlNo, locationId, locationName: loc.name, lines: doc.lines.length } });
+    const req = await this.approvals.request({ type: 'WRITEOFF', documentType: 'ExpiryWriteoffDoc', documentId: doc.id, requestedBy: user.id, summary: { controlNo: doc.controlNo, locationId, locationName: loc.name, lines: doc.lines.map((l) => ({ product: l.product.name, batch: l.batch.batchNo ?? '', qty: l.qty, reason: l.reason })), chargeTo: chargeTo === 'STAFF' ? `Charge to staff: ${staff.map((e) => e.fullName).join(', ')}` : 'Company expense' } });
     await this.prisma.db.expiryWriteoffDoc.update({ where: { id: doc.id }, data: { approvalRequestId: req.id } });
     return doc;
+  }
+  /** Before approval the Head Auditor (or Admin) can change who bears the loss. */
+  async setWriteoffCharge(id: string, chargeTo: 'COMPANY' | 'STAFF', employeeIds: string[], user: SessionUser) {
+    const doc = await this.prisma.db.expiryWriteoffDoc.findUniqueOrThrow({ where: { id } });
+    if (doc.status !== 'SUBMITTED') throw new BadRequestException('Only a write-off awaiting approval can be changed');
+    if (user.locationScoped && !user.locationIds.includes(doc.locationId)) throw new ForbiddenException();
+    const staff = chargeTo === 'STAFF' ? await this.charges.assertEmployees(employeeIds) : [];
+    const after = await this.prisma.db.expiryWriteoffDoc.update({ where: { id }, data: { chargeTo, chargeEmployeeIds: staff.map((e) => e.id) } });
+    if (doc.approvalRequestId) { const req = await this.prisma.db.approvalRequest.findUnique({ where: { id: doc.approvalRequestId } }); if (req) await this.prisma.db.approvalRequest.update({ where: { id: req.id }, data: { summary: { ...(req.summary as object), chargeTo: chargeTo === 'STAFF' ? `Charge to staff: ${staff.map((e) => e.fullName).join(', ')}` : 'Company expense' } } }); }
+    await this.audit.log({ action: 'SET_CHARGE_TO', entityType: 'ExpiryWriteoffDoc', entityId: id, before: { chargeTo: doc.chargeTo, employees: doc.chargeEmployeeIds }, after: { chargeTo, employees: staff.map((e) => e.fullName) } });
+    return after;
   }
   listWriteoffs(user: SessionUser) { return this.prisma.db.expiryWriteoffDoc.findMany({ where: { locationId: user.locationScoped ? { in: user.locationIds } : { not: '' } }, include: { location: { select: { code: true, name: true } }, lines: { include: { product: { select: { name: true, sku: true } }, batch: { select: { batchNo: true, expiryDate: true, unitCost: true } } } } }, orderBy: { createdAt: 'desc' } }); }
   private async onWriteoffDecision(docId: string, outcome: 'APPROVED' | 'REJECTED', actorId: string | null) {
@@ -304,11 +338,23 @@ export class TransfersService implements OnModuleInit {
       const doc = await this.prisma.db.expiryWriteoffDoc.findUniqueOrThrow({ where: { id: docId }, include: { lines: { include: { batch: true, product: { include: { category: true } } } } } });
       if (doc.status !== 'SUBMITTED') return;
       if (outcome === 'REJECTED') { await this.prisma.db.expiryWriteoffDoc.update({ where: { id: docId }, data: { status: 'REJECTED' } }); return; }
+      let chargeFormId: string | null = null;
       await this.prisma.db.$transaction(async (tx) => {
         await this.stock.post(tx, doc.lines.map((l) => ({ locationId: doc.locationId, productId: l.productId, batchId: l.batchId, qtyDelta: -l.qty, movementType: 'EXPIRED_WRITEOFF' as const, documentType: 'ExpiryWriteoffDoc', documentId: doc.id, unitCost: l.batch.unitCost, businessDate: doc.docDate, createdBy: actorId ?? undefined })));
+        if (doc.chargeTo === 'STAFF' && doc.chargeEmployeeIds.length) {
+          // charged to staff: no expense now; the charge form (franchise-tier price, batch cost kept for R11) goes to HR
+          const lines = [];
+          for (const l of doc.lines) lines.push({ productId: l.productId, qty: l.qty, unitCharge: (await this.master.priceFor(l.productId, 'FRANCHISE', doc.docDate, tx)) ?? l.batch.unitCost, batchCost: l.batch.unitCost, description: `${l.reason.toLowerCase()} · batch ${l.batch.batchNo ?? '—'}` });
+          const kind = doc.lines.every((l) => l.reason === 'EXPIRED') ? 'EXPIRED' : 'DAMAGED';
+          const cf = await this.charges.create(tx, { kind, locationId: doc.locationId, sourceType: 'ExpiryWriteoffDoc', sourceId: doc.id, reason: `Write-off ${doc.controlNo}`, lines, employeeIds: doc.chargeEmployeeIds, createdBy: actorId });
+          chargeFormId = cf.id;
+          await tx.expiryWriteoffDoc.update({ where: { id: docId }, data: { status: 'POSTED', postedAt: new Date(), chargeFormId: cf.id } });
+          return;
+        }
         await tx.expiryWriteoffDoc.update({ where: { id: docId }, data: { status: 'POSTED', postedAt: new Date() } });
         await this.posting.post(tx, { type: 'ExpiryWriteoffDoc', id: doc.id, date: doc.docDate, createdBy: actorId }, (r) => r9Writeoff(r, { locationId: doc.locationId, controlNo: doc.controlNo, lines: doc.lines.map((l) => ({ accountingClass: l.product.category.accountingClass, qty: l.qty, unitCost: l.batch.unitCost })) }));
       });
+      if (chargeFormId) await this.charges.announce(chargeFormId);
     });
   }
 }

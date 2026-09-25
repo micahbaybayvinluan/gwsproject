@@ -50,6 +50,17 @@ Steps 1, 2, 3 and 5 of the migration plan (products, chart of accounts, opening 
 
 Every importer is also available in the UI (**Catalogue → Imports**) with template downloads and per-row error reporting; `.xlsm` uploads are accepted.
 
+### If you cannot sign in
+
+Keep the window running `pnpm dev` open. Open a second Terminal window and run:
+
+```
+cd /Users/micahVinluan/Downloads/gws-erp
+pnpm login-check
+```
+
+It checks the settings file, Docker (database and Redis), the app server and the web page, then tries to sign in as admin. Each problem it finds comes with the fix. `pnpm login-check --reset` also resets every demo account to the password `ChangeMe!2026`, switches it back on and removes any authenticator.
+
 ## Test accounts (created by the seed)
 
 See **SIMULATION-GUIDE.md** for the full account list (one per branch and franchise) and a 16-step walk-through across every role.

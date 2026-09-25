@@ -11,7 +11,8 @@
     "test": "pnpm -r run test",
     "typecheck": "pnpm -r run typecheck",
     "db:migrate": "pnpm --filter @gws/api prisma:migrate",
-    "db:seed": "pnpm --filter @gws/api prisma:seed"
+    "db:seed": "pnpm --filter @gws/api prisma:seed",
+    "login-check": "pnpm --filter @gws/api login-check"
   },
   "engines": { "node": ">=22" }
 }

@@ -16,7 +16,8 @@
     "prisma:deploy": "prisma migrate deploy",
     "prisma:seed": "tsx prisma/seed.ts",
     "import:products": "tsx src/imports/cli.ts products",
-    "import:coa": "tsx src/imports/cli.ts coa"
+    "import:coa": "tsx src/imports/cli.ts coa",
+    "login-check": "tsx prisma/login-check.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

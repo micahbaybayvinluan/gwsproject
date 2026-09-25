@@ -72,7 +72,7 @@ All seeded users share the password `ChangeMe!2026` (override with `SEED_PASSWOR
 | `acct.head` | ACCOUNTING_HEAD | finance | yes |
 | `acct.assoc` | ACCOUNTING_ASSOCIATE | finance | |
 | `hr.staff` | HR_STAFF | payroll only | |
-| `field.auditor` | FIELD_AUDITOR | West Ave, CSR | |
+| `field.auditor` | FIELD_AUDITOR | All branches, franchises and warehouse (inventory only, no cost) | |
 
 ## Tests
 
@@ -107,6 +107,30 @@ Sessions are server-side in Redis (30 min idle; 12 h for sales/franchise roles),
 - **Receiving side ticks.** The receiving location confirms each line with a tick ("arrived complete") or "tick all"; an unticked line needs the counted quantity and a note when short.
 - **Warehouse edits need the preparer's acceptance.** The Warehouse In-Charge (and Admin) can change a receiving or transfer that someone else prepared while it is a draft or awaiting approval; the change is sent to the preparer as a person-addressed "Warehouse edit" and applies only when they accept. A submitted document goes back through approval after an accepted edit.
 - **Warehouse transfers** go from the warehouse to any branch, franchise or consignee; the Warehouse Associate and In-Charge both see every destination.
+
+## HR, cash fund and audit rules (owner requests, 2026-09-26)
+
+- **Who sees supplier cost.** Only Admin/Owner, Head Auditor, Asst Auditor, Audit Associate, External Auditor, Accounting Head and Accounting Associate. Every other role gets cost fields removed by the server.
+- **Form numbers.** Every form starts with a 2-letter branch code and a 2-letter form code, e.g. `WA-DR-000001` (West Ave sale), `WH-PO-000004` (warehouse pull-out), `WA-CF-000002` (charge form). See `docs/decisions.md` D34 for the full list.
+- **Charges.** Discrepancies, expired or damaged items, cash shortages and other charges all use the charge form. HR only clicks: pick the staff, finalize, and payroll deducts it in the chosen number of pay periods. The staff member sees and acknowledges it under "My Pay & Charges".
+- **Write-offs.** Expired or damaged stock is either expensed by the company or charged to chosen staff. Inventory updates either way.
+- **Payroll privacy.** Names and breakdowns are visible to HR, the External Auditor, the Accounting Head and Admin. The Accounting Associate sees totals only.
+- **Government contributions.** SSS, PhilHealth and Pag-IBIG are computed per employee on each payroll run. The monthly register shows employee and employer shares, and remittances are recorded from the same screen.
+- **Branch cash fund.** Each branch has a fixed fund for small expenses, replenished from the day's cash sales. Balances show on the dashboards of Admin, the auditors and Accounting. The Field Auditor confirms the cash actually found.
+- **Field Auditor.** Sees inventory and expiries of every branch, franchise and the warehouse, without cost. Cannot sell or edit reports. Does audit counts, cash fund checks and the Store Inspection Report, which goes to HR with Admin and the Head Auditor notified.
+- **Count sheets.** Every item is listed with its start-of-day beginning count; the counter types only actual counts. Differences are computed and sent automatically. A submitted sheet is locked, and a revision needs the Head Auditor, with Admin notified.
+- **Weekly counts.** Each sales associate submits a weekly count sheet. The Head Auditor, Asst Auditor and Audit Associate are notified; the dashboard shows a red alarm until it is done; HR sees who is not complying.
+- **Discrepancy countdown.** Branch staff see, in bold red, the days left before a discrepancy is charged to them. They can send an explanation: HR is notified and the Head Auditor decides.
+- **AR payments.** Branch staff can enter a payment any day; the Accounting Associate or Head approves it. Accounting's own entries apply at once and the branch is notified. Each payment shows who entered it.
+- **Transfers.** A branch account's "From" is fixed to its branch. Sales associates request stock from the warehouse and only receive; the warehouse prepares the form.
+- **Expiry dates.** One item can carry several expiry dates. Receiving has "+ another expiry", and stock, count sheets, sales and transfers show the quantity per date.
+- **Revisions.** Audit Associate corrections go to the Head Auditor alone, and the staff member who made the document is notified. Every approved correction is kept in the Revision Log, which counts corrections per staff member.
+
+### Forms in the system
+
+Charge Form (discrepancy, expired, damaged, cash shortage, other), Salary Deduction Authorization, Payslip, Employee Ledger, Contributions Register (SSS / PhilHealth / Pag-IBIG), Cash Fund Replenishment Voucher, Store Inspection Report, Inventory Count Sheet (audit and weekly), Discrepancy Report, Stock Request, Pull-Out, Transfer-In, Receiving, DR/Sales, Credit Note, Expense, Write-off.
+
+Recommended next: Final Pay and Clearance, 13th-Month Pay Report, Notice to Explain (NTE) and Incident Report, Leave and Overtime requests.
 
 ## Decisions to confirm with the owner
 

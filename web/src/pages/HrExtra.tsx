@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { api, fmtDate, peso, today } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { Badge, Button, Card, Empty, ErrorBox, Field, Input, Select } from '@/components/ui/primitives';
@@ -91,4 +91,30 @@ export function WeeklyCompliancePage() {
       <tbody>{d.rows.map((r) => <tr key={r.userId} className="border-t"><td className="px-2 py-1">{r.name}<div className="text-[10px] text-slate-400">{r.username}{r.idNumber ? ` · ${r.idNumber}` : ''}</div></td><td className="px-2">{r.branch}</td><td className={`px-2 num font-semibold ${r.missed ? 'text-red-700' : ''}`}>{r.missed}</td><td className="px-2 num">{r.compliancePct}%</td>
         {r.weeks.map((w) => <td key={w.weekStart} className={`px-1 text-center ${w.submitted ? 'bg-emerald-50 text-emerald-700' : w.current ? 'bg-amber-50 text-amber-700' : 'bg-red-50 font-bold text-red-700'}`}>{w.submitted ? (w.countId ? <Link to={`/counts/${w.countId}`} title={w.controlNo ?? ''}>✔</Link> : '✔') : w.current ? '…' : '✘'}</td>)}</tr>)}</tbody></table></div>}
   </div>;
+}
+
+/** HR creates a charge form by clicking: kind, branch, staff, and what is charged (no upload). */
+export function NewChargeFormCard() {
+  const qc = useQueryClient(); const nav = useNavigate();
+  const [open, setOpen] = useState(false);
+  const [f, setF] = useState({ kind: 'DAMAGED', locationId: '', reason: '' });
+  const [lines, setLines] = useState<{ description: string; qty: string; unitCharge: string }[]>([{ description: '', qty: '1', unitCharge: '' }]);
+  const [emp, setEmp] = useState<Set<string>>(new Set());
+  const locations = useQuery({ queryKey: ['locations'], queryFn: () => api.get<{ id: string; name: string; type: string }[]>('/api/locations'), enabled: open });
+  const staff = useQuery({ queryKey: ['staff', f.locationId], queryFn: () => api.get<{ id: string; fullName: string; position: string | null }[]>(`/api/staff?locationId=${f.locationId}`), enabled: open && !!f.locationId });
+  const total = lines.reduce((s, l) => s + Number(l.qty || 0) * Number(l.unitCharge || 0), 0);
+  const m = useMutation({ mutationFn: () => api.post<{ id: string }>('/api/charge-forms', { kind: f.kind, locationId: f.locationId, reason: f.reason, employeeIds: [...emp], lines: lines.filter((l) => l.description && Number(l.qty) > 0).map((l) => ({ description: l.description, qty: Number(l.qty), unitCharge: Number(l.unitCharge || 0) })) }), onSuccess: (r) => { void qc.invalidateQueries({ queryKey: ['charge-forms'] }); nav(`/charge-forms/${r.id}`); } });
+  if (!open) return <Button onClick={() => setOpen(true)}>New charge form</Button>;
+  return <Card title="New charge form">
+    <div className="grid gap-3 md:grid-cols-3">
+      <Field label="Kind"><Select value={f.kind} onChange={(e) => setF({ ...f, kind: e.target.value })}><option value="DAMAGED">Damaged items</option><option value="EXPIRED">Expired items</option><option value="CASH_SHORTAGE">Cash shortage</option><option value="OTHER">Other</option></Select></Field>
+      <Field label="Branch"><Select value={f.locationId} onChange={(e) => { setF({ ...f, locationId: e.target.value }); setEmp(new Set()); }}><option value="">—</option>{locations.data?.filter((l) => ['BRANCH', 'WAREHOUSE', 'OFFICE', 'FRANCHISE'].includes(l.type)).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</Select></Field>
+      <Field label="Reason"><Input value={f.reason} onChange={(e) => setF({ ...f, reason: e.target.value })} placeholder="e.g. 2 tubs dropped on 25 Sep" /></Field>
+    </div>
+    <table className="mt-3 w-full text-sm"><thead className="text-left text-xs text-slate-500"><tr><th>What is charged</th><th>Qty</th><th>Amount each (₱)</th><th className="num">Total</th><th /></tr></thead><tbody>{lines.map((l, i) => <tr key={i} className="border-t"><td><Input value={l.description} onChange={(e) => setLines(lines.map((x, k) => (k === i ? { ...x, description: e.target.value } : x)))} /></td><td><Input type="number" min={1} className="w-20" value={l.qty} onChange={(e) => setLines(lines.map((x, k) => (k === i ? { ...x, qty: e.target.value } : x)))} /></td><td><Input type="number" step="0.01" className="w-28" value={l.unitCharge} onChange={(e) => setLines(lines.map((x, k) => (k === i ? { ...x, unitCharge: e.target.value } : x)))} /></td><td className="num">{peso(Number(l.qty || 0) * Number(l.unitCharge || 0))}</td><td>{lines.length > 1 && <button className="text-red-600" onClick={() => setLines(lines.filter((_, k) => k !== i))}>✕</button>}</td></tr>)}</tbody></table>
+    <button type="button" className="mt-1 text-xs text-brand underline" onClick={() => setLines([...lines, { description: '', qty: '1', unitCharge: '' }])}>+ add a line</button>
+    {f.locationId && <div className="mt-3"><div className="text-xs uppercase text-slate-500">Charge to (split equally; you can change the split after)</div><div className="mt-1 flex flex-wrap gap-3">{staff.data?.map((e) => <label key={e.id} className="flex items-center gap-1 text-sm"><input type="checkbox" checked={emp.has(e.id)} onChange={(ev) => { const n = new Set(emp); if (ev.target.checked) n.add(e.id); else n.delete(e.id); setEmp(n); }} />{e.fullName}</label>)}{staff.data?.length === 0 && <span className="text-sm text-slate-500">No employees at this branch yet.</span>}</div></div>}
+    <div className="mt-3 flex items-center gap-2"><Button disabled={!f.locationId || !f.reason || total <= 0 || m.isPending} onClick={() => m.mutate()}>Create charge form ({peso(total)})</Button><Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button></div>
+    <ErrorBox error={m.error} />
+  </Card>;
 }

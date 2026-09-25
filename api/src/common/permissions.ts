@@ -219,7 +219,7 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
     key: 'HR_STAFF',
     name: 'HR Staff',
     description: 'Payroll runs, employee master, loans/advances, charge-form allocation. Zero access to inventory/sales.',
-    permissions: ['payroll.view.summary', 'payroll.view.detail', 'payroll.edit', 'employee.manage', 'charge_form.finalize', 'dashboard.view', 'notification.view', 'inspection.view', 'inspection.review', 'contribution.remit', 'revision.view'],
+    permissions: ['payroll.view.summary', 'payroll.view.detail', 'payroll.edit', 'employee.manage', 'location.view.all', 'charge_form.finalize', 'dashboard.view', 'notification.view', 'inspection.view', 'inspection.review', 'contribution.remit', 'revision.view'],
   },
   {
     key: 'FIELD_AUDITOR',

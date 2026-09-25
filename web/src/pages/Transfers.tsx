@@ -6,7 +6,7 @@ import { useAuth } from '@/lib/auth';
 import { Badge, Button, Card, ErrorBox, Field, Input, Select, statusTone } from '@/components/ui/primitives';
 import { DataTable } from '@/components/ui/table';
 import { Attachments } from '@/components/Attachments';
-import { EditRequests, History, TransferEditor, useEditRights } from '@/components/DocEdits';
+import { CorrectionRequest, EditRequests, History, TransferEditor, useEditRights } from '@/components/DocEdits';
 
 interface Tr { id: string; controlNo: string; docDate: string; status: string; transferType: string; notes: string | null; preparedBy?: string; preparedByName?: string | null; receivedByName?: string | null; fromLocation: { id: string; name: string; type: string }; toLocation: { id: string; name: string; type: string }; lines: { id: string; qtySent: number; qtyReceived: number | null; discrepancyNote: string | null; checkerRemarks: string | null; product: { name: string; sku: string }; batch: { batchNo: string | null; expiryDate: string | null } }[] }
 
@@ -16,20 +16,22 @@ export function TransfersPage() {
   const [direction, setDirection] = useState(sp.get('direction') ?? '');
   const q = useQuery({ queryKey: ['transfers', direction], queryFn: () => api.get<Tr[]>(`/api/transfers${direction ? `?direction=${direction}` : ''}`) });
   const locations = useQuery({ queryKey: ['locations'], queryFn: () => api.get<{ id: string; name: string; type: string; code: string }[]>('/api/locations') });
-  const wh = locations.data?.find((l) => l.type === 'WAREHOUSE'); const own = me!.locations[0];
+  const own = me!.locations[0];
   const [f, setF] = useState({ fromLocationId: '', toLocationId: '', transferType: 'RESTOCK', returnReason: '', notes: '' });
   const [lines, setLines] = useState<{ productId: string; name: string; qty: number }[]>([]); const [search, setSearch] = useState('');
   // Warehouse staff send from their warehouse to any branch / franchise / consignee; branch staff request from the warehouse to their branch.
   const warehouseUser = me!.locations.some((l) => l.type === 'WAREHOUSE');
-  const from = f.fromLocationId || (me!.locationScoped ? (warehouseUser ? own?.id : wh?.id) ?? '' : ''); const to = f.toLocationId || (me!.locationScoped && !warehouseUser ? own?.id ?? '' : '');
+  // a branch account always sends from its own branch ("From" is fixed); only "To" is chosen
+  const from = me!.locationScoped ? own?.id ?? '' : f.fromLocationId; const to = f.toLocationId || (sp.get('to') && sp.get('to') !== from ? sp.get('to')! : '');
   const products = useQuery({ queryKey: ['products', search], queryFn: () => api.get<{ id: string; name: string; sku: string }[]>(`/api/products?search=${encodeURIComponent(search)}&take=20`), enabled: search.length >= 2 });
   const avail = useQuery({ queryKey: ['wh-avail', lines.map((l) => l.productId).join()], queryFn: () => api.get<{ productId: string; qty: number }[]>(`/api/stock/warehouse-availability?productIds=${lines.map((l) => l.productId).join(',')}`), enabled: lines.length > 0 });
   const m = useMutation({ mutationFn: () => api.post<{ id: string }>('/api/transfers', { fromLocationId: from, toLocationId: to, transferType: f.transferType, returnReason: f.returnReason || undefined, notes: f.notes, lines: lines.map((l) => ({ productId: l.productId, qty: l.qty })) }), onSuccess: (r) => { void qc.invalidateQueries({ queryKey: ['transfers'] }); nav(`/transfers/${r.id}`); } });
   return <div className="space-y-4">
     <div className="flex flex-wrap items-end gap-2"><h1 className="mr-auto text-xl font-semibold">Transfers (Pull-Out / Transfer-In)</h1><Field label="View"><Select value={direction} onChange={(e) => setDirection(e.target.value)}><option value="">All</option><option value="out">Outgoing (Pull-Out)</option><option value="in">Incoming (Transfer-In)</option></Select></Field></div>
-    {can('transfer.create') && <Card title={warehouseUser ? 'Send stock from the warehouse (to a branch, franchise or consignee)' : me!.locationScoped ? 'Request stock from warehouse / send from my branch' : 'New transfer'}>
+    {me!.locationScoped && !warehouseUser && (can('transfer.confirm') || can('transfer.create')) && <StockRequestCard />}
+    {can('transfer.create') && <Card title={warehouseUser ? 'Send stock from the warehouse (to a branch, franchise or consignee)' : me!.locationScoped ? `Pull-out from ${own?.name ?? 'my branch'} (return to warehouse or send to another branch)` : 'New transfer'}>
       <div className="grid gap-3 md:grid-cols-4">
-        <Field label="From"><Select value={from} onChange={(e) => setF({ ...f, fromLocationId: e.target.value })}><option value="">—</option>{locations.data?.filter((l) => !me!.locationScoped || l.type === 'WAREHOUSE' || me!.locations.some((x) => x.id === l.id) || l.code === 'V-CUSTRET').map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</Select></Field>
+        <Field label="From">{me!.locationScoped ? <div className="flex min-h-9 items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm font-medium" data-testid="from-fixed">{own?.name ?? '—'}</div> : <Select value={from} onChange={(e) => setF({ ...f, fromLocationId: e.target.value })}><option value="">—</option>{locations.data?.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</Select>}</Field>
         <Field label="To"><Select value={to} onChange={(e) => setF({ ...f, toLocationId: e.target.value })}><option value="">—</option>{locations.data?.filter((l) => (l.type !== 'VIRTUAL' || l.code === 'V-CUSTRET') && l.id !== from).map((l) => <option key={l.id} value={l.id}>{l.name}{l.type === 'FRANCHISE' ? ' (franchise)' : l.type === 'CONSIGNEE' ? ' (consignee)' : ''}</option>)}</Select></Field>
         <Field label="Type"><Select value={f.transferType} onChange={(e) => setF({ ...f, transferType: e.target.value })}>{['RESTOCK', 'RETURN', 'REPLACEMENT', 'INTERNAL', 'CONSIGNMENT_OUT', 'CONSIGNMENT_RETURN'].map((t) => <option key={t}>{t}</option>)}</Select></Field>
         {f.transferType === 'RETURN' && <Field label="Return reason"><Select value={f.returnReason} onChange={(e) => setF({ ...f, returnReason: e.target.value })}><option value="">—</option>{['clumped', 'damaged', 'wrong item', 'expired', 'other'].map((r) => <option key={r}>{r}</option>)}</Select></Field>}
@@ -90,6 +92,22 @@ export function TransferDetailPage() {
       <ErrorBox error={submit.error || confirm.error || resolve.error} />
     </Card>
     <Attachments type="TransferDoc" id={d.id} />
+    {!draft && d.status !== 'VOIDED' && can('revision.request') && <CorrectionRequest documentType="TransferDoc" documentId={d.id} fields={[{ key: 'notes', label: 'Notes / remarks', current: d.notes }]} />}
     <History entityType="TransferDoc" id={d.id} />
   </div>;
+}
+
+/** Branch staff ask the warehouse for stock; the warehouse prepares the transfer and the branch only receives it (owner request 2026-09-26). */
+function StockRequestCard() {
+  const [items, setItems] = useState<{ productId: string; name: string; qty: number }[]>([]); const [search, setSearch] = useState(''); const [notes, setNotes] = useState('');
+  const products = useQuery({ queryKey: ['products', search], queryFn: () => api.get<{ id: string; name: string; sku: string }[]>(`/api/products?search=${encodeURIComponent(search)}&take=20`), enabled: search.length >= 2 });
+  const m = useMutation({ mutationFn: () => api.post<{ items: string }>('/api/transfers/request-stock', { items: items.map((i) => ({ productId: i.productId, qty: i.qty })), notes: notes || undefined }), onSuccess: () => { setItems([]); setNotes(''); } });
+  return <Card title="Request stock from the warehouse">
+    <p className="mb-2 text-sm text-slate-600">The warehouse is notified and prepares the transfer. You do not make a form: the Transfer-In copy appears under Incoming for you to check and receive.</p>
+    <Input placeholder="Add product…" value={search} onChange={(e) => setSearch(e.target.value)} />{search.length >= 2 && <ul className="max-h-48 divide-y overflow-auto rounded border bg-white">{products.data?.map((p) => <li key={p.id}><button className="w-full px-3 py-2 text-left text-sm hover:bg-slate-50" onClick={() => { setItems([...items, { productId: p.id, name: p.name, qty: 1 }]); setSearch(''); }}>{p.name} <span className="text-xs text-slate-500">{p.sku}</span></button></li>)}</ul>}
+    {items.length > 0 && <table className="mt-2 w-full text-sm"><tbody>{items.map((l, i) => <tr key={i} className="border-t"><td>{l.name}</td><td><Input type="number" min={1} className="w-24" value={l.qty} onChange={(e) => setItems(items.map((x, k) => (k === i ? { ...x, qty: Number(e.target.value) } : x)))} /></td><td><button className="text-red-600" onClick={() => setItems(items.filter((_, k) => k !== i))}>✕</button></td></tr>)}</tbody></table>}
+    <Field label="Notes" className="mt-2"><Input value={notes} onChange={(e) => setNotes(e.target.value)} /></Field>
+    <Button className="mt-2" disabled={!items.length || items.some((i) => !(i.qty > 0)) || m.isPending} onClick={() => m.mutate()}>Send request to the warehouse</Button>
+    {m.isSuccess && <p className="mt-2 text-sm text-emerald-700">Request sent: {m.data.items}</p>}<ErrorBox error={m.error} />
+  </Card>;
 }

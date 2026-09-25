@@ -288,10 +288,12 @@ export class CountsService implements OnModuleInit {
   private canSeeAllocations(user: SessionUser) { return ['charge_form.finalize', 'payroll.view.detail', 'charge.assign', 'discrepancy.resolve'].some((k) => user.permissions.has(k)); }
   private hideAllocations<T extends { allocations: unknown[] }>(user: SessionUser, cf: T) { return this.canSeeAllocations(user) ? cf : { ...cf, allocations: [], allocationsHidden: cf.allocations.length }; }
   async chargeForms(user: SessionUser, q: { kind?: string; status?: string } = {}) {
+    if (user.roleKey === 'FIELD_AUDITOR') throw new ForbiddenException('The Field Auditor sees inventory only');
     const rows = await this.prisma.db.chargeForm.findMany({ where: { ...(user.locationScoped ? { locationId: { in: user.locationIds } } : {}), kind: (q.kind || undefined) as never, finalizedByHrAt: q.status === 'OPEN' ? null : q.status === 'FINALIZED' ? { not: null } : undefined }, include: { location: { select: { code: true, name: true } }, allocations: { include: { employee: { select: { fullName: true, employeeNo: true } } } } }, orderBy: { createdAt: 'desc' } });
     return rows.map((r) => ({ ...this.hideAllocations(user, r), kindLabel: KIND_LABEL[r.kind] }));
   }
   async chargeForm(id: string, user?: SessionUser) {
+    if (user?.roleKey === 'FIELD_AUDITOR') throw new ForbiddenException('The Field Auditor sees inventory only');
     const cf = await this.prisma.db.chargeForm.findUnique({ where: { id }, include: { location: true, lines: { include: { product: { select: { sku: true, name: true } } } }, allocations: { include: { employee: { select: { id: true, employeeNo: true, fullName: true } } } } } });
     if (!cf) throw new NotFoundException();
     if (user?.locationScoped && !user.locationIds.includes(cf.locationId)) throw new ForbiddenException();

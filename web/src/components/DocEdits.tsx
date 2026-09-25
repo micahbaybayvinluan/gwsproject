@@ -113,3 +113,24 @@ export function TransferEditor({ doc, own, preparedByName, onClose }: { doc: TrD
     <ErrorBox error={save.error} />
   </Card>;
 }
+
+/**
+ * Audit Associate correction request (owner request 2026-09-26): the Head Auditor alone approves, the staff member who made the
+ * document is notified, and every approved correction is logged against that staff member (Revision Log).
+ */
+export function CorrectionRequest({ documentType, documentId, fields }: { documentType: 'SalesDoc' | 'ExpenseDoc' | 'TransferDoc'; documentId: string; fields: { key: string; label: string; current: string | null; type?: 'text' | 'number' }[] }) {
+  const [key, setKey] = useState(fields[0]?.key ?? ''); const [value, setValue] = useState(''); const [reason, setReason] = useState(''); const [voidIt, setVoidIt] = useState(false);
+  const f = fields.find((x) => x.key === key);
+  const m = useMutation({ mutationFn: () => api.post('/api/closing/edits', { documentType, documentId, reason, after: voidIt ? { voidReason: reason } : { [key]: f?.type === 'number' ? Number(value) : value } }), onSuccess: () => { setValue(''); setReason(''); setVoidIt(false); } });
+  return <Card title="Request a correction (Head Auditor approves)">
+    <p className="mb-2 text-sm text-slate-600">Nothing changes until the Head Auditor approves. The staff member who made this document is notified, and the correction is recorded in the Revision Log.</p>
+    <div className="grid gap-2 md:grid-cols-3">
+      <Field label="What to correct"><Select value={voidIt ? '__void' : key} onChange={(e) => { if (e.target.value === '__void') setVoidIt(true); else { setVoidIt(false); setKey(e.target.value); } }}>{fields.map((x) => <option key={x.key} value={x.key}>{x.label}</option>)}<option value="__void">Void the whole document</option></Select></Field>
+      {!voidIt && <Field label={`New value (now: ${f?.current ?? '—'})`}><Input type={f?.type === 'number' ? 'number' : 'text'} value={value} onChange={(e) => setValue(e.target.value)} /></Field>}
+      <Field label="Reason / error found"><Input value={reason} onChange={(e) => setReason(e.target.value)} /></Field>
+    </div>
+    <Button className="mt-2" disabled={reason.length < 3 || (!voidIt && value === '') || m.isPending} onClick={() => m.mutate()}>Send to the Head Auditor</Button>
+    {m.isSuccess && <p className="mt-2 text-sm text-emerald-700">Sent to the Head Auditor. The staff member was notified.</p>}
+    <ErrorBox error={m.error} />
+  </Card>;
+}

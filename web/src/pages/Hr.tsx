@@ -5,7 +5,7 @@ import { api, fmtDate, peso } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { Badge, Button, Card, ErrorBox, Field, Input, Select, statusTone } from '@/components/ui/primitives';
 import { DataTable } from '@/components/ui/table';
-import { ContributionsPanel, EmployeeLinks } from './HrExtra';
+import { ContributionsPanel, EmployeeLinks, NewChargeFormCard } from './HrExtra';
 
 interface CF { id: string; controlNo: string; kind: string; kindLabel: string; sourceType: string | null; totalAmount: string; reason: string | null; finalizedByHrAt: string | null; createdAt: string; location: { name: string }; lines?: { qty: number; unitCharge: string; amount: string; description: string | null; product: { name: string; sku: string } | null }[]; allocations: { id: string; employeeId: string; amount: string; deductedToDate: string; acknowledgedAt: string | null; employee: { fullName: string; employeeNo: string } }[]; allocationsHidden?: number }
 
@@ -34,7 +34,7 @@ export function ChargeFormsPage() {
       </Card>
     </div>;
   }
-  return <div className="space-y-4"><h1 className="text-xl font-semibold">Charge forms</h1><DataTable data={list.data ?? []} onRowClick={(r) => nav(`/charge-forms/${r.id}`)} columns={[{ header: 'Control #', accessorKey: 'controlNo' }, { header: 'Location', accessorFn: (r) => r.location.name }, { header: 'Type', accessorKey: 'kindLabel' }, { header: 'Reason', accessorFn: (r) => r.reason ?? '' }, { header: 'Total', accessorKey: 'totalAmount', cell: (c) => <span className="num block">{peso(c.getValue())}</span> }, { header: 'Charged to', accessorFn: (r) => (r.allocationsHidden ? `${r.allocationsHidden} staff` : r.allocations.map((a) => a.employee.fullName).join(', ')) }, { header: 'Acknowledged', accessorFn: (r) => (r.allocations.length ? `${r.allocations.filter((a) => a.acknowledgedAt).length}/${r.allocations.length}` : '') }, { header: 'Status', cell: (c) => <Badge tone={c.row.original.finalizedByHrAt ? 'green' : 'amber'}>{c.row.original.finalizedByHrAt ? 'FINALIZED' : 'PENDING'}</Badge> }]} /></div>;
+  return <div className="space-y-4"><h1 className="text-xl font-semibold">Charge forms</h1>{can('charge_form.finalize') && <NewChargeFormCard />}<DataTable data={list.data ?? []} onRowClick={(r) => nav(`/charge-forms/${r.id}`)} columns={[{ header: 'Control #', accessorKey: 'controlNo' }, { header: 'Location', accessorFn: (r) => r.location.name }, { header: 'Type', accessorKey: 'kindLabel' }, { header: 'Reason', accessorFn: (r) => r.reason ?? '' }, { header: 'Total', accessorKey: 'totalAmount', cell: (c) => <span className="num block">{peso(c.getValue())}</span> }, { header: 'Charged to', accessorFn: (r) => (r.allocationsHidden ? `${r.allocationsHidden} staff` : r.allocations.map((a) => a.employee.fullName).join(', ')) }, { header: 'Acknowledged', accessorFn: (r) => (r.allocations.length ? `${r.allocations.filter((a) => a.acknowledgedAt).length}/${r.allocations.length}` : '') }, { header: 'Status', cell: (c) => <Badge tone={c.row.original.finalizedByHrAt ? 'green' : 'amber'}>{c.row.original.finalizedByHrAt ? 'FINALIZED' : 'PENDING'}</Badge> }]} /></div>;
 }
 
 /** §11 Payroll: employees, runs (create → edit → HR finalize → Accounting Head close with paying account). */

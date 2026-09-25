@@ -34,7 +34,7 @@ Two-factor codes are switched off for the simulation (`AUTH_TOTP_OPTIONAL=true` 
 | XII | Accounting Head | `acct.head` | Finance | Yes |
 | XIII | Accounting Associate | `acct.assoc` | Finance (payroll totals only) | Yes |
 | XIV | HR Staff | `hr.staff` | Payroll & charge forms only | No |
-| XV | Field Auditor | `field.auditor` | West Ave + CSR (read-only + counts) | No |
+| XV | Field Auditor | `field.auditor` | Every branch, franchise and the warehouse (inventory only, counts, inspections) | No |
 
 Admin can add more users of any role under **Admin → Users & Roles** (for example a Sales Associate for another branch or a Franchise Owner for Parañaque): username, email, the person's full name, their **company ID number** (required), role, a temporary password, and the branch(es) to assign. At first sign-in that person must set their own password and accept the accountability statement. Users & Roles shows each person's ID, whether they accepted, their last sign-in and recent devices; **Activity** opens everything they did in the Audit Log.
 
@@ -106,6 +106,33 @@ As `wh.incharge`, open a draft (or submitted, not yet approved) receiving or tra
 
 **20. One person per account** — `admin`
 Users & Roles → New user: full name, company ID, role, temporary password, branch → Create. Sign in as the new user: they must set their own password, then accept the statement. Sign in to the same account in a second window: the first window is signed out and the person gets a notification.
+
+**21. Charges from HR, with no uploads** — `hr.staff`, then `sales.westave`
+As `hr.staff`: HR → Charge Forms → New charge form → kind "Damaged" (or Expired, Cash shortage, Other), branch West Ave, tick the staff, add a line → Create. Open it → Finalize with the number of pay periods → print the Charge Form or the Salary Deduction Authorization. As `sales.westave`: the dashboard shows "My charges"; My Pay & Charges → Acknowledge.
+
+**22. Expired or damaged items: company or staff** — `sales.westave`, then `head.auditor`
+Inventory → Write-offs → choose "Charged to staff" and tick who, or "Expensed by the company". After approval, the stock leaves the inventory. A staff charge appears in HR's Charge Forms and in the staff member's My Pay & Charges.
+
+**23. Government contributions** — `hr.staff`, then `acct.assoc`
+HR → Payroll & Contributions → run a payroll (the SSS, PhilHealth and Pag-IBIG tables are already loaded) → the Contributions register lists each employee's share and the employer share → Record payment. Sign in as `acct.assoc`: the same screens show totals only, without names.
+
+**24. Branch cash fund** — `sales.westave`, then `admin`, then `field.auditor`
+Expenses → Paid from "Cash fund" → save. Cash Fund → "Replenish from today's cash sales"; Daily Close shows it lowers the cash for deposit. `admin` sees every branch fund on the dashboard. `field.auditor` → Cash Fund → pick the branch → type the cash found → Confirm count.
+
+**25. Field Auditor: count sheet and store inspection** — `field.auditor`, then `head.auditor`
+Inventory Count → choose the branch → Create count sheet. Every item is listed with its beginning count; type the actual counts → Submit. The sheet is now locked; "Correct this count…" sends a revision to the Head Auditor, and Admin is notified. Store Inspections → New → fill the 19 checklist items from the paper form → Submit to HR. HR, Admin and the Head Auditor are notified.
+
+**26. Weekly count and discrepancy countdown** — `sales.csr`, then `hr.staff`
+Sign in as `sales.csr`: the dashboard shows a red "weekly count sheet" alarm → Start my weekly count → type actual counts → Submit. `hr.staff` → Weekly Count Compliance shows who submitted. When a discrepancy is open, the sales associate's dashboard shows the days left in bold red and an Explain button.
+
+**27. AR payment from the branch** — `sales.westave`, then `acct.assoc`
+AR / Credit → tick an invoice → enter the amount → "Send payment for Accounting approval". The payment shows "Waiting for Accounting". As `acct.assoc`: Approvals → AR payment → Approve. The invoice balance drops and the credit note is issued.
+
+**28. Audit Associate correction and the Revision Log** — `audit.assoc`, then `head.auditor`, then `hr.staff`
+As `audit.assoc`: open a sale → "Request a correction" → choose the field, type the new value and the error found → Send. The sales associate is notified. As `head.auditor`: Approvals → "Audit Associate correction" → Approve (only the Head Auditor can). HR → Revision Log shows every correction and a count per staff member.
+
+**29. Stock request and fixed "From"** — `sales.westave`, then `wh.assoc`
+Transfers → "Request stock from the warehouse" → add items → Send. The pull-out form's "From" is fixed to West Ave. As `wh.assoc`: the notification opens Transfers with the branch already chosen as "To". Receiving → "+ another expiry" records one item with two expiry dates.
 
 ## Where the files come out
 

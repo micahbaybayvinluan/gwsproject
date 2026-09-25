@@ -27,6 +27,7 @@ import { AccountsPage, VouchersPage, TrialBalancePage, StatementsPage, PeriodsPa
 import { ChargeFormsPage, PayrollPage } from './pages/Hr';
 import { UsersPage, AuditLogPage, SettingsPage } from './pages/Admin';
 import { MyHrPage, WeeklyCompliancePage } from './pages/HrExtra';
+import { RevisionsPage } from './pages/Revisions';
 import { CashFundPage } from './pages/CashFund';
 import { InspectionDetailPage, InspectionFormPage, InspectionsPage } from './pages/Inspections';
 import { CustomersReportPage, InventoryCostPage } from './pages/ReportsExtra';
@@ -90,6 +91,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
               <Route path="/payroll" element={<PayrollPage />} />
               <Route path="/my-hr" element={<MyHrPage />} />
               <Route path="/hr/weekly-counts" element={<WeeklyCompliancePage />} />
+              <Route path="/revisions" element={<RevisionsPage />} />
               <Route path="/cash-fund" element={<CashFundPage />} />
               <Route path="/inspections" element={<InspectionsPage />} />
               <Route path="/inspections/new" element={<InspectionFormPage />} />

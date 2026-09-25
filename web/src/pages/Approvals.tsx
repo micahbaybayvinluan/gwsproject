@@ -6,7 +6,8 @@ import { useAuth } from '@/lib/auth';
 import { Badge, Button, Card, Empty, ErrorBox, Input, statusTone } from '@/components/ui/primitives';
 
 interface Req { id: string; type: string; documentType: string; documentId: string; requestedBy: string; requesterName: string; requiredApproverRoles: string[]; anyOf: boolean; status: string; summary: Record<string, unknown> | null; autoApproveAt: string | null; createdAt: string; decisions: { roleKey: string; decision: string; note: string | null; user: { fullName: string } }[] }
-const LINKS: Record<string, string> = { ReceivingDoc: '/receiving', TransferDoc: '/transfers', SalesDoc: '/sales', ExpiryWriteoffDoc: '/writeoffs', PriceChangeDoc: '/price-changes', CountDoc: '/counts', DiscrepancyCase: '/discrepancies', PostCloseEdit: '/closing' };
+const LINKS: Record<string, string> = { ReceivingDoc: '/receiving', TransferDoc: '/transfers', SalesDoc: '/sales', ExpiryWriteoffDoc: '/writeoffs', PriceChangeDoc: '/price-changes', CountDoc: '/counts', DiscrepancyCase: '/discrepancies', PostCloseEdit: '/closing', Payment: '/ar' };
+const TYPE_LABEL: Record<string, string> = { AUDIT_REVISION: 'Audit Associate correction (Head Auditor only)', AR_PAYMENT: 'AR payment entered by branch', COUNT_REVISION: 'Count sheet revision', DISCREPANCY_EXPLANATION: 'Discrepancy explanation', WAREHOUSE_EDIT: 'Edit of your warehouse document' };
 
 /** §6.2 Approvals inbox: grouped by type, newest first, select-all + bulk approve/reject with one note, inline expand. */
 export function ApprovalsPage() {
@@ -33,7 +34,7 @@ export function ApprovalsPage() {
       {results && <div className="mt-2 text-sm">{results.filter((r) => r.ok).length} succeeded{results.some((r) => !r.ok) && <ul className="list-disc pl-5 text-red-700">{results.filter((r) => !r.ok).map((r) => <li key={r.id}>{r.error}</li>)}</ul>}</div>}
     </Card>
     {!items.length && <Empty>Nothing waiting for you.</Empty>}
-    {groups.map((g) => <Card key={g.type} title={<>{g.type.replace(/_/g, ' ')} <Badge>{g.items.length}</Badge></>}>
+    {groups.map((g) => <Card key={g.type} title={<>{TYPE_LABEL[g.type] ?? g.type.replace(/_/g, ' ')} <Badge>{g.items.length}</Badge></>}>
       <ul className="divide-y">{g.items.map((r) => <li key={r.id} className="py-2">
         <div className="flex flex-wrap items-start gap-2">
           <input type="checkbox" className="mt-1" checked={selected.has(r.id)} onChange={() => toggle(r.id)} />
@@ -49,7 +50,7 @@ export function ApprovalsPage() {
         </div>}
         {open === r.id && <div className="mt-2 rounded bg-slate-50 p-3 text-sm">
           <Summary s={r.summary} showCost={can('cost.view')} />
-          <Link className="mt-2 inline-block text-brand underline" to={`${LINKS[r.documentType] ?? '/'}${r.documentType === 'PostCloseEdit' ? '' : `/${r.documentId}`}`}>Open full document</Link>
+          <Link className="mt-2 inline-block text-brand underline" to={`${LINKS[r.documentType] ?? '/'}${['PostCloseEdit', 'Payment'].includes(r.documentType) ? '' : `/${r.documentId}`}`}>Open full document</Link>
         </div>}
       </li>)}</ul>
     </Card>)}

@@ -264,8 +264,11 @@ export class SalesService implements OnModuleInit {
     });
   }
 
-  creditNotes(user: SessionUser, q: { from?: string; to?: string }) {
-    return this.prisma.db.payment.findMany({ where: { voidedAt: null, businessDate: q.from || q.to ? { gte: q.from ? toDateOnly(q.from) : undefined, lte: q.to ? toDateOnly(q.to) : undefined } : undefined, ...(user.locationScoped ? { OR: [{ allocations: { some: { salesDoc: { locationId: { in: user.locationIds } } } } }, { locationId: { in: user.locationIds } }] } : {}) }, include: { customer: true, allocations: { include: { salesDoc: { select: { drSiNo: true, locationId: true } } } } }, orderBy: { receivedAt: 'desc' } });
+  async creditNotes(user: SessionUser, q: { from?: string; to?: string }) {
+    const rows = await this.prisma.db.payment.findMany({ where: { voidedAt: null, businessDate: q.from || q.to ? { gte: q.from ? toDateOnly(q.from) : undefined, lte: q.to ? toDateOnly(q.to) : undefined } : undefined, ...(user.locationScoped ? { OR: [{ allocations: { some: { salesDoc: { locationId: { in: user.locationIds } } } } }, { locationId: { in: user.locationIds } }] } : {}) }, include: { customer: true, allocations: { include: { salesDoc: { select: { drSiNo: true, locationId: true } } } } }, orderBy: { receivedAt: 'desc' } });
+    // who entered each payment (branch transactions are shared by the branch but tagged to the person)
+    const users = await this.prisma.db.user.findMany({ where: { id: { in: [...new Set(rows.map((r) => r.createdBy).filter((x): x is string => !!x))] } }, select: { id: true, fullName: true } });
+    return rows.map((r) => ({ ...r, enteredBy: users.find((u) => u.id === r.createdBy)?.fullName ?? null }));
   }
 
   /** §8.2 Agent sales report per agent per period with totals by payment mode. */

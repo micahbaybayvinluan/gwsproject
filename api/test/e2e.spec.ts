@@ -628,6 +628,7 @@ describe('field auditor: inventory of every branch and franchise, no sales, no c
     await as('field.auditor').post('/api/sales').send({ locationId: dasma, channel: 'WALK_IN', paymentMode: 'CASH', drSiNo: `FA-${run}`, lines: [] }).expect(403);
     await as('field.auditor').get(`/api/reports/daily-sales?locationId=${dasma}`).expect(403);
     await as('field.auditor').get('/api/sales').expect(403);
+    await as('field.auditor').get('/api/charge-forms').expect(403);
     const me = ok(await as('field.auditor').get('/api/auth/me')).body; expect(me.locationScoped).toBe(false); expect(me.permissions).not.toContain('sale.create');
   });
 });

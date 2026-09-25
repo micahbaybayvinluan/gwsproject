@@ -8,7 +8,7 @@ Things the build had to decide that the spec does not cover, or where the spec l
 | D2 | Bundles | Selling a bundle product consumes its components (FEFO per component) and records the bundle SKU on the sale line; component picks are recorded in the ledger. | §4.2 "Selling a bundle consumes components". |
 | D3 | Transfers | Stock moves sender → virtual `IN_TRANSIT` on approval and `IN_TRANSIT` → receiver on confirmation; shortfalls stay in transit until the Head Auditor picks TO_SENDER / TO_RECEIVER / WRITEOFF. Consignment-out and customer returns skip the transit hop (received immediately). | §7.3, §7.4. |
 | D4 | Customer returns | Modelled as a RETURN transfer from the virtual `V-CUSTRET` location with a reason; posts `SALE_RETURN` at the branch against the newest (or chosen) batch. Requires no approval because it only adds stock. | Mirrors LEDGER4. |
-| D5 | Control numbers | Per document type and per location where paper forms do so (`RCV-WH-000001`, `PO-WESTAVE-000001`, `DR-WESTAVE-…`, `EXP-…`, `CNT-…`, `WO-…`, `CN-000001`, `CHG-000001`). Implemented with `INSERT … ON CONFLICT` on NOT NULL key columns (NULL keys defeat ON CONFLICT — found by the e2e suite). | §4.4. |
+| D5 | Control numbers (superseded by D34) | Per document type and per location where paper forms do so (`RCV-WH-000001`, `PO-WESTAVE-000001`, `DR-WESTAVE-…`, `EXP-…`, `CNT-…`, `WO-…`, `CN-000001`, `CHG-000001`). Implemented with `INSERT … ON CONFLICT` on NOT NULL key columns (NULL keys defeat ON CONFLICT — found by the e2e suite). | §4.4. |
 | D6 | Daily close | Any business day earlier than the Manila calendar date counts as closed, whether or not the midnight job ran (job failures cannot reopen a day). Expected cash includes **cash AR collections** received at the branch that day. | §8.4. |
 | D7 | Post-close edits | Stored as a JSON diff and applied on approval to header fields (DR no., channel, payment details, fees, notes) or as a void; quantity/price changes are handled by void + re-entry (itself an edit request). | Keeps stock and journal consistent. |
 | D8 | Posting switch | Auto journal posting is behind `gl.auto_posting_enabled` (default off). When enabled, a missing account (e.g. branch accounts not yet generated) is logged as `POSTING_SKIPPED` in the audit log instead of failing the operational document. | Phase 1 go-live before Phase 2. |
@@ -24,13 +24,6 @@ Things the build had to decide that the spec does not cover, or where the spec l
 | D18 | Cash flow | Indirect method derived from balance-sheet movements (NI + depreciation ± working capital; investing = fixed assets; financing = equity/advances-from). | §10.5 gave the sheet name only. |
 | D19 | Payroll contributions | SSS/PHIC/HDMF tables are editable JSON config (`contribution_tables`): SSS as brackets `{from,to,ee,er}`, PHIC/HDMF as rates with min/max. No table → zero contributions until HR loads them. | §11 "current government tables stored as editable config". |
 | D20 | Prisma Decimals | Decimals are serialised as strings in API responses (both the fast path and the redaction walker). Frontend formats them with `peso()`. | Exactness. |
-
-## Proposals not implemented (out of scope / for later)
-
-- Shopee/Lazada/TikTok CSV import of platform orders.
-- AP payments module (AP ageing currently derives from unpaid receiving docs).
-- Barcode label printing.
-- Per-branch rider incentive rules (incentive is entered per delivery sale today).
 | D21 | Workbook loading | The `.xlsm` files contain legacy VML comment drawings that exceljs cannot parse; the loader strips VML/comment parts (and their relationships) from the zip before reading. Formulas are read as their cached results. | Real files. |
 | D22 | Brand headers | In `DAILY INVTY COUNT`, ALL-CAPS rows without prices (or a short title-case row the following rows start with) are brand headers and become `Product.brand`; unpriced product rows are imported with `needsReview`. | Real file has 183 header rows. |
 | D23 | Opening stock | Column G ("ACTUAL QTY") is posted as Warehouse opening stock as of the sheet's BEG. INVTY. date in one `OPENING` batch per product at ₱0 cost (the COST column is empty); negative quantities are skipped and listed in the seed output. | §15.3 with the data available. |
@@ -44,4 +37,22 @@ Things the build had to decide that the spec does not cover, or where the spec l
 | D31 | Receipt ticks | Confirm takes `checked: true` (= received exactly as sent) or `qtyReceived` (+ a note when short) per line; every line must be one or the other. Overages remain rejected. | Owner request 2026-09-25. |
 | D32 | Personal accounts | New users require full name + company ID (`users.id_number`, unique) and always start with `mustChangePassword`; the guard returns 403 `PASSWORD_CHANGE_REQUIRED` / `ACCOUNTABILITY_REQUIRED` for every non-auth route until done. The accepted statement text, time and IP are stored. Seeded demo users get IDs DEMO-001… and no forced password change (simulation). | Owner request 2026-09-25. |
 | D33 | Single session | Completing sign-in (after 2FA if required) ends all other sessions of the account; ended session ids get a 7-day tombstone so the old device receives 401 `SESSION_REPLACED` with an explanation. The person is notified and `SESSION_REPLACED` is audit-logged with the new sign-in's IP/device. Ending sessions only after 2FA prevents someone with just the password from kicking the real owner out. | Owner request 2026-09-25. |
+| D34 | Form numbers | Every form is numbered `<branch code>-<form code>-<000001>`, one sequence per branch and form: e.g. `WA-DR-000001` (West Ave sale), `WH-PO-000004` (warehouse pull-out), `WA-TI-…` (Transfer-In copy), `WA-IC-…` count, `WA-DC-…` discrepancy, `WA-CF-…` charge form, `WA-EX-…` expense, `WA-FR-…` cash fund replenishment, `WA-SI-…` store inspection, `WA-CN-…` credit note, `WH-RC-…` receiving, `WA-WO-…` write-off, `HO-PC-…` price change. Company-wide forms use `HO`. A new location without a code gets one generated from its name. | Owner request: the number alone tells the branch and the form. |
+| D35 | Charges | One charge form model for inventory discrepancy, expired, damaged, cash shortage and other; amount-only lines (e.g. cash) are allowed. The charge is split equally between the chosen staff; HR can re-allocate before finalizing; staff acknowledge in "My Pay & Charges". Only HR, the External Auditor, the Accounting Head, Admin and the persons charged see the names. | Owner request: HR only clicks, nothing is uploaded. |
+| D36 | Write-offs | An expired/damaged write-off is either expensed by the company (R9) or charged to staff at the franchise price (R11 via the charge form); stock leaves the inventory either way. | Owner request. |
+| D37 | Cash fund | Imprest fund per branch. Fund-paid expenses lower the fund, not the cash drawer; "Replenish" takes the spent amount out of the day's cash for deposit (it appears on the Daily Close and the Daily Sales Report). The Field Auditor records the cash actually found. | Owner request: replenished from cash sales. |
+| D38 | Contributions | SSS 2025 brackets (5% EE / 10% ER + EC), PhilHealth 2.5%/2.5% (₱10k floor, ₱100k ceiling), Pag-IBIG 2%/2% (₱10k max base) loaded as editable defaults. Register by month; remittance posts R13 (payable → cash/bank). The Accounting Associate sees totals only. | Owner request; tables stay editable because rates change yearly. |
+| D39 | Counts | A count sheet is pre-filled with every item and its start-of-day beginning count; the counter types only actual counts; the expected figure is refreshed at submission. Submitted sheets are locked; a revision needs the Head Auditor (Admin notified). Sales associates submit a weekly sheet (no case is opened; auditors are notified); HR sees compliance. | Owner requests. |
+| D40 | AR | A payment entered by branch staff stays PENDING until the Accounting Associate or Head approves; Accounting's own entries apply at once and the branch is notified. Franchise AR applies at once. | Owner request. |
+| D41 | Revisions | Every approved correction (Audit Associate revision, post-close edit, warehouse edit, count revision) is written to a revision log against the staff member who made the document, and that person is notified. Audit Associate corrections route to the Head Auditor alone. | Owner request: track staff with many errors. |
+| D42 | Field Auditor | Not location-scoped: sees inventory of every branch, franchise and the warehouse, without cost; cannot sell, read sales reports or charge forms. Counts, cash fund checks and store inspection reports only. | Owner requests. |
+| D43 | Testing switch | `AUTH_TOTP_OPTIONAL=true` skips 2FA for every account, including ones already enrolled, so the owner can test. Set to `false` before real use. | Owner request. |
+
+
+## Proposals not implemented (out of scope / for later)
+
+- Shopee/Lazada/TikTok CSV import of platform orders.
+- AP payments module (AP ageing currently derives from unpaid receiving docs).
+- Barcode label printing.
+- Per-branch rider incentive rules (incentive is entered per delivery sale today).
 

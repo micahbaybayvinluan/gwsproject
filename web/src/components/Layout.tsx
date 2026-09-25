@@ -11,7 +11,7 @@ interface NavItem { to: string; label: string; any?: string[]; hideFor?: string[
 const NAV: { group: string; items: NavItem[] }[] = [
   { group: 'Work', items: [
     { to: '/', label: 'Dashboard' },
-    { to: '/approvals', label: 'Approvals', any: ['approval.act.COST_ON_RECEIVING', 'approval.act.TRANSFER_INTERNAL', 'approval.act.SPECIAL_PRICE', 'approval.act.POST_CLOSE_EDIT', 'approval.act.POST_CLOSE_EDIT_FRANCHISE', 'approval.act.WRITEOFF', 'approval.act.PRICE_CHANGE', 'approval.act.DISCREPANCY_RESOLUTION', 'approval.act.PERIOD_LOCK', 'approval.act.WAREHOUSE_EDIT', 'approval.act.TRANSFER_TO_FRANCHISE', 'approval.act.EDIT_REQUEST', 'approval.act.CONSIGNMENT_OUT', 'approval.act.AR_PAYMENT', 'approval.act.COUNT_REVISION', 'approval.act.DISCREPANCY_EXPLANATION', 'approval.act.WRITEOFF'] },
+    { to: '/approvals', label: 'Approvals', any: ['approval.act.COST_ON_RECEIVING', 'approval.act.TRANSFER_INTERNAL', 'approval.act.SPECIAL_PRICE', 'approval.act.POST_CLOSE_EDIT', 'approval.act.POST_CLOSE_EDIT_FRANCHISE', 'approval.act.WRITEOFF', 'approval.act.PRICE_CHANGE', 'approval.act.DISCREPANCY_RESOLUTION', 'approval.act.PERIOD_LOCK', 'approval.act.WAREHOUSE_EDIT', 'approval.act.AUDIT_REVISION', 'approval.act.TRANSFER_TO_FRANCHISE', 'approval.act.EDIT_REQUEST', 'approval.act.CONSIGNMENT_OUT', 'approval.act.AR_PAYMENT', 'approval.act.COUNT_REVISION', 'approval.act.DISCREPANCY_EXPLANATION', 'approval.act.WRITEOFF'] },
     { to: '/sales/new', label: 'New Sale', any: ['sale.create'] },
     { to: '/sales', label: 'Sales', any: ['sale.create', 'report.sales.own', 'report.sales.all'] },
     { to: '/ar', label: 'AR / Credit', any: ['ar.view'] },
@@ -52,9 +52,10 @@ const NAV: { group: string; items: NavItem[] }[] = [
     { to: '/accounting/inventory-cost', label: 'Inventory & Direct Cost', any: ['gl.view'] },
   ] },
   { group: 'HR', items: [
-    { to: '/charge-forms', label: 'Charge Forms', any: ['charge_form.finalize', 'discrepancy.view'] },
+    { to: '/charge-forms', label: 'Charge Forms', any: ['charge_form.finalize', 'discrepancy.view'], hideFor: ['FIELD_AUDITOR'] },
     { to: '/payroll', label: 'Payroll & Contributions', any: ['payroll.view.summary', 'payroll.view.detail', 'payroll.edit'] },
-    { to: '/hr/weekly-counts', label: 'Weekly Count Compliance', any: ['employee.manage', 'discrepancy.resolve', 'discrepancy.view'] },
+    { to: '/hr/weekly-counts', label: 'Weekly Count Compliance', any: ['employee.manage', 'discrepancy.resolve', 'discrepancy.view'], hideFor: ['FIELD_AUDITOR'] },
+    { to: '/revisions', label: 'Revision Log (errors per staff)', any: ['revision.view'] },
   ] },
   { group: 'Admin', items: [
     { to: '/users', label: 'Users & Roles', any: ['user.manage'] },

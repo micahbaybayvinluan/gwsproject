@@ -20,7 +20,8 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
     const roleKey = user.role.key as RoleKey;
-    const totpRequired = TOTP_REQUIRED_ROLES.includes(roleKey) || user.totpEnabled;
+    // AUTH_TOTP_OPTIONAL=true relaxes the mandatory 2FA for Admin / auditors / Accounting Head (development & simulation only; keep false in production)
+    const totpRequired = (TOTP_REQUIRED_ROLES.includes(roleKey) && process.env.AUTH_TOTP_OPTIONAL !== 'true') || user.totpEnabled;
     const idleMinutes = LONG_SESSION_ROLES.includes(roleKey)
       ? await this.settings.get<number>('session.idle_minutes_long')
       : await this.settings.get<number>('session.idle_minutes_default');

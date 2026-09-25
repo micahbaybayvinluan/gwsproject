@@ -56,9 +56,16 @@ const TEST_USERS: { username: string; role: string; fullName: string; locations?
   { username: 'wh.incharge', role: 'WAREHOUSE_IN_CHARGE', fullName: 'Warehouse In-Charge', locations: ['WH'] },
   { username: 'wh.assoc', role: 'WAREHOUSE_ASSOCIATE', fullName: 'Warehouse Associate', locations: ['WH'] },
   { username: 'sales.westave', role: 'SALES_ASSOCIATE', fullName: 'Sales Associate – West Ave', locations: ['WESTAVE'] },
+  { username: 'sales.csr', role: 'SALES_ASSOCIATE', fullName: 'Sales Associate – CSR', locations: ['CSR'] },
+  { username: 'sales.imus', role: 'SALES_ASSOCIATE', fullName: 'Sales Associate – Imus Cavite', locations: ['IMUS'] },
+  { username: 'sales.laguna', role: 'SALES_ASSOCIATE', fullName: 'Sales Associate – Laguna', locations: ['LAGUNA'] },
   { username: 'sales.dasma', role: 'SALES_ASSOCIATE', fullName: 'Sales Associate – Dasmariñas', locations: ['DASMA'] },
+  { username: 'sales.vitocruz', role: 'SALES_ASSOCIATE', fullName: 'Sales Associate – Vito Cruz', locations: ['VITOCRUZ'] },
+  { username: 'sales.wh', role: 'SALES_ASSOCIATE', fullName: 'Sales Associate – Warehouse store', locations: ['WH'] },
   { username: 'fr.mayon.assoc', role: 'FRANCHISE_SALES_ASSOCIATE', fullName: 'Franchise Associate – Mayon', locations: ['MAYON'] },
   { username: 'fr.mayon.owner', role: 'FRANCHISE_OWNER', fullName: 'Franchise Owner – Mayon', locations: ['MAYON'] },
+  { username: 'fr.malolos.assoc', role: 'FRANCHISE_SALES_ASSOCIATE', fullName: 'Franchise Associate – Malolos', locations: ['MALOLOS'] },
+  { username: 'fr.malolos.owner', role: 'FRANCHISE_OWNER', fullName: 'Franchise Owner – Malolos', locations: ['MALOLOS'] },
   { username: 'custom.user', role: 'CUSTOM', fullName: 'Custom Role User' },
   { username: 'acct.head', role: 'ACCOUNTING_HEAD', fullName: 'Accounting Head' },
   { username: 'acct.assoc', role: 'ACCOUNTING_ASSOCIATE', fullName: 'Accounting Associate' },
@@ -101,6 +108,16 @@ async function main() {
   for (const l of LOCATIONS.filter((x) => x.type === 'FRANCHISE')) {
     const loc = await prisma.location.findUniqueOrThrow({ where: { code: l.code } });
     await prisma.customer.upsert({ where: { code: `FR-${l.code}` }, create: { code: `FR-${l.code}`, name: `Franchise ${l.name}`, type: 'FRANCHISE', locationId: loc.id }, update: { name: `Franchise ${l.name}` } });
+  }
+  // riders and agents for the simulation
+  const riderNames: Record<string, string[]> = { WESTAVE: ['Jaime', 'Carlo'], CSR: ['Marlon'], IMUS: ['Rey'], LAGUNA: ['Dan'], DASMA: ['Jaime', 'Paolo'], VITOCRUZ: ['Ben'], WH: ['Truck 1'] };
+  for (const [code, names] of Object.entries(riderNames)) {
+    const loc = await prisma.location.findUniqueOrThrow({ where: { code } });
+    for (const name of names) if (!(await prisma.rider.findFirst({ where: { locationId: loc.id, name } }))) await prisma.rider.create({ data: { name, locationId: loc.id } });
+  }
+  for (const [code, name, onPayroll] of [['WESTAVE', 'Jerick Quinto', true], ['DASMA', 'Matt Angelo Asma', false], ['WH', 'Raymart Bagatua', true]] as const) {
+    const loc = await prisma.location.findUniqueOrThrow({ where: { code } });
+    if (!(await prisma.agent.findFirst({ where: { name } }))) await prisma.agent.create({ data: { name, locationId: loc.id, onPayroll } });
   }
   for (const [i, d] of ['Topform', 'Level Up', 'Good Stuff', 'Juan Whey', 'Whey Avenue'].entries()) {
     await prisma.customer.upsert({ where: { code: `DLR-${String(i + 1).padStart(3, '0')}` }, create: { code: `DLR-${String(i + 1).padStart(3, '0')}`, name: d, type: 'DEALER' }, update: { name: d } });

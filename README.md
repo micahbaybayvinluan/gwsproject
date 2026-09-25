@@ -51,6 +51,8 @@ Every importer is also available in the UI (**Catalogue → Imports**) with temp
 
 ## Test accounts (created by the seed)
 
+See **SIMULATION-GUIDE.md** for the full account list (one per branch and franchise) and a 16-step walk-through across every role.
+
 All seeded users share the password `ChangeMe!2026` (override with `SEED_PASSWORD`). Roles marked 2FA must enrol a TOTP authenticator on first login (the login screen shows the secret / otpauth link).
 
 | Username | Role | Scope | 2FA |

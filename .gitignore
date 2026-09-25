@@ -9,6 +9,4 @@ coverage
 .pnpm-store
 playwright-report
 test-results
-/seed/*.xlsm
-/seed/*.xlsx
 dump.rdb

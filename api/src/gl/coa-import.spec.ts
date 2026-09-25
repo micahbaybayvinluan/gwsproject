@@ -31,10 +31,13 @@ describe('chart of accounts import parser (§10.1)', () => {
     expect(classFromSection('LIABILITIES', 'SSS Premium Payable')).toBe('CURRENT_LIABILITY'); expect(classFromSection('ASSETS', 'Accumulated Depreciation – Equipment')).toBe('ACCUM_DEPN'); expect(classFromSection('EQUITY', 'Capital')).toBe('EQUITY');
   });
   it('matches imported titles to templates', () => {
-    expect(matchTemplate('Petty Cash – West Ave', ACCOUNT_TEMPLATES)).toBe('PETTY_CASH');
-    expect(matchTemplate('Rider/Driver Expense (Gas) – Dasmariñas', ACCOUNT_TEMPLATES)).toBe('RIDER_GAS');
-    expect(matchTemplate('Expired Items – Laguna', ACCOUNT_TEMPLATES)).toBe('EXPIRED_ITEMS');
-    expect(matchTemplate('Taxes & Licenses', ACCOUNT_TEMPLATES)).toBeNull();
+    expect(matchTemplate('Petty Cash – West Ave', ACCOUNT_TEMPLATES, locs)).toBe('PETTY_CASH');
+    expect(matchTemplate('Sales - Imus Ave Dealers', ACCOUNT_TEMPLATES, locs)).toBe('SALES_DEALER');
+    expect(matchTemplate('Other Expenses (Office Supplies, Drinking Water, etc)- CSR', ACCOUNT_TEMPLATES, [...locs, { id: 'OFFICE', code: 'OFFICE', name: 'Office', type: 'OFFICE' }])).toBe('OTHER_EXPENSES');
+    expect(matchTemplate('AR - Franchise Mayon (Store)', ACCOUNT_TEMPLATES, locs)).toBe('AR_FRANCHISE_STORE');
+    expect(matchTemplate('Rider/Driver Expense (Gas) - Dasmarinas', ACCOUNT_TEMPLATES, locs)).toBe('RIDER_GAS');
+    expect(matchTemplate('Expired Items – Laguna', ACCOUNT_TEMPLATES, locs)).toBe('EXPIRED_ITEMS');
+    expect(matchTemplate('Taxes & Licenses', ACCOUNT_TEMPLATES, locs)).toBeNull();
     expect(normalizeTitle('Meralco  -  West Ave')).toBe('Meralco – West Ave');
   });
 });

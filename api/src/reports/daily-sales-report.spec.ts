@@ -3,7 +3,7 @@ import Decimal from 'decimal.js';
 import { buildDailySalesReport, RSale } from './daily-sales-report';
 
 const d = (n: number) => new Decimal(n);
-const sale = (o: Partial<RSale>): RSale => ({ id: 'x', drSiNo: '1', channel: 'WALK_IN', channelSub: null, paymentMode: 'CASH', customerName: null, agentName: null, riderName: null, deliveryFee: d(0), riderIncentive: d(0), shippingFee: d(0), shippingExpense: d(0), productTotal: d(0), grandTotal: d(0), cardMid: null, cardSlipNo: null, cardApprovalCode: null, cardBatchNo: null, notes: null, lines: [], ...o });
+const sale = (o: Partial<RSale>): RSale => ({ id: 'x', drSiNo: '1', channel: 'WALK_IN', channelSub: null, paymentMode: 'CASH', customerName: null, agentName: null, riderName: null, deliveryFee: d(0), riderIncentive: d(0), shippingFee: d(0), shippingExpense: d(0), marketplaceCharges: d(0), productTotal: d(0), grandTotal: d(0), cardMid: null, cardSlipNo: null, cardApprovalCode: null, cardBatchNo: null, notes: null, lines: [], ...o });
 
 describe('Daily Branch Sales Report builder (§8.5)', () => {
   it('splits by channel × payment mode and computes deposit summary', () => {

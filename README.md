@@ -9,7 +9,7 @@ One data model, one codebase, two phases:
 | **1 — Operations** | Users/roles/overrides, approval engine, audit log, notifications; products, tiers, suppliers, locations; batches with expiry, receiving + cost approval, pull-out/transfer-in with in-transit and receiver confirmation, returns, consignment in/out; sales (all channels/modes), agents, AR/PDC + credit notes, midnight close + post-close edits, cash count; branch expenses; min-stock & expiry alerts; actual count → 7-day discrepancy case → final report + charge form; Daily Branch Sales Report, inventory reports, forms to xlsx/PDF; Excel imports | Implemented end to end and covered by the test suite |
 | **2 — Finance** | Chart of accounts import + branch templating, beginning balances, automatic journal entries R1–R14, manual vouchers, period lock, TB / IS / BS / NI-per-branch / Cash Flow / schedules, depreciation, payroll (HR + Accounting Head close), franchise P&L | Implemented; auto-posting is behind the `gl.auto_posting_enabled` setting (off by default) so Phase 1 can go live first |
 
-The seed workbooks referenced by the spec were **not present in `/seed/`** when this was built; see `seed/README.md` for what to drop in and how the importers use them. Cell-for-cell verification of the FRONT sheet against `SAles Report Sample.xlsx` (acceptance criterion §19) still has to be run once that file is available.
+The three source workbooks are in `/seed/` and are loaded by the seed step: **1,120 products** with brands, FRANCHISEE/DEALER/RETAILER prices and the Warehouse opening quantities from `inventory.xlsm`; the **full chart of accounts (601 accounts) with FY2026 beginning balances** (balanced to the peso) from `ACCTG PROGRAM - FORMAT.xlsm`. The Daily Branch Sales Report export fills a copy of `SAles Report Sample.xlsx` (`api/templates/daily-sales-report.xlsx`), so the FRONT sheet is produced by the sample's own formulas and matches it cell for cell. See `seed/README.md`.
 
 ## Repository layout
 
@@ -32,23 +32,22 @@ cp .env.example api/.env                      # edit DATABASE_URL / REDIS_URL if
 docker compose up -d postgres redis            # add "minio minio-init clamav" for S3 storage + virus scanning
 pnpm --filter @gws/api prisma:generate
 pnpm --filter @gws/api prisma:deploy           # applies prisma/migrations
-pnpm --filter @gws/api prisma:seed             # roles, locations, categories, tiers, account templates, test users
+pnpm --filter @gws/api prisma:seed             # roles, locations, tiers, test users + products, opening stock and chart of accounts from /seed
 pnpm dev                                       # api on :4000 (nest start --watch), web on :5173 (vite)
 ```
 
 Full stack in containers: `docker compose up --build` (web on http://localhost:5173, API on :4000, MinIO console :9001).
 
-### Importing the real data (§15 migration plan)
+### The real data (§15 migration plan)
 
-```bash
-# 1. products + FRANCHISE/DEALER/RETAIL tiers from inventory.xlsm sheet "DAILY INVTY COUNT"
-pnpm --filter @gws/api import:products "../seed/inventory.xlsm"
-# 2. chart of accounts from the BALANCE SHEET + INCOME STATEMENT sheets (parsed tags; review/override in Imports → Chart of accounts)
-pnpm --filter @gws/api import:coa "../seed/ACCTG PROGRAM - FORMAT.xlsm"
-# 3–5. opening stock, open AR, beginning balances: download the xlsx templates from the Imports page and upload them there
-```
+Steps 1, 2, 3 and 5 of the migration plan (products, chart of accounts, opening stock at the Warehouse, beginning balances) run inside `prisma:seed` from the workbooks in `/seed/`. Re-running the seed is safe: it never duplicates and posts opening stock once. What is still manual:
 
-Every importer is also available in the UI (**Catalogue → Imports**) with template downloads and per-row error reporting.
+- **Product costs**: `inventory.xlsm` has an empty COST column, so opening stock is posted at ₱0 and no standard cost exists. Admin enters costs via **Catalogue → Price Changes** (cost column) or the Imports → Products template; receiving with Head Auditor cost approval sets them from then on.
+- **Opening stock at branches** (the workbook only has the Warehouse): Imports → "Opening stock per location" template.
+- **Open AR**: Imports → "Open AR" template.
+- **27 products flagged for review** (promo bundles, ambiguous names): Catalogue → Products, filter by the "review" badge.
+
+Every importer is also available in the UI (**Catalogue → Imports**) with template downloads and per-row error reporting; `.xlsm` uploads are accepted.
 
 ## Test accounts (created by the seed)
 
@@ -104,7 +103,7 @@ Implemented as stated in the spec's ASSUMPTION notes (§18); each is a one-line 
 4. Cost **decreases do not revalue** stock; only increases post to "Other Income – Price Increase" (R12), and the approval screen labels this as non-standard.
 5. Supplier **freebies are booked to Other Income** (R2) rather than lowering average cost.
 6. **Consignment-in is off-balance-sheet** by default (`consignment_in_on_balance_sheet=false`); flip the setting for the legacy treatment.
-7. Dasmariñas and Vito Cruz are seeded as **company branches**; their legacy "AR – Franchise …" accounts can be imported and left for old balances.
+7. Dasmariñas and Vito Cruz are seeded as **company branches**; their legacy "AR – Franchise …" accounts are imported and left for old balances.
 8. Untagged (main) expenses in NI-per-branch are allocated **pro-rata to revenue** (`gl.ni_allocation_basis`, `EQUAL` also available).
 9. The AGENT tier **defaults to the DEALER price** when no AGENT price row exists.
 10. The product import loads **all rows** of `DAILY INVTY COUNT` and flags ambiguous ones for Head Auditor review; deactivate rather than skip.
@@ -120,3 +119,10 @@ Further choices made where the spec was silent are logged in `docs/decisions.md`
 - Backups: the `backup` compose service runs `docs/ops/backup.sh` (daily `pg_dump` to the `gws-backups` bucket, 30-day retention).
 - PDF rendering needs Chromium (`PUPPETEER_EXECUTABLE_PATH`); without it the PDF endpoints return the same document as HTML.
 - Email digests need `SMTP_URL`; without it the in-app bell still works.
+
+## What the workbooks revealed (decided while importing)
+
+- The chart of accounts uses the numbering 1xxx cash/AR, 2xxx inventory/advances-to, 3xxx fixed assets, 4xxx liabilities, 5xxx equity, 6xxx revenue, 7xxx direct cost, 8xxx OPEX; generated codes follow the same ranges.
+- Account titles follow the workbook's exact wording ("Cash on Hand- West Ave", "Rider/Driver Expense (Gas) - Imus"), so accounts generated for a new branch look identical to the imported ones. Typos in the source ("Sales - Imus Ave Dealers", "Globe/PLDT (Internet) -CSR") are matched to the right template.
+- "Spoilage, Damage, Expired & Others" and the supplement tasting accounts sit under Operating Expenses in the workbook, so that is where the system posts them.
+- Accumulated depreciation is shown as a negative asset in the workbook; the import books it as a credit so the opening trial balance balances.

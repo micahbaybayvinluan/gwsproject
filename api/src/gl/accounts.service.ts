@@ -2,8 +2,10 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { AccountClass, Prisma } from '@prisma/client';
 import { PrismaService, Tx } from '../common/prisma.service';
 import { AuditService } from '../common/audit.service';
-import { ACCOUNT_TEMPLATES, GLOBAL_ACCOUNTS, NORMAL_BALANCE } from './account-templates';
+import { ACCOUNT_TEMPLATES, GLOBAL_ACCOUNTS, NORMAL_BALANCE, nextCodeInRange } from './account-templates';
 import { AccountResolver, MissingAccountError } from './posting-rules';
+import { normalizeTitle } from './coa-import';
+const tkey = (t: string) => normalizeTitle(t).toLowerCase();
 
 
 /** Chart of accounts, branch templating (§10.2) and the AccountResolver used by posting rules. */
@@ -31,7 +33,7 @@ export class AccountsService {
 
   async create(data: { code?: string; title: string; class: AccountClass; branchTagId?: string | null; channelTag?: string | null; entryScope?: 'BRANCH' | 'MAIN' | 'BOTH'; isPaymentAccount?: boolean; paymentAccountType?: string | null; counterpartyType?: string | null; counterpartyId?: string | null; templateId?: string | null }, actorId: string, tx: Tx | null = null) {
     const db = (tx ?? this.prisma.db) as Tx;
-    const code = data.code ?? (await this.nextCode(db, data.class));
+    const code = data.code && !(await db.account.findUnique({ where: { code: data.code } })) ? data.code : await this.nextCode(db, data.class);
     const a = await db.account.create({ data: { ...data, code, normalBalance: NORMAL_BALANCE[data.class], isPaymentAccount: data.isPaymentAccount ?? data.class === 'CASH', paymentAccountType: (data.paymentAccountType ?? null) as never, entryScope: data.entryScope ?? (data.branchTagId ? 'BRANCH' : 'MAIN'), createdBy: actorId } });
     await this.audit.log({ action: 'CREATE', entityType: 'Account', entityId: a.id, after: a, userId: actorId });
     return a;
@@ -43,13 +45,10 @@ export class AccountsService {
     return after;
   }
 
-  /** Code ranges in the workbook's numeric style: 1xxx assets, 2xxx liabilities, 3xxx equity, 6xxx revenue, 7xxx direct cost, 8xxx opex, 9xxx other income. */
+  /** Next free code in the workbook's range for the class (1xxx cash/AR, 2xxx inventory/advances, 3xxx fixed assets, 4xxx liabilities, 5xxx equity, 6xxx revenue, 7xxx direct cost, 8xxx opex). */
   async nextCode(db: Tx, cls: AccountClass): Promise<string> {
-    const base: Record<AccountClass, number> = { CASH: 1000, AR: 1200, INVENTORY: 1300, ADVANCES_TO: 1500, FIXED_ASSET: 1600, ACCUM_DEPN: 1700, CURRENT_LIABILITY: 2000, ADVANCES_FROM: 2500, EQUITY: 3000, REVENUE: 6000, DIRECT_COST: 7000, OPEX: 8000, OTHER_INCOME: 9000 };
-    const last = await db.account.findFirst({ where: { class: cls, code: { gte: String(base[cls]), lt: String(base[cls] + 1000) } }, orderBy: { code: 'desc' } });
-    let n = last ? parseInt(last.code, 10) + 1 : base[cls] + 1;
-    while (await db.account.findUnique({ where: { code: String(n) } })) n++;
-    return String(n);
+    const codes = (await db.account.findMany({ select: { code: true } })).map((a) => a.code);
+    return nextCodeInRange(cls, codes);
   }
 
   /** §10.2 Generate the full templated set for a new branch (or the franchise subset). Idempotent: existing template+branch pairs are skipped. */
@@ -67,7 +66,7 @@ export class AccountsService {
       }
       // Ensure global accounts exist
       for (const g of GLOBAL_ACCOUNTS) {
-        const exists = await tx.account.findFirst({ where: { OR: [{ code: g.code }, { title: g.title }] } });
+        const exists = await tx.account.findFirst({ where: { OR: [...(g.code ? [{ code: g.code }] : []), { title: g.title }] } });
         if (!exists) { await this.create({ code: g.code, title: g.title, class: g.class, entryScope: 'MAIN', paymentAccountType: g.paymentAccountType ?? null }, actorId, tx); created.push(g.title); }
       }
     });
@@ -88,11 +87,11 @@ export class AccountsService {
     const apBySupplier = new Map<string, string>();
     for (const a of accounts) {
       if (a.template && a.branchTagId) byTemplateBranch.set(`${a.template.key}|${a.branchTagId}`, a.id);
-      byTitle.set(a.title, a.id); byCode.set(a.code, a.id);
+      byTitle.set(tkey(a.title), a.id); byCode.set(a.code, a.id);
       if (a.class === 'AR' && a.counterpartyId) arByCounterparty.set(a.counterpartyId, a.id);
       if (a.class === 'CURRENT_LIABILITY' && a.counterpartyType === 'SUPPLIER' && a.counterpartyId) apBySupplier.set(a.counterpartyId, a.id);
     }
-    const globalByKey = new Map(GLOBAL_ACCOUNTS.map((g) => [g.key, byCode.get(g.code) ?? byTitle.get(g.title)]));
+    const globalByKey = new Map(GLOBAL_ACCOUNTS.map((g) => [g.key, (g.code ? byCode.get(g.code) : undefined) ?? byTitle.get(tkey(g.title))]));
     const global = (key: string) => { const id = globalByKey.get(key); if (!id) throw new MissingAccountError(`global account ${key}`); return id; };
     const branch = (templateKey: string, locationId: string) => { const id = byTemplateBranch.get(`${templateKey}|${locationId}`); if (!id) throw new MissingAccountError(`${templateKey} for location ${locationId}`); return id; };
     return {
@@ -110,7 +109,7 @@ export class AccountsService {
   async ensureGlobalAccounts(actorId: string) {
     let n = 0;
     for (const g of GLOBAL_ACCOUNTS) {
-      const exists = await this.prisma.db.account.findFirst({ where: { OR: [{ code: g.code }, { title: g.title }] } });
+      const exists = await this.prisma.db.account.findFirst({ where: { OR: [...(g.code ? [{ code: g.code }] : []), { title: g.title }] } });
       if (!exists) { await this.create({ code: g.code, title: g.title, class: g.class, entryScope: 'MAIN', paymentAccountType: g.paymentAccountType ?? null }, actorId); n++; }
     }
     return { created: n };

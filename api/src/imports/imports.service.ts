@@ -6,7 +6,7 @@ import { StockService, VIRTUAL_CODES } from '../stock/stock.service';
 import { AccountsService } from '../gl/accounts.service';
 import { AuditService } from '../common/audit.service';
 import { parseProductGrid } from './product-import';
-import { classFromSection, entryScopeFor, matchTemplate, normalizeTitle, parseBranchTag, parseChannelTag } from '../gl/coa-import';
+import { classFromSection, entryScopeFor, matchTemplate, normalizeTitle, parseBranchTag, parseCaCodes, parseChannelTag, parseCoaGrid } from '../gl/coa-import';
 import { toDateOnly, todayManila } from '../common/manila';
 import { D } from '../common/money';
 import type { SessionUser } from '../common/request-context';
@@ -44,7 +44,7 @@ export class ImportsService {
       const sku = await this.master.nextSku();
       const prices: Record<string, number> = {}; if (p.retail != null) prices.RETAIL = p.retail; if (p.dealer != null) prices.DEALER = p.dealer; if (p.franchise != null) prices.FRANCHISE = p.franchise;
       await this.prisma.db.$transaction(async (tx) => {
-        const prod = await tx.product.create({ data: { sku, name: p.name, categoryId: catFor(p.accountingClass), trackExpiry: p.trackExpiry, isBundle: p.accountingClass === 'BUNDLE', needsReview: p.needsReview, createdBy: user.id } });
+        const prod = await tx.product.create({ data: { sku, name: p.name, brand: p.brand, categoryId: catFor(p.accountingClass), trackExpiry: p.trackExpiry, isBundle: p.accountingClass === 'BUNDLE', needsReview: p.needsReview, createdBy: user.id } });
         for (const [tier, price] of Object.entries(prices)) await tx.priceList.create({ data: { productId: prod.id, tier, effectiveFrom: today, price: D(price).toFixed(2), createdBy: user.id, approvedBy: user.id } });
         if (p.cost != null) await tx.productCost.create({ data: { productId: prod.id, effectiveFrom: today, cost: D(p.cost).toFixed(2), createdBy: user.id, approvedBy: user.id } });
       });
@@ -113,18 +113,17 @@ export class ImportsService {
     for (const [i, r] of rows.entries()) { try { const p = await this.prisma.db.product.findUniqueOrThrow({ where: { sku: String(r.SKU) } }); if (r['Actual Qty'] == null || r['Actual Qty'] === '') continue; out.push({ productId: p.id, actualQty: Number(r['Actual Qty']), remarks: r.Remarks ? String(r.Remarks) : undefined }); } catch (e) { errors.push(`Row ${i + 2}: ${(e as Error).message}`); } }
     return { lines: out, errors };
   }
-  /** §10.1 COA import: preview (with parsed tags for the review screen) then commit with overrides. */
+  /** §10.1 COA import: preview (with parsed tags for the review screen) then commit with overrides. `sheet` = BALANCE SHEET / INCOME STATEMENT of the accounting workbook; no sheet = the template. */
   async coaPreview(buf: Buffer, sheet?: string) {
     const locations = await this.prisma.db.location.findMany({ where: { active: true } });
     const templates = await this.prisma.db.accountTemplate.findMany();
-    const rows = sheet ? (await this.coaRowsFromWorkbookSheet(buf, sheet)) : (await this.xlsx.read(buf)).rows.map((r) => ({ code: r.Code ? String(r.Code) : null, title: String(r.Title ?? ''), section: String(r.Section ?? ''), branchCode: r.BranchCode ? String(r.BranchCode) : null, channelTag: r.ChannelTag ? String(r.ChannelTag) : null, beginningDebit: Number(r.BeginningDebit ?? 0), beginningCredit: Number(r.BeginningCredit ?? 0) }));
-    return rows.filter((r) => r.title).map((r) => { const title = normalizeTitle(r.title); const branch = r.branchCode ?? parseBranchTag(title, locations); const cls = classFromSection(r.section, title); return { ...r, title, class: cls, branchCode: branch, branchName: locations.find((l) => l.code === branch)?.name ?? null, channelTag: r.channelTag ?? parseChannelTag(title), templateKey: matchTemplate(title, templates), entryScope: entryScopeFor(cls, branch), isPaymentAccount: cls === 'CASH' }; });
-  }
-  /** Raw workbook sheets `BALANCE SHEET` / `INCOME STATEMENT` (code, title, beginning balance; section headers in col A/B). */
-  private async coaRowsFromWorkbookSheet(buf: Buffer, sheet: string) {
-    const grid = await this.xlsx.grid(buf, sheet); const out = []; let section = '';
-    for (const row of grid) { if (!row) continue; const a = String(row[1] ?? '').trim(), b = String(row[2] ?? '').trim(); const upper = (a || b).toUpperCase(); if (!a && !b) continue; if (/^(REVENUES?|DIRECT COST|OPERATING EXPENSES|OTHER INCOME|ASSETS|CURRENT ASSETS|FIXED ASSETS|LIABILITIES|CURRENT LIABILITIES|ADVANCES FROM|EQUITY|CAPITAL)/.test(upper) && !row[3]) { section = upper; continue; } const code = /^\d{3,6}$/.test(a) ? a : null; const title = code ? b : a || b; if (!title || /^total|^gross|^net income|^should be/i.test(title)) continue; const bal = Number(row[3] ?? 0) || 0; out.push({ code, title, section, branchCode: null, channelTag: null, beginningDebit: bal > 0 ? bal : 0, beginningCredit: bal < 0 ? -bal : 0 }); }
-    return out;
+    if (sheet) {
+      let caCodes = new Map<string, string>();
+      try { caCodes = parseCaCodes(await this.xlsx.grid(buf, 'CA')); } catch { /* template without CA sheet */ }
+      return parseCoaGrid(await this.xlsx.grid(buf, sheet), templates, locations, caCodes).map((r) => ({ ...r, branchName: locations.find((l) => l.code === r.branchCode)?.name ?? null }));
+    }
+    const rows = (await this.xlsx.read(buf)).rows.map((r) => ({ code: r.Code ? String(r.Code) : null, title: String(r.Title ?? ''), section: String(r.Section ?? ''), branchCode: r.BranchCode ? String(r.BranchCode) : null, channelTag: r.ChannelTag ? String(r.ChannelTag) : null, beginningDebit: Number(r.BeginningDebit ?? 0), beginningCredit: Number(r.BeginningCredit ?? 0) }));
+    return rows.filter((r) => r.title).map((r) => { const title = normalizeTitle(r.title); const branch = r.branchCode ?? parseBranchTag(title, locations); const cls = classFromSection(r.section, title); return { ...r, title, class: cls, branchCode: branch, branchName: locations.find((l) => l.code === branch)?.name ?? null, channelTag: r.channelTag ?? parseChannelTag(title), templateKey: matchTemplate(title, templates, locations), entryScope: entryScopeFor(cls, branch), isPaymentAccount: cls === 'CASH' }; });
   }
   async coaCommit(rows: { code?: string | null; title: string; class: AccountClass; branchCode?: string | null; channelTag?: string | null; templateKey?: string | null; entryScope?: 'BRANCH' | 'MAIN' | 'BOTH'; beginningDebit?: number; beginningCredit?: number }[], year: number, user: SessionUser) {
     const locations = await this.prisma.db.location.findMany(); const templates = await this.prisma.db.accountTemplate.findMany(); let created = 0, updated = 0; const errors: string[] = [];

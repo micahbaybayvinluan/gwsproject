@@ -3,6 +3,8 @@ import { PrismaClient } from '@prisma/client';
 import * as argon2 from 'argon2';
 import { ROLE_CATALOGUE } from '../src/common/permissions';
 import { ACCOUNT_TEMPLATES } from '../src/gl/account-templates';
+import { seedWorkbooks } from './seed-workbooks';
+import * as path from 'node:path';
 
 const prisma = new PrismaClient();
 const DEV_PASSWORD = process.env.SEED_PASSWORD || 'ChangeMe!2026';
@@ -103,6 +105,7 @@ async function main() {
   for (const [i, d] of ['Topform', 'Level Up', 'Good Stuff', 'Juan Whey', 'Whey Avenue'].entries()) {
     await prisma.customer.upsert({ where: { code: `DLR-${String(i + 1).padStart(3, '0')}` }, create: { code: `DLR-${String(i + 1).padStart(3, '0')}`, name: d, type: 'DEALER' }, update: { name: d } });
   }
+  await seedWorkbooks(prisma, process.env.SEED_DIR || path.resolve(__dirname, '../../seed'));
   console.log(`Seed complete. All test users use password: ${DEV_PASSWORD}`);
 }
 

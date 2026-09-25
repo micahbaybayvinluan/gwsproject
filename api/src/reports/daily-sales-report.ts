@@ -6,7 +6,7 @@
 import Decimal from 'decimal.js';
 import { D, ZERO } from '../common/money';
 
-export interface RSale { id: string; drSiNo: string; channel: string; channelSub: string | null; paymentMode: string; customerName: string | null; agentName: string | null; riderName: string | null; deliveryFee: Decimal; riderIncentive: Decimal; shippingFee: Decimal; shippingExpense: Decimal; productTotal: Decimal; grandTotal: Decimal; cardMid: string | null; cardSlipNo: string | null; cardApprovalCode: string | null; cardBatchNo: string | null; notes: string | null; lines: { productName: string; qty: number; unitPrice: Decimal; amount: Decimal; isFreebie: boolean; accountingClass: string }[] }
+export interface RSale { id: string; drSiNo: string; channel: string; channelSub: string | null; paymentMode: string; customerName: string | null; agentName: string | null; riderName: string | null; deliveryFee: Decimal; riderIncentive: Decimal; shippingFee: Decimal; shippingExpense: Decimal; marketplaceCharges: Decimal; productTotal: Decimal; grandTotal: Decimal; cardMid: string | null; cardSlipNo: string | null; cardApprovalCode: string | null; cardBatchNo: string | null; notes: string | null; lines: { productName: string; qty: number; unitPrice: Decimal; amount: Decimal; isFreebie: boolean; accountingClass: string }[] }
 export interface RExpense { accountTitle: string; payee: string | null; amount: Decimal; paidFrom: string }
 export interface RClose { moneyBreakdown: Record<string, number> | null; countedCash: Decimal | null; expectedCash: Decimal | null; cashVariance: Decimal | null }
 
@@ -17,8 +17,8 @@ const isShipping = (s: RSale) => s.channel === 'SHIPPING_COURIER' || s.channel =
 export function buildDailySalesReport(input: { branch: string; date: string; sales: RSale[]; expenses: RExpense[]; close: RClose | null; preparedBy: string; majorExpenseTitles?: RegExp }) {
   const S = input.sales.filter((s) => s.channelSub !== 'CONSIGNMENT');
   const by = (mode: string, ch: (s: RSale) => boolean) => S.filter((s) => s.paymentMode === mode && ch(s));
-  const walk = (s: RSale) => s.channel === 'WALK_IN' || s.channel === 'PERSONAL' || s.channel === 'OTHER';
-  const deliv = (s: RSale) => s.channel === 'DELIVERY';
+  const deliv = (s: RSale) => s.channel === 'DELIVERY' || (!!s.riderName && ['WALK_IN', 'PERSONAL', 'OTHER'].includes(s.channel));
+  const walk = (s: RSale) => (s.channel === 'WALK_IN' || s.channel === 'PERSONAL' || s.channel === 'OTHER') && !deliv(s);
   const cash = {
     walkIn: prod(by('CASH', walk)), delivery: prod(by('CASH', deliv)), franchise: prod(by('CASH', (s) => s.channel === 'FRANCHISE')), dealer: prod(by('CASH', (s) => s.channel === 'DEALER')), agent: prod(by('CASH', (s) => s.channel === 'AGENT')),
     deliveryFee: sum(by('CASH', () => true).map((s) => s.deliveryFee)),
@@ -46,6 +46,7 @@ export function buildDailySalesReport(input: { branch: string; date: string; sal
   const overall = sum(S.map((s) => s.grandTotal));
   return {
     header: { branch: input.branch, date: input.date, systemDate: new Date().toISOString(), preparedBy: input.preparedBy },
+    sales: S,
     cash: { ...cash, subtotal: cashSubtotal }, creditCard: { ...cc, total: ccTotal }, onlineWalkIn: onlineWalk, onlineDelivery, shipping, onlineCcShippingTotal: onlineCcShipTotal, ar: arTotal,
     channelTotals, productCounts, feesBox: { deliveryFee: sum(S.map((s) => s.deliveryFee)), shippingFee: sum(S.map((s) => s.shippingFee)) }, riders, moneyBreakdown: input.close?.moneyBreakdown ?? null, cashCount: input.close ? { counted: input.close.countedCash, expected: input.close.expectedCash, variance: input.close.cashVariance } : null,
     expenses, expenseTotals: { major: sum(expenses.filter((e) => e.group === 'MAJOR').map((e) => e.amount)), other: sum(expenses.filter((e) => e.group === 'OTHER').map((e) => e.amount)), total: totalExpenses, riderExpense, shippingExpense },

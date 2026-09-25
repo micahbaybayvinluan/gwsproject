@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import ExcelJS from 'exceljs';
 import { DailySalesReport, asNum } from './daily-sales-report';
+import { loadWorkbook } from '../imports/workbook-readers';
+import { fillDailySalesTemplate, templatePath } from './daily-sales-template';
 
 /** exceljs renderers. Totals use formulas (not values) as the source workbooks do. */
 @Injectable()
@@ -18,8 +20,13 @@ export class XlsxService {
     return Buffer.from(await wb.xlsx.writeBuffer());
   }
 
-  /** §8.5 Daily Branch Sales Report: FRONT + WALK IN + DELIVERY + SHIPPING + CREDIT CARD + RECEIPT TRACKER. */
+  /** §8.5 Daily Branch Sales Report. Uses the owner's sample workbook as the template when present (exact layout); otherwise the generated layout below. */
   async dailySalesReport(rep: DailySalesReport): Promise<Buffer> {
+    const tpl = templatePath();
+    if (tpl) return fillDailySalesTemplate(rep, tpl);
+    return this.dailySalesReportGenerated(rep);
+  }
+  async dailySalesReportGenerated(rep: DailySalesReport): Promise<Buffer> {
     const wb = new ExcelJS.Workbook();
     const f = wb.addWorksheet('FRONT'); f.getColumn(1).width = 34; f.getColumn(2).width = 16; f.getColumn(4).width = 30; f.getColumn(5).width = 16; f.getColumn(6).width = 14; f.getColumn(7).width = 14;
     const money = '#,##0.00;(#,##0.00);-';
@@ -106,7 +113,7 @@ export class XlsxService {
 
   /** Read first sheet into row objects keyed by header. */
   async read(buf: Buffer, sheetName?: string): Promise<{ headers: string[]; rows: Record<string, unknown>[] }> {
-    const wb = new ExcelJS.Workbook(); await wb.xlsx.load(buf as unknown as ArrayBuffer);
+    const wb = await loadWorkbook(buf);
     const ws = sheetName ? wb.getWorksheet(sheetName) : wb.worksheets[0];
     if (!ws) throw new Error(`Sheet ${sheetName ?? '(first)'} not found`);
     const headers = (ws.getRow(1).values as unknown[]).slice(1).map((h) => String(h ?? '').trim());
@@ -116,7 +123,7 @@ export class XlsxService {
   }
   /** Raw cell grid (for the workbook-specific product / COA importers). */
   async grid(buf: Buffer, sheetName: string): Promise<unknown[][]> {
-    const wb = new ExcelJS.Workbook(); await wb.xlsx.load(buf as unknown as ArrayBuffer);
+    const wb = await loadWorkbook(buf);
     const ws = wb.getWorksheet(sheetName) ?? wb.worksheets.find((w) => w.name.toLowerCase().includes(sheetName.toLowerCase()));
     if (!ws) throw new Error(`Sheet ${sheetName} not found; available: ${wb.worksheets.map((w) => w.name).join(', ')}`);
     const out: unknown[][] = [];

@@ -49,6 +49,9 @@ importers:
       ioredis:
         specifier: ^5.4.1
         version: 5.11.1
+      jszip:
+        specifier: ^3.10.1
+        version: 3.10.2
       luxon:
         specifier: ^3.5.0
         version: 3.7.2

@@ -4,6 +4,8 @@ Everything runs on your Mac at **http://localhost:5173** (see README "Quick star
 
 > **ChangeMe!2026**
 
+**Each account belongs to one person.** The first time you sign in to an account it shows an accountability statement with the person's name and company ID (the demo accounts use DEMO-001 … DEMO-023). Tick the box and press **I accept**. Only one device can be signed in to an account at a time: signing in to the same account in another window signs the first window out, with a message. To play two roles side by side, use two different browsers (for example Safari and Chrome) or a normal and a private window.
+
 Two-factor codes are switched off for the simulation (`AUTH_TOTP_OPTIONAL=true` in `api/.env`). Set it to `false` before real use; Admin, External Auditor, Head Auditor and Accounting Head will then be asked to enrol an authenticator app on first login.
 
 ## Accounts (numbered as in your role list)
@@ -34,7 +36,7 @@ Two-factor codes are switched off for the simulation (`AUTH_TOTP_OPTIONAL=true` 
 | XIV | HR Staff | `hr.staff` | Payroll & charge forms only | No |
 | XV | Field Auditor | `field.auditor` | West Ave + CSR (read-only + counts) | No |
 
-Admin can add more users of any role under **Admin → Users & Roles** (for example a Sales Associate for another branch or a Franchise Owner for Parañaque): username, email, name, role, temporary password, and the branch(es) to assign.
+Admin can add more users of any role under **Admin → Users & Roles** (for example a Sales Associate for another branch or a Franchise Owner for Parañaque): username, email, the person's full name, their **company ID number** (required), role, a temporary password, and the branch(es) to assign. At first sign-in that person must set their own password and accept the accountability statement. Users & Roles shows each person's ID, whether they accepted, their last sign-in and recent devices; **Activity** opens everything they did in the Audit Log.
 
 Riders already exist for each branch (e.g. Jaime and Carlo at West Ave); agents Jerick Quinto (West Ave), Matt Angelo Asma (Dasmariñas), Raymart Bagatua (Warehouse); dealers Topform, Level Up, Good Stuff, Juan Whey, Whey Avenue and the dealers from your chart of accounts.
 
@@ -57,7 +59,7 @@ Inventory → Transfers: From Warehouse, To West Ave, type RESTOCK, add the prod
 Approvals → Approve. Stock is now "in transit".
 
 **5. Branch confirms receipt** — `sales.westave`
-Transfers → open the incoming transfer → enter received qty (try 11 instead of 12 to see the shortfall flow) → Confirm receipt. If short, `head.auditor` resolves it under Transfers → Resolve shortfall.
+Transfers → open the incoming transfer. This is the branch's copy (print it with **Transfer-In copy**). Tick each line that arrived complete, or tick **Tick all** if everything is correct → Confirm receipt. To see the shortfall flow, leave a line unticked and type the quantity actually received (e.g. 11 instead of 12) with a note. If short, `head.auditor` resolves it under Transfers → Resolve shortfall.
 
 **6. Sell** — `sales.westave` (works on a phone too)
 New Sale: DR number, channel Walk in, Cash, search "whey", qty 2, Save. Then a Delivery sale with rider Jaime and a delivery fee. Then a sale where you lower the price below SRP: it saves, and Admin gets a **Special price** approval showing cost and margin (only Admin sees that).
@@ -95,6 +97,15 @@ Users & Roles → click `custom.user` → tick the exact permissions and approva
 
 **17. Daily Inventory Report (every role)** — try `wh.assoc`, then `sales.westave`, then `head.auditor`
 Reports → Inventory Reports → Daily Inventory Report: pick From/To dates, press **Generate xlsx** or read it on screen. "Show" switches between the whole period and one day at a time. Columns: Beg, Receive, Transfer In, Returns, Pull Out, Sales, Other Out (freebies/tasting), Adj (count adjustments & write-offs), End. Associates, franchise users, field auditors and the audit associate get quantities only. Admin, the auditors, and Accounting get the same report with costing added automatically (Transfer In Cost, Pull Out Cost, Cost of Sales, End Value, average unit cost). Each user only sees their own location(s); `hr.staff` has no inventory access (§5.4).
+
+**18. Warehouse sends to a branch or franchise, with a printable draft** — `wh.assoc`
+Inventory → Transfers → "Send stock from the warehouse": To = any branch or franchise (e.g. Mayon (franchise)), add items → Create draft. On the draft: **Print Pull-Out (draft)** gives a form stamped DRAFT with your name as preparer; **Edit draft** changes items or quantities; when it is right, **Submit for approval** (franchise → Admin approves; company branch → either auditor). The receiving branch does not see the draft; it gets its copy once you submit.
+
+**19. In-Charge corrects the associate's entry** — `wh.incharge`, then `wh.assoc`
+As `wh.incharge`, open a draft (or submitted, not yet approved) receiving or transfer that `wh.assoc` prepared → **Propose edit** → change a quantity → Send. Nothing changes yet. Sign in as `wh.assoc`: the bell and Approvals show "Warehouse edit" with the exact changes (e.g. "qty 3 → 2") → **Accept** (applied, and a submitted document goes back through approval) or **Reject** (stays as it was). The document's "Who did what" panel lists each step with the person's name and ID. The In-Charge also enters receiving and transfers directly, like the associate; costs are still entered and approved by the Head Auditor.
+
+**20. One person per account** — `admin`
+Users & Roles → New user: full name, company ID, role, temporary password, branch → Create. Sign in as the new user: they must set their own password, then accept the statement. Sign in to the same account in a second window: the first window is signed out and the person gets a notification.
 
 ## Where the files come out
 

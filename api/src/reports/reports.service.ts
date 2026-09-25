@@ -88,31 +88,51 @@ export class ReportsService {
 
   // ── Paper forms (§13) ──
   async form(type: string, id: string, user: SessionUser, format: 'pdf' | 'xlsx'): Promise<Out> {
-    const f = await this.formData(type, id, user);
+    const f = await this.withPeople(await this.formData(type, id, user), id);
     await this.logExport(user, `${type}.${format}`, { id });
     if (format === 'xlsx') return { buffer: await this.xlsx.table(f.title, f.columns.map((c, i) => ({ header: c, key: String(i) })), f.rows.map((r) => Object.fromEntries(r.map((v, i) => [String(i), v]))), { title: `${f.title} — ${f.header.map(([k, v]) => `${k}: ${v}`).join(' | ')}` }), contentType: XLSX, fileName: `${f.title.replace(/\W+/g, '_')}_${id.slice(0, 8)}.xlsx` };
-    const r = await this.pdf.render(this.pdf.formHtml(f.title, f.header, f.columns, f.rows, f.footer, f.signatures));
+    const r = await this.pdf.render(this.pdf.formHtml(f.title, f.header, f.columns, f.rows, f.footer, f.signatures, f.watermark));
     return { buffer: r.buffer, contentType: r.contentType, fileName: `${f.title.replace(/\W+/g, '_')}_${id.slice(0, 8)}.${r.ext}` };
   }
-  private async formData(type: string, id: string, user: SessionUser): Promise<{ title: string; header: [string, unknown][]; columns: string[]; rows: unknown[][]; footer?: [string, unknown][]; signatures?: string[] }> {
+  /**
+   * Draft / pending forms print with a watermark so a draft can be checked on paper before submission; every form names the people
+   * responsible (prepared / approved / received by) from the accounts that did it.
+   */
+  private async withPeople<F extends { status?: string; docType?: string; preparedBy?: string | null; receivedBy?: string | null; title: string; header: [string, unknown][]; signatures?: string[] }>(f: F, id: string): Promise<F & { watermark?: string }> {
+    if (!f.docType) return f;
+    const approvals = await this.prisma.db.approvalRequest.findMany({ where: { documentType: f.docType, documentId: id, status: { in: ['APPROVED', 'AUTO_APPROVED'] }, type: { not: 'WAREHOUSE_EDIT' } }, include: { decisions: { where: { decision: 'APPROVE' }, include: { user: { select: { fullName: true } } } } }, orderBy: { decidedAt: 'desc' } });
+    const ids = [f.preparedBy, f.receivedBy].filter((x): x is string => !!x);
+    const users = await this.prisma.db.user.findMany({ where: { id: { in: ids } }, select: { id: true, fullName: true } });
+    const nameOf = (uid?: string | null) => users.find((u) => u.id === uid)?.fullName ?? '';
+    const approvedBy = approvals.flatMap((a) => (a.status === 'AUTO_APPROVED' ? ['auto-approved'] : a.decisions.map((d) => d.user.fullName))).join(', ');
+    const status = f.status ?? '';
+    const watermark = status === 'DRAFT' ? 'DRAFT — not yet submitted' : ['SUBMITTED', 'PENDING'].includes(status) ? 'FOR APPROVAL — not yet approved' : status === 'VOIDED' ? 'VOIDED' : status === 'REJECTED' ? 'REJECTED' : undefined;
+    const header: [string, unknown][] = [...f.header, ['Status', status], ['Prepared by', nameOf(f.preparedBy)], ...(approvedBy ? [['Approved by', approvedBy] as [string, unknown]] : []), ...(f.receivedBy ? [['Received by', nameOf(f.receivedBy)] as [string, unknown]] : [])];
+    const signatures = (f.signatures ?? ['Prepared by', 'Checked by', 'Received by']).map((sig) => (/^prepared/i.test(sig) && f.preparedBy ? `${sig}: ${nameOf(f.preparedBy)}` : /^received/i.test(sig) && f.receivedBy ? `${sig}: ${nameOf(f.receivedBy)}` : sig));
+    return { ...f, title: watermark ? `${f.title} (${watermark})` : f.title, header, signatures, watermark };
+  }
+  private async formData(type: string, id: string, user: SessionUser): Promise<{ status?: string; docType?: string; preparedBy?: string | null; receivedBy?: string | null; title: string; header: [string, unknown][]; columns: string[]; rows: unknown[][]; footer?: [string, unknown][]; signatures?: string[] }> {
     const db = this.prisma.db; const canCost = user.permissions.has('cost.view');
     const scope = (locationId: string) => { if (user.locationScoped && !user.locationIds.includes(locationId)) throw new ForbiddenException(); };
     switch (type) {
       case 'pull-out': case 'transfer-in': {
         const t = await db.transferDoc.findUnique({ where: { id }, include: { fromLocation: true, toLocation: true, lines: { include: { product: true, batch: true } } } }); if (!t) throw new NotFoundException(); if (user.locationScoped && !user.locationIds.includes(t.fromLocationId) && !user.locationIds.includes(t.toLocationId)) throw new ForbiddenException();
-        return { title: type === 'pull-out' ? 'Pull-Out Form' : 'Transfer-In Form', header: [['Control #', t.controlNo], ['Date', dateStr(t.docDate)], ['From', t.fromLocation.name], ['Trans. To', t.toLocation.name], ['Type', t.transferType], ['Notes', t.notes ?? '']], columns: ['Qty Out', 'Items', 'Batch / Expiry', "Checker's", 'Received Qty', 'Remarks', 'Type'], rows: t.lines.map((l) => [l.qtySent, l.product.name, `${l.batch.batchNo ?? ''} ${l.batch.expiryDate ? dateStr(l.batch.expiryDate) : ''}`, l.checkerRemarks ?? '', l.qtyReceived ?? '', l.discrepancyNote ?? '', t.transferType]), signatures: ['Prepared by', 'Checked by', 'Received by'] };
+        // the sending side drafts and prints the Pull-Out; the receiving side gets the Transfer-In copy once the transfer is submitted
+        const sender = !user.locationScoped || user.locationIds.includes(t.fromLocationId) || t.createdBy === user.id;
+        if (!sender && (t.status === 'DRAFT' || type === 'pull-out')) throw new ForbiddenException(t.status === 'DRAFT' ? 'This transfer has not been sent yet' : 'The Pull-Out form is printed by the sending location; print the Transfer-In copy');
+        return { status: t.status, docType: 'TransferDoc', preparedBy: t.preparedBy ?? t.createdBy, receivedBy: t.receivedBy, title: type === 'pull-out' ? 'Pull-Out Form' : 'Transfer-In Form', header: [['Control #', t.controlNo], ['Date', dateStr(t.docDate)], ['From', t.fromLocation.name], ['Trans. To', t.toLocation.name], ['Type', t.transferType], ['Notes', t.notes ?? '']], columns: ['Qty Out', 'Items', 'Batch / Expiry', "Checker's", 'Received Qty', 'Remarks', 'Type'], rows: t.lines.map((l) => [l.qtySent, l.product.name, `${l.batch.batchNo ?? ''} ${l.batch.expiryDate ? dateStr(l.batch.expiryDate) : ''}`, l.checkerRemarks ?? '', l.qtyReceived ?? '', l.discrepancyNote ?? '', t.transferType]), signatures: ['Prepared by', 'Checked by', 'Received by'] };
       }
       case 'dr-sales': {
         const s = await db.salesDoc.findUnique({ where: { id }, include: { location: true, customer: true, lines: { include: { product: true } } } }); if (!s) throw new NotFoundException(); scope(s.locationId);
-        return { title: 'Delivery Receipt – Sales', header: [['Control #', s.controlNo], ['DR/SI #', s.drSiNo], ['Date', dateStr(s.docDate)], ['Trans. To', s.location.name], ['Name', s.customer?.name ?? s.customerName ?? ''], ['Mode of Payment', s.paymentMode]], columns: ['Qty', 'Items', 'S. Price/Unit', 'Amount', 'Remarks'], rows: s.lines.map((l) => [l.qty, l.product.name, l.unitPrice, l.amount, l.lineRemarks ?? (l.isFreebie ? 'FREEBIE' : '')]), footer: [['Product total', s.productTotal], ['Delivery fee', s.deliveryFee], ['Shipping fee', s.shippingFee], ['TOTAL', s.grandTotal]] };
+        return { status: s.status, docType: 'SalesDoc', preparedBy: s.createdBy, title: 'Delivery Receipt – Sales', header: [['Control #', s.controlNo], ['DR/SI #', s.drSiNo], ['Date', dateStr(s.docDate)], ['Trans. To', s.location.name], ['Name', s.customer?.name ?? s.customerName ?? ''], ['Mode of Payment', s.paymentMode]], columns: ['Qty', 'Items', 'S. Price/Unit', 'Amount', 'Remarks'], rows: s.lines.map((l) => [l.qty, l.product.name, l.unitPrice, l.amount, l.lineRemarks ?? (l.isFreebie ? 'FREEBIE' : '')]), footer: [['Product total', s.productTotal], ['Delivery fee', s.deliveryFee], ['Shipping fee', s.shippingFee], ['TOTAL', s.grandTotal]] };
       }
       case 'supplier-form': {
         const r = await db.receivingDoc.findUnique({ where: { id }, include: { supplier: true, location: true, lines: { include: { product: true } } } }); if (!r) throw new NotFoundException(); scope(r.locationId);
-        return { title: "Supplier's Form (PO / Purchases)", header: [['Control #', r.controlNo], ['Date', dateStr(r.docDate)], ['Supplier', canCost ? `${r.supplier.code} ${r.supplier.name}` : r.supplier.code], ['Supplier Ref', r.supplierRef ?? ''], ['Received at', r.location.name]], columns: ['Qty', 'Free', 'Items', 'Batch', 'Expiry', ...(canCost ? ['Unit Cost', 'Amount'] : []), 'Remarks'], rows: r.lines.map((l) => [l.qty, l.freeQty, l.product.name, l.batchNo ?? '', l.expiryDate ? dateStr(l.expiryDate) : '', ...(canCost ? [l.unitCost ?? '', D(l.unitCost ?? 0).mul(l.qty)] : []), l.remarks ?? '']) };
+        return { status: r.status, docType: 'ReceivingDoc', preparedBy: r.preparedBy ?? r.createdBy, title: "Supplier's Form (PO / Purchases)", header: [['Control #', r.controlNo], ['Date', dateStr(r.docDate)], ['Supplier', canCost ? `${r.supplier.code} ${r.supplier.name}` : r.supplier.code], ['Supplier Ref', r.supplierRef ?? ''], ['Received at', r.location.name]], columns: ['Qty', 'Free', 'Items', 'Batch', 'Expiry', ...(canCost ? ['Unit Cost', 'Amount'] : []), 'Remarks'], rows: r.lines.map((l) => [l.qty, l.freeQty, l.product.name, l.batchNo ?? '', l.expiryDate ? dateStr(l.expiryDate) : '', ...(canCost ? [l.unitCost ?? '', D(l.unitCost ?? 0).mul(l.qty)] : []), l.remarks ?? '']) };
       }
       case 'count': {
         const c = await db.countDoc.findUnique({ where: { id }, include: { location: true, lines: { include: { product: true } } } }); if (!c) throw new NotFoundException(); scope(c.locationId);
-        return { title: 'Actual Inventory Count', header: [['Control #', c.controlNo], ['Location', c.location.name], ['Count date', dateStr(c.countDate)]], columns: ['SKU', 'Name', 'System Qty', 'Actual Qty', 'Variance', 'Remarks'], rows: c.lines.map((l) => [l.product.sku, l.product.name, l.systemQty, l.actualQty ?? '', l.variance, l.remarks ?? '']), signatures: ['Counted by', 'Witnessed by', 'Reviewed by'] };
+        return { status: c.status, docType: 'CountDoc', preparedBy: c.createdBy, title: 'Actual Inventory Count', header: [['Control #', c.controlNo], ['Location', c.location.name], ['Count date', dateStr(c.countDate)]], columns: ['SKU', 'Name', 'System Qty', 'Actual Qty', 'Variance', 'Remarks'], rows: c.lines.map((l) => [l.product.sku, l.product.name, l.systemQty, l.actualQty ?? '', l.variance, l.remarks ?? '']), signatures: ['Counted by', 'Witnessed by', 'Reviewed by'] };
       }
       case 'discrepancy': {
         const c = await db.discrepancyCase.findUnique({ where: { id }, include: { countDoc: { include: { location: true, lines: { include: { product: true } } } } } }); if (!c) throw new NotFoundException(); scope(c.countDoc.locationId);

@@ -29,6 +29,8 @@ export class AuthService {
       userId: user.id, roleKey, totpVerified: !totpRequired, idleSeconds: idleMinutes * 60, createdAt: Date.now(), ip: meta.ip, userAgent: meta.userAgent,
     });
     await this.prisma.db.loginSessionRecord.create({ data: { userId: user.id, sessionId, ip: meta.ip, userAgent: meta.userAgent } });
+    // One person, one active session: once this sign-in is complete (after 2FA where required) every other session of the account ends.
+    if (!totpRequired) await this.endOtherSessions(user.id, sessionId, meta);
     await this.prisma.db.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
     await this.audit.log({ action: 'LOGIN', entityType: 'User', entityId: user.id, userId: user.id });
     return {
@@ -51,6 +53,7 @@ export class AuthService {
     }
     if (!user.totpEnabled) await this.prisma.db.user.update({ where: { id: user.id }, data: { totpEnabled: true } });
     await this.sessions.update(sessionId, { totpVerified: true });
+    await this.endOtherSessions(user.id, sessionId, { ip: sess.ip, userAgent: sess.userAgent });
     return { ok: true };
   }
 
@@ -64,6 +67,26 @@ export class AuthService {
     return { secret, otpauthUrl: authenticator.keyuri(user.username, 'GWS-ERP', secret) };
   }
 
+  /** Accounts are personal (owner rule): a new sign-in signs out every other device, and the person is told where it happened. */
+  async endOtherSessions(userId: string, keep: string, meta: { ip?: string; userAgent?: string }) {
+    const others = (await this.sessions.listForUser(userId)).filter((id) => id !== keep);
+    if (!others.length) return 0;
+    for (const id of others) { await this.sessions.destroy(id); await this.sessions.markReplaced(id); }
+    await this.prisma.db.loginSessionRecord.updateMany({ where: { userId, sessionId: { in: others }, revokedAt: null }, data: { revokedAt: new Date() } });
+    await this.audit.log({ action: 'SESSION_REPLACED', entityType: 'User', entityId: userId, userId, after: { endedSessions: others.length, newSignInIp: meta.ip ?? null, newSignInDevice: meta.userAgent ?? null } });
+    await this.prisma.db.notification.create({ data: { userId, type: 'SESSION_REPLACED', title: 'Your account was signed in on another device', body: `Other sessions were signed out${meta.ip ? ` (new sign-in from ${meta.ip})` : ''}. If this was not you, tell the Admin and change your password.`, link: '/' } }).catch(() => undefined);
+    return others.length;
+  }
+
+  async acceptAccountability(userId: string, ip?: string) {
+    const user = await this.prisma.db.user.findUniqueOrThrow({ where: { id: userId }, include: { role: true } });
+    if (user.accountabilityAcceptedAt) return { ok: true, acceptedAt: user.accountabilityAcceptedAt };
+    const acceptedAt = new Date();
+    await this.prisma.db.user.update({ where: { id: userId }, data: { accountabilityAcceptedAt: acceptedAt, accountabilityIp: ip ?? null } });
+    await this.audit.log({ action: 'ACCOUNTABILITY_ACCEPTED', entityType: 'User', entityId: userId, userId, after: { statement: accountabilityStatement(user.fullName, user.idNumber, user.username, user.role.name), acceptedAt } });
+    return { ok: true, acceptedAt };
+  }
+
   async logout(sessionId: string) {
     await this.sessions.destroy(sessionId);
     await this.prisma.db.loginSessionRecord.updateMany({ where: { sessionId }, data: { revokedAt: new Date() } });
@@ -73,6 +96,7 @@ export class AuthService {
     const user = await this.prisma.db.user.findUniqueOrThrow({ where: { id: userId } });
     if (!(await argon2.verify(user.passwordHash, current))) throw new UnauthorizedException('Current password is wrong');
     if (next.length < 10) throw new BadRequestException('Password must be at least 10 characters');
+    if (next === current) throw new BadRequestException('Choose a new password different from the current one');
     await this.prisma.db.user.update({ where: { id: userId }, data: { passwordHash: await argon2.hash(next), mustChangePassword: false } });
     await this.audit.log({ action: 'PASSWORD_CHANGED', entityType: 'User', entityId: userId, userId });
     return { ok: true };
@@ -96,6 +120,13 @@ export class AuthService {
       locationScoped: LOCATION_SCOPED_ROLES.includes(roleKey),
       sessionId,
       totpVerified: sess.totpVerified,
+      mustChangePassword: user.mustChangePassword,
+      accountabilityAccepted: !!user.accountabilityAcceptedAt,
     };
   }
+}
+
+/** The statement each person accepts on first sign-in (stored verbatim in the audit log). */
+export function accountabilityStatement(fullName: string, idNumber: string | null, username: string, roleName: string) {
+  return `I, ${fullName}${idNumber ? ` (ID ${idNumber})` : ''}, confirm that the account "${username}" (${roleName}) is assigned to me alone. I will not share my password or let anyone else use this account. Every transaction, approval, edit and export recorded under this account is my responsibility.`;
 }

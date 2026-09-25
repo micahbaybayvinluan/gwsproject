@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Put, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Put, Query } from '@nestjs/common';
 import { PrismaService } from '../common/prisma.service';
 import { ApprovalsService } from '../approvals/approvals.service';
 import { AlertsService } from '../alerts/alerts.service';
@@ -46,6 +46,7 @@ export class DashboardController {
   @Get('franchise/portal') @RequirePermission('franchise.portal')
   async portal(@CurrentUser() u: SessionUser) {
     const locationId = u.locationIds[0]; const today = todayManila();
+    if (!locationId) throw new BadRequestException('The franchise portal is for accounts assigned to a franchise location');
     const loc = await this.prisma.db.location.findUniqueOrThrow({ where: { id: locationId } });
     const stock = await this.prisma.db.stockBalance.groupBy({ by: ['productId'], where: { locationId, qty: { gt: 0 } }, _sum: { qty: true } });
     const incoming = await this.prisma.db.transferDoc.findMany({ where: { toLocationId: locationId, status: 'APPROVED' }, include: { fromLocation: { select: { name: true } }, lines: true } });

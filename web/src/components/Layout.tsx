@@ -11,7 +11,7 @@ interface NavItem { to: string; label: string; any?: string[]; hideFor?: string[
 const NAV: { group: string; items: NavItem[] }[] = [
   { group: 'Work', items: [
     { to: '/', label: 'Dashboard' },
-    { to: '/approvals', label: 'Approvals', any: ['approval.act.COST_ON_RECEIVING', 'approval.act.TRANSFER_INTERNAL', 'approval.act.SPECIAL_PRICE', 'approval.act.POST_CLOSE_EDIT', 'approval.act.POST_CLOSE_EDIT_FRANCHISE', 'approval.act.WRITEOFF', 'approval.act.PRICE_CHANGE', 'approval.act.DISCREPANCY_RESOLUTION', 'approval.act.PERIOD_LOCK'] },
+    { to: '/approvals', label: 'Approvals', any: ['approval.act.COST_ON_RECEIVING', 'approval.act.TRANSFER_INTERNAL', 'approval.act.SPECIAL_PRICE', 'approval.act.POST_CLOSE_EDIT', 'approval.act.POST_CLOSE_EDIT_FRANCHISE', 'approval.act.WRITEOFF', 'approval.act.PRICE_CHANGE', 'approval.act.DISCREPANCY_RESOLUTION', 'approval.act.PERIOD_LOCK', 'approval.act.WAREHOUSE_EDIT', 'approval.act.TRANSFER_TO_FRANCHISE', 'approval.act.EDIT_REQUEST', 'approval.act.CONSIGNMENT_OUT'] },
     { to: '/sales/new', label: 'New Sale', any: ['sale.create'] },
     { to: '/sales', label: 'Sales', any: ['sale.create', 'report.sales.own', 'report.sales.all'] },
     { to: '/ar', label: 'AR / Credit', any: ['ar.view'] },

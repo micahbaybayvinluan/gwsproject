@@ -51,5 +51,9 @@ export class SessionStore implements OnModuleDestroy {
     if (ids.length) await this.redis.del(...ids.map((i) => this.key(i)));
     await this.redis.del(this.userKey(userId));
   }
+  async listForUser(userId: string): Promise<string[]> { return this.redis.smembers(this.userKey(userId)); }
+  /** Tombstone for a session ended because the same account signed in elsewhere (so the old device can be told why). */
+  async markReplaced(id: string) { await this.redis.set(`sess:replaced:${id}`, '1', 'EX', 7 * 86400); }
+  async wasReplaced(id: string) { return (await this.redis.exists(`sess:replaced:${id}`)) === 1; }
   onModuleDestroy() { this.redis.disconnect(); }
 }

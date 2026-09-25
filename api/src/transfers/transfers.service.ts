@@ -10,13 +10,14 @@ import { SettingsService } from '../common/settings.service';
 import { MasterService } from '../master/master.service';
 import { PostingService } from '../gl/posting.service';
 import { r6Transfer, r7FranchiseTransfer, r8ConsignOut, r9Writeoff } from '../gl/posting-rules';
-import { toDateOnly, todayManila } from '../common/manila';
+import { dateStr, toDateOnly, todayManila } from '../common/manila';
 import { D, sum } from '../common/money';
 import type { SessionUser } from '../common/request-context';
 import { requestContext } from '../common/request-context';
 import type { ApprovalType } from '../common/permissions';
 
 export interface TransferLineInput { productId: string; qty: number; batchId?: string | null; checkerRemarks?: string }
+export interface TransferEditInput { toLocationId?: string; transferType?: TransferType; returnReason?: string | null; docDate?: string; notes?: string | null; lines: TransferLineInput[] }
 export interface TransferInput { fromLocationId?: string; toLocationId: string; transferType: TransferType; returnReason?: string; docDate?: string; notes?: string; lines: TransferLineInput[] }
 
 /** §7.3 Transfers: one document, two views (Pull-Out for sender, Transfer-In for receiver). In-transit until receiver confirms. */
@@ -31,7 +32,7 @@ export class TransfersService implements OnModuleInit {
 
   private static readonly INCLUDE = { fromLocation: { select: { id: true, code: true, name: true, type: true } }, toLocation: { select: { id: true, code: true, name: true, type: true } }, lines: { include: { product: { select: { id: true, sku: true, name: true, category: { select: { accountingClass: true } } } }, batch: { select: { id: true, batchNo: true, expiryDate: true, unitCost: true, isConsignmentIn: true } } } } } as const;
 
-  list(user: SessionUser, q: { direction?: 'out' | 'in'; status?: string; locationId?: string; from?: string; to?: string }) {
+  async list(user: SessionUser, q: { direction?: 'out' | 'in'; status?: string; locationId?: string; from?: string; to?: string }) {
     const scope = user.locationScoped ? user.locationIds : null;
     const where: Prisma.TransferDocWhereInput = { status: q.status as never, docDate: q.from || q.to ? { gte: q.from ? toDateOnly(q.from) : undefined, lte: q.to ? toDateOnly(q.to) : undefined } : undefined };
     if (q.locationId && user.locationScoped && !user.locationIds.includes(q.locationId)) throw new ForbiddenException('Location outside your assignment');
@@ -39,13 +40,22 @@ export class TransfersService implements OnModuleInit {
     if (q.direction === 'out') where.fromLocationId = loc ? { in: loc } : { not: '' };
     else if (q.direction === 'in') where.toLocationId = loc ? { in: loc } : { not: '' };
     else where.OR = loc ? [{ fromLocationId: { in: loc } }, { toLocationId: { in: loc } }] : [{ fromLocationId: { not: '' } }];
-    return this.prisma.db.transferDoc.findMany({ where, include: TransfersService.INCLUDE, orderBy: { createdAt: 'desc' }, take: 300 });
+    const rows = await this.prisma.db.transferDoc.findMany({ where, include: TransfersService.INCLUDE, orderBy: { createdAt: 'desc' }, take: 300 });
+    // a draft belongs to the sending side; the receiving location gets its copy once it is submitted
+    return rows.filter((d) => d.status !== 'DRAFT' || TransfersService.isSenderSide(user, d));
+  }
+
+  /** Sending side = users of the from-location (or unscoped users), plus whoever created the document (e.g. a branch requesting stock). */
+  static isSenderSide(user: SessionUser, doc: { fromLocationId: string; createdBy: string | null; preparedBy?: string | null }) {
+    return !user.locationScoped || user.locationIds.includes(doc.fromLocationId) || doc.createdBy === user.id || doc.preparedBy === user.id;
   }
   async get(id: string, user: SessionUser) {
     const doc = await this.prisma.db.transferDoc.findUnique({ where: { id }, include: TransfersService.INCLUDE });
     if (!doc) throw new NotFoundException();
     if (user.locationScoped && !user.locationIds.includes(doc.fromLocationId) && !user.locationIds.includes(doc.toLocationId)) throw new ForbiddenException();
-    return doc;
+    if (doc.status === 'DRAFT' && !TransfersService.isSenderSide(user, doc)) throw new NotFoundException('This transfer has not been sent yet');
+    const people = await this.prisma.db.user.findMany({ where: { id: { in: [doc.preparedBy, doc.receivedBy].filter((x): x is string => !!x) } }, select: { id: true, fullName: true } });
+    return { ...doc, preparedByName: people.find((p) => p.id === doc.preparedBy)?.fullName ?? null, receivedByName: people.find((p) => p.id === doc.receivedBy)?.fullName ?? null };
   }
 
   async create(input: TransferInput, user: SessionUser) {
@@ -54,35 +64,83 @@ export class TransfersService implements OnModuleInit {
     const fromLoc = await this.prisma.db.location.findUniqueOrThrow({ where: { id: from } });
     const toLoc = await this.prisma.db.location.findUniqueOrThrow({ where: { id: input.toLocationId } });
     if (from === input.toLocationId) throw new BadRequestException('From and To must differ');
-    const isRequest = user.locationScoped && !user.locationIds.includes(from);
-    // sales associates may only send from their branch, or *request* from the warehouse to their branch
-    if (isRequest && !(fromLoc.type === 'WAREHOUSE' && user.locationIds.includes(toLoc.id))) throw new ForbiddenException('You may only send from your branch or request from the warehouse');
-    if (input.transferType === 'CONSIGNMENT_OUT' && toLoc.type !== 'CONSIGNEE') throw new BadRequestException('Consignment out must target a CONSIGNEE location');
+    this.assertRoute(user, fromLoc, toLoc, input.transferType);
     if (!input.lines.length) throw new BadRequestException('At least one line is required');
-    const customerReturns = input.transferType === 'RETURN' && fromLoc.code === VIRTUAL_CODES.CUSTOMER_RETURNS;
     const doc = await this.prisma.db.$transaction(async (tx) => {
       const controlNo = await this.seq.next(tx, 'PO', { locationId: from, locationCode: fromLoc.code, prefix: input.transferType === 'RETURN' ? 'RET' : input.transferType === 'CONSIGNMENT_OUT' ? 'CSG' : 'PO' });
-      const lines: Prisma.TransferLineUncheckedCreateWithoutDocInput[] = [];
-      for (const l of input.lines) {
-        if (l.qty <= 0) throw new BadRequestException('Qty must be positive');
-        if (customerReturns) {
-          // returned goods from customers: receive into branch under the batch given (or the newest batch of that product)
-          const batchId = l.batchId ?? (await tx.batch.findFirst({ where: { productId: l.productId }, orderBy: { createdAt: 'desc' } }))?.id;
-          if (!batchId) throw new BadRequestException('No batch known for returned product; receive it first');
-          lines.push({ productId: l.productId, batchId, qtySent: l.qty, checkerRemarks: l.checkerRemarks });
-          continue;
-        }
-        const picks = await this.stock.pickFefo(tx, from, l.productId, l.qty, { preferBatchId: l.batchId ?? undefined, allowExpired: input.transferType === 'RETURN' });
-        for (const p of picks) lines.push({ productId: l.productId, batchId: p.batchId, qtySent: p.qty, checkerRemarks: l.checkerRemarks });
-      }
+      const lines = await this.buildLines(tx, fromLoc, input.transferType, input.lines);
       return tx.transferDoc.create({ data: { controlNo, docDate: input.docDate ? toDateOnly(input.docDate) : todayManila(), fromLocationId: from, toLocationId: toLoc.id, transferType: input.transferType, returnReason: input.returnReason, notes: input.notes, preparedBy: user.id, createdBy: user.id, lines: { create: lines } }, include: TransfersService.INCLUDE });
     });
     await this.audit.log({ action: 'CREATE', entityType: 'TransferDoc', entityId: doc.id, after: doc });
     return doc;
   }
 
+  /** Who may send what where (§7.3): location-scoped users send from their own location, or request from the warehouse to their own location. */
+  assertRoute(user: SessionUser, fromLoc: { id: string; type: string }, toLoc: { id: string; type: string }, transferType: string) {
+    if (fromLoc.id === toLoc.id) throw new BadRequestException('From and To must differ');
+    const isRequest = user.locationScoped && !user.locationIds.includes(fromLoc.id);
+    if (isRequest && !(fromLoc.type === 'WAREHOUSE' && user.locationIds.includes(toLoc.id))) throw new ForbiddenException('You may only send from your branch or request from the warehouse');
+    if (transferType === 'CONSIGNMENT_OUT' && toLoc.type !== 'CONSIGNEE') throw new BadRequestException('Consignment out must target a CONSIGNEE location');
+  }
+
+  /** FEFO-picked lines (or the newest batch for customer returns). No stock moves until approval. */
+  async buildLines(tx: Tx, fromLoc: { id: string; code: string }, transferType: string, input: TransferLineInput[]) {
+    const customerReturns = transferType === 'RETURN' && fromLoc.code === VIRTUAL_CODES.CUSTOMER_RETURNS;
+    const lines: Prisma.TransferLineUncheckedCreateWithoutDocInput[] = [];
+    for (const l of input) {
+      if (l.qty <= 0) throw new BadRequestException('Qty must be positive');
+      if (customerReturns) {
+        // returned goods from customers: receive into branch under the batch given (or the newest batch of that product)
+        const batchId = l.batchId ?? (await tx.batch.findFirst({ where: { productId: l.productId }, orderBy: { createdAt: 'desc' } }))?.id;
+        if (!batchId) throw new BadRequestException('No batch known for returned product; receive it first');
+        lines.push({ productId: l.productId, batchId, qtySent: l.qty, checkerRemarks: l.checkerRemarks });
+        continue;
+      }
+      const picks = await this.stock.pickFefo(tx, fromLoc.id, l.productId, l.qty, { preferBatchId: l.batchId ?? undefined, allowExpired: transferType === 'RETURN' });
+      for (const p of picks) lines.push({ productId: l.productId, batchId: p.batchId, qtySent: p.qty, checkerRemarks: l.checkerRemarks });
+    }
+    return lines;
+  }
+
+  /** Snapshot for edit proposals: header + qty per product (batches are re-picked FEFO on apply). */
+  async editSnapshot(id: string) {
+    const d = await this.prisma.db.transferDoc.findUniqueOrThrow({ where: { id }, include: TransfersService.INCLUDE });
+    const perProduct = new Map<string, { productId: string; product: string; qty: number }>();
+    for (const l of d.lines) { const cur = perProduct.get(l.productId) ?? { productId: l.productId, product: l.product.name, qty: 0 }; cur.qty += l.qtySent; perProduct.set(l.productId, cur); }
+    return { id: d.id, controlNo: d.controlNo, status: d.status, locationId: d.fromLocationId, locationName: `${d.fromLocation.name} → ${d.toLocation.name}`, createdBy: d.createdBy ?? d.preparedBy, fromLocationId: d.fromLocationId, header: { to: d.toLocation.name, toLocationId: d.toLocationId, transferType: d.transferType, returnReason: d.returnReason ?? '', docDate: dateStr(d.docDate), notes: d.notes ?? '' }, lines: [...perProduct.values()] };
+  }
+
+  /**
+   * Replace destination / type / notes / lines of a DRAFT or SUBMITTED transfer (drafts are editable before submission; In-Charge edits
+   * apply after the preparer accepts). A submitted transfer's pending approval is cancelled and it is resubmitted in the preparer's name.
+   */
+  async applyEdit(id: string, input: TransferEditInput, actorId: string, editor: SessionUser | null) {
+    const doc = await this.prisma.db.transferDoc.findUniqueOrThrow({ where: { id }, include: TransfersService.INCLUDE });
+    if (!['DRAFT', 'SUBMITTED'].includes(doc.status)) throw new BadRequestException(`A ${doc.status} transfer can no longer be edited`);
+    if (!input.lines.length) throw new BadRequestException('At least one line is required');
+    const toLoc = await this.prisma.db.location.findUniqueOrThrow({ where: { id: input.toLocationId ?? doc.toLocationId } });
+    const transferType = (input.transferType ?? doc.transferType) as TransferType;
+    if (editor) this.assertRoute(editor, doc.fromLocation, toLoc, transferType);
+    else if (doc.fromLocationId === toLoc.id) throw new BadRequestException('From and To must differ');
+    const wasSubmitted = doc.status === 'SUBMITTED';
+    if (wasSubmitted) await this.approvals.cancelForDocument('TransferDoc', id);
+    await this.prisma.db.$transaction(async (tx) => {
+      const lines = await this.buildLines(tx, doc.fromLocation, transferType, input.lines);
+      await tx.transferLine.deleteMany({ where: { docId: id } });
+      await tx.transferDoc.update({ where: { id }, data: { toLocationId: toLoc.id, transferType, returnReason: input.returnReason === undefined ? undefined : input.returnReason, notes: input.notes === undefined ? undefined : input.notes, docDate: input.docDate ? toDateOnly(input.docDate) : undefined, status: 'DRAFT', approvalRequestId: null, updatedBy: actorId, lines: { create: lines } } });
+    });
+    if (wasSubmitted) await this.submitDoc(id, doc.preparedBy ?? doc.createdBy ?? actorId);
+  }
+
   async submit(id: string, user: SessionUser) {
     const doc = await this.get(id, user);
+    if (!TransfersService.isSenderSide(user, doc)) throw new ForbiddenException('Only the sending location submits this transfer');
+    if (user.locationScoped && doc.preparedBy !== user.id) throw new ForbiddenException(`Only ${doc.preparedByName ?? 'the person who prepared it'} can submit this draft; propose an edit instead`);
+    await this.submitDoc(id, user.id);
+    return this.get(id, user);
+  }
+  private async submitDoc(id: string, requestedBy: string) {
+    const doc = await this.prisma.db.transferDoc.findUniqueOrThrow({ where: { id }, include: TransfersService.INCLUDE });
     if (doc.status !== 'DRAFT') throw new BadRequestException('Only drafts can be submitted');
     const type: ApprovalType = doc.transferType === 'CONSIGNMENT_OUT' ? 'CONSIGNMENT_OUT' : doc.toLocation.type === 'FRANCHISE' ? 'TRANSFER_TO_FRANCHISE' : 'TRANSFER_INTERNAL';
     const totalAtCost = sum(doc.lines.map((l) => l.batch.unitCost.mul(l.qtySent)));
@@ -93,10 +151,9 @@ export class TransfersService implements OnModuleInit {
       || (type === 'TRANSFER_TO_FRANCHISE' && maxFranchise != null && totalAtCost.lte(maxFranchise));
     // Customer returns need no approval: they only add stock at the branch (mirrors LEDGER4)
     const customerReturn = doc.transferType === 'RETURN' && doc.fromLocation.code === VIRTUAL_CODES.CUSTOMER_RETURNS;
-    const req = await this.approvals.request({ type, documentType: 'TransferDoc', documentId: id, requestedBy: user.id, autoApproveAt: autoOk || customerReturn ? new Date() : null, summary: { controlNo: doc.controlNo, locationId: doc.fromLocationId, locationName: `${doc.fromLocation.name} → ${doc.toLocation.name}`, transferType: doc.transferType, lines: doc.lines.length, totalAtCost: totalAtCost.toFixed(2) } });
-    await this.prisma.db.transferDoc.update({ where: { id }, data: { status: 'SUBMITTED', approvalRequestId: req.id, updatedBy: user.id } });
+    const req = await this.approvals.request({ type, documentType: 'TransferDoc', documentId: id, requestedBy, autoApproveAt: autoOk || customerReturn ? new Date() : null, summary: { controlNo: doc.controlNo, locationId: doc.fromLocationId, locationName: `${doc.fromLocation.name} → ${doc.toLocation.name}`, transferType: doc.transferType, lines: doc.lines.length, totalAtCost: totalAtCost.toFixed(2) } });
+    await this.prisma.db.transferDoc.update({ where: { id }, data: { status: 'SUBMITTED', approvalRequestId: req.id, updatedBy: requestedBy } });
     if (autoOk || customerReturn) await this.approvals.runAutoApprovals();
-    return this.get(id, user);
   }
 
   /** On approval: TRANSFER_OUT from sender → IN_TRANSIT. Consignment out / customer returns are received immediately. */
@@ -133,7 +190,18 @@ export class TransfersService implements OnModuleInit {
   }
 
   /** Receiver confirms per-line qty_received (≤ sent). Match → TRANSFER_IN; shortfall stays IN_TRANSIT pending Head Auditor. */
-  async confirm(id: string, received: { lineId: string; qtyReceived: number; discrepancyNote?: string }[], user: SessionUser) {
+  /**
+   * Receiving location accepts the items line by line: a ticked line means "received exactly as sent"; an unticked line must state the
+   * quantity actually received (and a note when short). The UI offers "tick all if correct".
+   */
+  async confirm(id: string, input: { lineId: string; checked?: boolean; qtyReceived?: number; discrepancyNote?: string }[], user: SessionUser) {
+    const sent = await this.prisma.db.transferLine.findMany({ where: { docId: id }, include: { product: { select: { name: true } } } });
+    const received = sent.map((l) => {
+      const r = input.find((x) => x.lineId === l.id);
+      if (!r || (!r.checked && r.qtyReceived == null)) throw new BadRequestException(`Tick ${l.product.name} if it arrived complete, or enter the quantity actually received`);
+      if (!r.checked && r.qtyReceived! < l.qtySent && !r.discrepancyNote?.trim()) throw new BadRequestException(`Add a note for ${l.product.name}: received ${r.qtyReceived} of ${l.qtySent}`);
+      return { lineId: l.id, qtyReceived: r.checked ? l.qtySent : r.qtyReceived!, discrepancyNote: r.checked ? undefined : r.discrepancyNote };
+    });
     const doc = await this.get(id, user);
     if (doc.status !== 'APPROVED') throw new BadRequestException('Transfer is not awaiting receipt');
     if (user.locationScoped && !user.locationIds.includes(doc.toLocationId)) throw new ForbiddenException('Only the receiving location can confirm');
@@ -207,6 +275,7 @@ export class TransfersService implements OnModuleInit {
 
   async void(id: string, reason: string, user: SessionUser) {
     const doc = await this.get(id, user);
+    if (!TransfersService.isSenderSide(user, doc)) throw new ForbiddenException('Only the sending location can void this transfer');
     if (!['DRAFT', 'SUBMITTED', 'REJECTED'].includes(doc.status)) throw new BadRequestException('Only unposted transfers can be voided; use a RETURN transfer instead');
     await this.approvals.cancelForDocument('TransferDoc', id);
     const after = await this.prisma.db.transferDoc.update({ where: { id }, data: { status: 'VOIDED', voidedAt: new Date(), voidedBy: user.id, voidReason: reason } });

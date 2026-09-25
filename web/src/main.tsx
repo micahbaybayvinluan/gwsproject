@@ -5,6 +5,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import './index.css';
 import { AuthProvider, useAuth } from './lib/auth';
 import { Layout } from './components/Layout';
+import { AccountGate } from '@/components/AccountGate';
 import { LoginPage } from './pages/Login';
 import { DashboardPage } from './pages/Dashboard';
 import { ApprovalsPage } from './pages/Approvals';
@@ -33,6 +34,7 @@ function Guard({ children }: { children: React.ReactNode }) {
   if (loading) return <div className="p-8 text-center text-slate-500">Loading…</div>;
   if (!me) return <Navigate to="/login" replace />;
   if (!me.totpVerified) return <Navigate to="/login?totp=1" replace />;
+  if (me.mustChangePassword || !me.accountabilityAcceptedAt) return <AccountGate />;
   return <>{children}</>;
 }
 

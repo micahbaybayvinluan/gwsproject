@@ -1,3 +1,4 @@
+import { History } from '@/components/DocEdits';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
@@ -106,5 +107,6 @@ export function SaleDetailPage() {
     <Attachments type="SalesDoc" id={s.id} />
     {!s.voidedAt && (can('sale.void') || can('sale.edit.sameday')) && <Card title="Void / correct"><div className="flex flex-wrap items-end gap-2"><Field label="Reason" className="flex-1"><Input value={reason} onChange={(e) => setReason(e.target.value)} /></Field><Button variant="danger" disabled={!reason} onClick={() => voidM.mutate()}>Void sale</Button>{closedErr && <Button variant="outline" onClick={() => edit.mutate()}>Request post-close void (needs Head + Asst Auditor)</Button>}</div><ErrorBox error={voidM.error} /><ErrorBox error={edit.error} /></Card>}
     {s.voidedAt && <div className="rounded bg-red-50 p-3 text-sm text-red-800">Voided: {s.voidReason}</div>}
+    <History entityType="SalesDoc" id={s.id} />
   </div>;
 }

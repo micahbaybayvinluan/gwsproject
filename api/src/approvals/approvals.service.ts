@@ -22,32 +22,36 @@ export class ApprovalsService {
 
   register(type: ApprovalType, handler: ApprovalHandler) { this.handlers.set(type, handler); }
 
-  async request(input: { type: ApprovalType; documentType: string; documentId: string; requestedBy: string; requesterRole?: RoleKey; summary?: unknown; autoApproveAt?: Date | null; extraRoles?: RoleKey[]; discrepancyCaseId?: string | null }, tx: Tx | null = null) {
+  async request(input: { type: ApprovalType; documentType: string; documentId: string; requestedBy: string; requesterRole?: RoleKey; summary?: unknown; autoApproveAt?: Date | null; extraRoles?: RoleKey[]; discrepancyCaseId?: string | null; approverUserIds?: string[] }, tx: Tx | null = null) {
     const db = (tx ?? this.prisma.db);
     const route = APPROVAL_ROUTING[input.type];
     let roles: RoleKey[] = [...route.roles];
     if (input.type === 'EDIT_REQUEST' && input.requesterRole) roles = editRequestApprovers(input.requesterRole);
     if (input.extraRoles?.length) roles = [...new Set([...roles, ...input.extraRoles])];
+    const userIds = [...new Set(input.approverUserIds ?? [])];
+    if (userIds.length) roles = [];
     const req = await db.approvalRequest.create({
       data: {
         type: input.type, documentType: input.documentType, documentId: input.documentId, requestedBy: input.requestedBy,
-        requiredApproverRoles: roles, anyOf: !!route.anyOf && !input.extraRoles?.length, summary: (input.summary ?? undefined) as Prisma.InputJsonValue | undefined,
+        requiredApproverRoles: roles, requiredApproverUserIds: userIds, anyOf: !!route.anyOf && !input.extraRoles?.length, summary: (input.summary ?? undefined) as Prisma.InputJsonValue | undefined,
         autoApproveAt: input.autoApproveAt ?? null, discrepancyCaseId: input.discrepancyCaseId ?? null,
       },
     });
     // notify approvers (after commit when in tx — best effort)
-    const doNotify = () => this.notify.toRoles(roles, { type: 'APPROVAL_REQUESTED', title: `${humanType(input.type)} needs your approval`, body: `${input.documentType} ${summaryLine(input.summary)}`, link: `/approvals?type=${input.type}` }).catch((e) => this.log.warn(e));
+    const message = { type: 'APPROVAL_REQUESTED', title: `${humanType(input.type)} needs your ${userIds.length ? 'acceptance' : 'approval'}`, body: `${input.documentType} ${summaryLine(input.summary)}`, link: `/approvals?type=${input.type}` };
+    const doNotify = () => (userIds.length ? this.notify.toUsers(userIds, message) : this.notify.toRoles(roles, message)).catch((e) => this.log.warn(e));
     if (tx) setImmediate(doNotify); else await doNotify();
     return req;
   }
 
   /** Inbox for the current approver: pending requests where one of their roles is required and they have not decided yet. */
   async inbox(user: SessionUser, type?: string) {
-    const where: Prisma.ApprovalRequestWhereInput = { status: 'PENDING', requiredApproverRoles: { has: user.roleKey }, type: type || undefined, decisions: { none: { userId: user.id } } };
+    const byRole: Prisma.ApprovalRequestWhereInput = { requiredApproverRoles: { has: user.roleKey }, requiredApproverUserIds: { isEmpty: true } };
     if (user.roleKey === 'FRANCHISE_OWNER') {
       // franchise owner only sees requests for their own franchise (summary.locationId)
-      where.summary = { path: ['locationId'], string_contains: user.locationIds[0] ?? '∅' } as never;
+      byRole.summary = { path: ['locationId'], string_contains: user.locationIds[0] ?? '∅' } as never;
     }
+    const where: Prisma.ApprovalRequestWhereInput = { status: 'PENDING', type: type || undefined, decisions: { none: { userId: user.id } }, OR: [byRole, { requiredApproverUserIds: { has: user.id } }] };
     const rows = await this.prisma.db.approvalRequest.findMany({ where, include: { decisions: { include: { user: { select: { fullName: true } } } } }, orderBy: { createdAt: 'desc' } });
     const oldest = rows.length ? Math.floor((Date.now() - Math.min(...rows.map((r) => r.createdAt.getTime()))) / 86400000) : 0;
     const requesterIds = [...new Set(rows.map((r) => r.requestedBy))];
@@ -62,13 +66,20 @@ export class ApprovalsService {
   async decide(id: string, user: SessionUser, decision: 'APPROVE' | 'REJECT', note?: string) {
     const req = await this.get(id);
     if (req.status !== 'PENDING') throw new BadRequestException('Request already decided');
-    if (!req.requiredApproverRoles.includes(user.roleKey)) throw new ForbiddenException('Your role is not an approver for this request');
-    if (!user.permissions.has(`approval.act.${req.type}`)) throw new ForbiddenException(`Missing permission approval.act.${req.type}`);
+    const targeted = (req.requiredApproverUserIds ?? []).length > 0;
+    if (targeted) {
+      // person-targeted request: only the named person decides (their role does not matter)
+      if (!req.requiredApproverUserIds.includes(user.id)) throw new ForbiddenException('This request is addressed to another person');
+    } else {
+      if (!req.requiredApproverRoles.includes(user.roleKey)) throw new ForbiddenException('Your role is not an approver for this request');
+      if (!user.permissions.has(`approval.act.${req.type}`)) throw new ForbiddenException(`Missing permission approval.act.${req.type}`);
+    }
     if (req.decisions.some((d) => d.userId === user.id)) throw new BadRequestException('You already decided on this request');
     await this.prisma.db.approvalDecision.create({ data: { requestId: id, userId: user.id, roleKey: user.roleKey, decision, note } });
     const decisions = [...req.decisions.map((d) => ({ roleKey: d.roleKey, decision: d.decision })), { roleKey: user.roleKey, decision }];
     let final: ApprovalStatus | null = null;
     if (decision === 'REJECT') final = 'REJECTED';
+    else if (targeted) { const approvedUsers = new Set([...req.decisions.filter((d) => d.decision === 'APPROVE').map((d) => d.userId), user.id]); if (req.requiredApproverUserIds.every((u) => approvedUsers.has(u))) final = 'APPROVED'; }
     else if (req.anyOf) final = 'APPROVED';
     else {
       const approvedRoles = new Set(decisions.filter((d) => d.decision === 'APPROVE').map((d) => d.roleKey));

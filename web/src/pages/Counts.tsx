@@ -1,3 +1,4 @@
+import { History } from '@/components/DocEdits';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
@@ -38,6 +39,7 @@ export function CountDetailPage() {
     <Card><table className="w-full text-sm"><thead className="text-left text-xs text-slate-500"><tr><th>SKU</th><th>Name</th><th className="num">System Qty</th><th className="num">Actual Qty</th><th className="num">Variance</th><th>Remarks</th></tr></thead><tbody>{d.lines.map((l) => { const a = actual[l.productId] !== undefined ? Number(actual[l.productId]) : l.actualQty; const v = a == null ? null : a - l.systemQty; return <tr key={l.id} className="border-t"><td className="text-xs">{l.product.sku}</td><td>{l.product.name}</td><td className="num">{l.systemQty}</td><td className="num">{editable ? <Input type="number" inputMode="numeric" min={0} className="w-24 text-right" value={actual[l.productId] ?? (l.actualQty ?? '')} onChange={(e) => setActual({ ...actual, [l.productId]: e.target.value })} /> : l.actualQty ?? '—'}</td><td className={`num ${v ? 'font-medium text-red-700' : ''}`}>{v ?? ''}</td><td className="text-xs">{l.remarks}</td></tr>; })}</tbody></table>
       {editable && <div className="mt-3 flex gap-2"><Button variant="outline" onClick={() => save.mutate()}>Save actuals</Button><Button onClick={async () => { await save.mutateAsync(); submit.mutate(); }}>Submit count</Button></div>}<ErrorBox error={save.error || submit.error || upload.error} />
     </Card>
+    <History entityType="CountDoc" id={d.id} />
   </div>;
 }
 

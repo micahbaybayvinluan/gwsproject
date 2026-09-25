@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Post, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { z } from 'zod';
-import { AuthService } from './auth.service';
+import { AuthService, accountabilityStatement } from './auth.service';
 import { COOKIE } from './auth.guard';
 import { Public, CurrentUser } from '../common/decorators';
 import { Z } from '../common/zod.pipe';
@@ -40,11 +40,19 @@ export class AuthController {
   @Post('password')
   changePassword(@CurrentUser() user: SessionUser, @Body(Z(ChangePwDto)) dto: z.infer<typeof ChangePwDto>) { return this.auth.changePassword(user.id, dto.current, dto.next); }
 
+  @Post('accept-accountability')
+  accept(@CurrentUser() user: SessionUser, @Req() req: Request) { return this.auth.acceptAccountability(user.id, req.ip); }
+
   @Get('me')
   async me(@CurrentUser() user: SessionUser) {
     const locations = user.locationIds.length
       ? await this.prisma.db.location.findMany({ where: { id: { in: user.locationIds } }, select: { id: true, code: true, name: true, type: true, isSelling: true } })
       : [];
-    return { id: user.id, username: user.username, fullName: user.fullName, roleKey: user.roleKey, permissions: [...user.permissions].sort(), locations, locationScoped: user.locationScoped, totpVerified: user.totpVerified };
+    const u = await this.prisma.db.user.findUniqueOrThrow({ where: { id: user.id }, select: { idNumber: true, accountabilityAcceptedAt: true, mustChangePassword: true, lastLoginAt: true, role: { select: { name: true } } } });
+    return {
+      id: user.id, username: user.username, fullName: user.fullName, roleKey: user.roleKey, roleName: u.role.name, permissions: [...user.permissions].sort(), locations, locationScoped: user.locationScoped, totpVerified: user.totpVerified,
+      idNumber: u.idNumber, mustChangePassword: u.mustChangePassword, accountabilityAcceptedAt: u.accountabilityAcceptedAt,
+      accountabilityStatement: accountabilityStatement(user.fullName, u.idNumber, user.username, u.role.name),
+    };
   }
 }

@@ -54,7 +54,7 @@ Every importer is also available in the UI (**Catalogue → Imports**) with temp
 
 See **SIMULATION-GUIDE.md** for the full account list (one per branch and franchise) and a 16-step walk-through across every role.
 
-All seeded users share the password `ChangeMe!2026` (override with `SEED_PASSWORD`). Roles marked 2FA must enrol a TOTP authenticator on first login (the login screen shows the secret / otpauth link).
+All seeded users share the password `ChangeMe!2026` (override with `SEED_PASSWORD`) and demo company IDs DEMO-001…; each accepts the accountability statement at first sign-in. Accounts created by Admin must set their own password. Roles marked 2FA must enrol a TOTP authenticator on first login (the login screen shows the secret / otpauth link).
 
 | Username | Role | Scope | 2FA |
 |---|---|---|---|
@@ -77,10 +77,12 @@ All seeded users share the password `ChangeMe!2026` (override with `SEED_PASSWOR
 ## Tests
 
 ```bash
-pnpm test          # api: 50 unit tests (redaction per role, posting rules R1–R14, approval routing, importers, sales report builder, daily inventory report)
-                   #      + 18 end-to-end tests over HTTP against the real DB (receive → cost approve → transfer → confirm → FEFO sale →
+pnpm test          # api: 55 unit tests (redaction per role, posting rules R1–R14, approval routing, importers, sales report builder, daily inventory report)
+                   #      + 27 end-to-end tests over HTTP against the real DB (receive → cost approve → transfer → confirm → FEFO sale →
                    #        special price → AR/credit note → reports → post-close edit needing Head+Asst → bulk approvals →
-                   #        count → discrepancy → charge form → HR → alerts → scoping/redaction → Phase 2 posting, period lock, opening balances)
+                   #        count → discrepancy → charge form → HR → alerts → scoping/redaction → Phase 2 posting, period lock, opening balances →
+                   #        warehouse → franchise transfer, In-Charge edits accepted/rejected by the preparer, draft forms, receiver ticks,
+                   #        personal accounts: ID + own password + accountability statement, one session per account)
 pnpm --filter @gws/web test:e2e   # Playwright smoke test of the daily close on a phone viewport (set PLAYWRIGHT_CHROMIUM_PATH to reuse a local Chromium)
 pnpm typecheck && pnpm build
 ```
@@ -95,6 +97,16 @@ The e2e suite expects a seeded database (`prisma:seed`) and creates its own prod
 4. **No hard deletes** on transactional tables: `voidedAt/voidedBy/voidReason` everywhere; journal corrections are reversals.
 
 Sessions are server-side in Redis (30 min idle; 12 h for sales/franchise roles), passwords argon2, TOTP mandatory for Admin, External Auditor, Head Auditor, Accounting Head. Uploads are size-, magic-byte- and ClamAV-checked (`CLAMAV_REQUIRED=true` to fail closed).
+
+## Accountability and editing rules (owner requests, 2026-09-25)
+
+- **One person per account.** Every account names its person (full name + company ID; required when Admin creates a user). A new person replaces the temporary password and accepts an accountability statement before doing anything; the acceptance, IP and statement text are audit-logged. Changing the name or ID on an account requires the new person to accept again.
+- **One device at a time.** A completed sign-in (after 2FA where required) signs out every other session of that account; the old device sees "signed out because your account signed in on another device", and the person gets a notification. Users & Roles shows recent sign-ins (IP and device).
+- **Everything is tagged.** Documents show "Prepared by / received by" names, a "Who did what" panel (every action with name, company ID, role and time), and printed forms carry the preparer, approvers and receiver. Audit Log filters by person.
+- **Drafts.** Receiving and transfer drafts can be printed (stamped DRAFT) and edited by their preparer before submission; only the preparer submits a draft (Admin and auditors can too). Drafts belong to the sending location: the receiving location sees the document once it is submitted and prints a Transfer-In copy.
+- **Receiving side ticks.** The receiving location confirms each line with a tick ("arrived complete") or "tick all"; an unticked line needs the counted quantity and a note when short.
+- **Warehouse edits need the preparer's acceptance.** The Warehouse In-Charge (and Admin) can change a receiving or transfer that someone else prepared while it is a draft or awaiting approval; the change is sent to the preparer as a person-addressed "Warehouse edit" and applies only when they accept. A submitted document goes back through approval after an accepted edit.
+- **Warehouse transfers** go from the warehouse to any branch, franchise or consignee; the Warehouse Associate and In-Charge both see every destination.
 
 ## Decisions to confirm with the owner
 

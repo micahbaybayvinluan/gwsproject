@@ -41,8 +41,12 @@ export function ApprovalsPage() {
             <div className="flex flex-wrap items-center gap-2 text-sm"><span className="font-medium">{String(r.summary?.controlNo ?? r.summary?.drSiNo ?? r.documentType)}</span>{r.summary?.locationName ? <span className="text-slate-500">{String(r.summary.locationName)}</span> : null}{r.summary?.total !== undefined ? <span>{peso(r.summary.total)}</span> : null}{r.summary?.franchiseTier === true ? <Badge tone="purple">FRANCHISE</Badge> : null}{r.autoApproveAt && <Badge tone="blue">auto-approves {new Date(r.autoApproveAt).toLocaleString()}</Badge>}{!r.anyOf && r.requiredApproverRoles.length > 1 && <Badge tone="amber">needs all: {r.requiredApproverRoles.join(' + ')}</Badge>}</div>
             <div className="text-xs text-slate-500">by {r.requesterName} · {new Date(r.createdAt).toLocaleString()}{r.decisions.length ? ` · decided by ${r.decisions.map((d) => `${d.user.fullName} (${d.decision})`).join(', ')}` : ''}</div>
           </button>
-          <div className="flex gap-1"><Button size="sm" onClick={() => one.mutate({ id: r.id, decision: 'APPROVE' })}>Approve</Button><Button size="sm" variant="danger" onClick={() => one.mutate({ id: r.id, decision: 'REJECT' })}>Reject</Button></div>
+          <div className="flex gap-1"><Button size="sm" onClick={() => one.mutate({ id: r.id, decision: 'APPROVE' })}>{r.type === 'WAREHOUSE_EDIT' ? 'Accept' : 'Approve'}</Button><Button size="sm" variant="danger" onClick={() => one.mutate({ id: r.id, decision: 'REJECT' })}>Reject</Button></div>
         </div>
+        {r.type === 'WAREHOUSE_EDIT' && Array.isArray(r.summary?.changes) && <div className="ml-6 mt-1 rounded border border-amber-200 bg-amber-50 p-2 text-sm">
+          <div className="text-xs text-slate-600">{String(r.summary?.proposedBy ?? r.requesterName)} wants to change your {String(r.summary?.document ?? 'document')}. Nothing changes unless you accept.</div>
+          <ul className="list-disc pl-5">{(r.summary!.changes as string[]).map((c, i) => <li key={i}>{c}</li>)}</ul>
+        </div>}
         {open === r.id && <div className="mt-2 rounded bg-slate-50 p-3 text-sm">
           <Summary s={r.summary} showCost={can('cost.view')} />
           <Link className="mt-2 inline-block text-brand underline" to={`${LINKS[r.documentType] ?? '/'}${r.documentType === 'PostCloseEdit' ? '' : `/${r.documentId}`}`}>Open full document</Link>
@@ -54,7 +58,7 @@ export function ApprovalsPage() {
 function Summary({ s, showCost }: { s: Record<string, unknown> | null; showCost: boolean }) {
   if (!s) return null;
   const lines = Array.isArray(s.lines) ? (s.lines as Record<string, unknown>[]) : null;
-  const scalars = Object.entries(s).filter(([k, v]) => !['lines', 'before', 'after', 'variances'].includes(k) && (typeof v !== 'object' || v === null));
+  const scalars = Object.entries(s).filter(([k, v]) => !['lines', 'before', 'after', 'variances', 'changes', 'payload', 'kind'].includes(k) && (typeof v !== 'object' || v === null));
   return <div className="space-y-2">
     <dl className="grid grid-cols-2 gap-x-4 gap-y-1 md:grid-cols-4">{scalars.map(([k, v]) => <div key={k}><dt className="text-xs uppercase text-slate-500">{k}</dt><dd>{String(v)}</dd></div>)}</dl>
     {lines && typeof lines[0] === 'object' && <table className="w-full text-xs"><thead><tr>{Object.keys(lines[0]).filter((k) => showCost || !/cost|margin/i.test(k)).map((k) => <th key={k} className="text-left">{k}</th>)}</tr></thead><tbody>{lines.map((l, i) => <tr key={i} className="border-t">{Object.entries(l).filter(([k]) => showCost || !/cost|margin/i.test(k)).map(([k, v]) => <td key={k} className={typeof v === 'number' || /^\d/.test(String(v)) ? 'num' : ''}>{String(v ?? '')}</td>)}</tr>)}</tbody></table>}

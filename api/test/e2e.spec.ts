@@ -28,9 +28,12 @@ async function login(username: string): Promise<string> {
     if (!secret) { const u = await prisma.user.findUniqueOrThrow({ where: { username } }); secret = u.totpSecret!; }
     await http.post('/api/auth/totp/verify').set('Authorization', `Bearer ${token}`).send({ code: authenticator.generate(secret) }).expect(201);
   }
+  // personal accounts: the person accepts the accountability statement once before working
+  const me = await http.get('/api/auth/me').set('Authorization', `Bearer ${token}`).expect(200);
+  if (!me.body.accountabilityAcceptedAt) await http.post('/api/auth/accept-accountability').set('Authorization', `Bearer ${token}`).expect(201);
   tokens[username] = token; return token;
 }
-const USERS = ['admin', 'ext.auditor', 'head.auditor', 'asst.auditor', 'audit.assoc', 'wh.incharge', 'wh.assoc', 'sales.westave', 'fr.mayon.assoc', 'fr.mayon.owner', 'custom.user', 'acct.head', 'acct.assoc', 'hr.staff', 'field.auditor'];
+const USERS = ['admin', 'ext.auditor', 'head.auditor', 'asst.auditor', 'audit.assoc', 'wh.incharge', 'wh.assoc', 'sales.westave', 'fr.mayon.assoc', 'fr.mayon.owner', 'custom.user', 'acct.head', 'acct.assoc', 'hr.staff', 'field.auditor', 'sales.dasma'];
 const as = (u: string) => ({ get: (p: string) => http.get(p).set('Authorization', `Bearer ${tokens[u]}`), post: (p: string) => http.post(p).set('Authorization', `Bearer ${tokens[u]}`), put: (p: string) => http.put(p).set('Authorization', `Bearer ${tokens[u]}`) });
 const has = (o: unknown, re: RegExp): boolean => JSON.stringify(o).match(re) !== null;
 const ok = (r: request.Response) => { if (r.status >= 400) throw new Error(`${r.request?.method} ${r.request?.url} → ${r.status} ${JSON.stringify(r.body)}`); return r; };
@@ -297,5 +300,153 @@ describe('Phase 2: posting, period lock, beginning balances', () => {
     const bs = ok(await as('admin').get('/api/fs/balance-sheet?year=2026')).body; expect(bs.totals.shouldBeZero).toHaveLength(13);
     void branchId;
     ok(await as('admin').put('/api/settings').send({ 'gl.auto_posting_enabled': false }));
+  });
+});
+
+describe('warehouse: transfers to any branch/franchise, In-Charge input, edits accepted by the preparer, printable drafts', () => {
+  let productId: string; let whId: string; let mayonId: string; let westId: string; let transferId: string;
+  const P = `E2E Casein ${run}`;
+  const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(64)]);
+  const qtyOf = (d: { lines: { qtySent: number }[] }) => d.lines.reduce((t, l) => t + l.qtySent, 0);
+
+  it('In-Charge receives into the warehouse like the associate; cost only by the Head Auditor', async () => {
+    const all = ok(await as('admin').get('/api/locations')).body as { id: string; code: string }[];
+    whId = all.find((l) => l.code === 'WH')!.id; mayonId = all.find((l) => l.code === 'MAYON')!.id; westId = all.find((l) => l.code === 'WESTAVE')!.id;
+    const supplierId = ok(await as('admin').post('/api/suppliers').send({ name: `Secret Supplier ${run}-2`, termsDays: 30 })).body.id;
+    const cats = ok(await as('admin').get('/api/categories')).body as { id: string; accountingClass: string }[];
+    productId = ok(await as('admin').post('/api/products').send({ name: P, categoryId: cats.find((c) => c.accountingClass === 'SUPPLEMENT')!.id, supplierId, prices: { RETAIL: 1000, DEALER: 900, FRANCHISE: 800 }, cost: 500 })).body.id;
+    await as('wh.incharge').post('/api/receiving').send({ supplierId, lines: [{ productId, qty: 50, expiryDate: '2028-01-31', unitCost: 400 }] }).expect(403);
+    const r = ok(await as('wh.incharge').post('/api/receiving').send({ supplierId, supplierRef: 'INV-WIC', lines: [{ productId, qty: 50, expiryDate: '2028-01-31', batchNo: 'C1' }] })).body;
+    await http.post(`/api/attachments/ReceivingDoc/${r.id}`).set('Authorization', `Bearer ${tokens['wh.incharge']}`).attach('file', png, { filename: 'invoice.png', contentType: 'image/png' }).expect(201);
+    ok(await as('wh.incharge').post(`/api/receiving/${r.id}/submit`));
+    await as('wh.incharge').post(`/api/receiving/${r.id}/costs`).send({ costs: [] }).expect(403);
+    const req = (ok(await as('head.auditor').get('/api/approvals/inbox?type=COST_ON_RECEIVING')).body.items as { id: string; documentId: string }[]).find((i) => i.documentId === r.id)!;
+    ok(await as('head.auditor').post(`/api/approvals/${req.id}/decide`).send({ decision: 'APPROVE' }));
+    expect(ok(await as('wh.incharge').get(`/api/receiving/${r.id}`)).body.status).toBe('POSTED');
+  });
+
+  it('warehouse associate sees every branch and franchise and drafts a transfer to a franchise; edits own draft; prints the DRAFT pull-out form', async () => {
+    const locs = ok(await as('wh.assoc').get('/api/locations')).body as { code: string }[];
+    expect(locs.map((l) => l.code)).toEqual(expect.arrayContaining(['WH', 'MAYON', 'WESTAVE']));
+    const t = ok(await as('wh.assoc').post('/api/transfers').send({ fromLocationId: whId, toLocationId: mayonId, transferType: 'RESTOCK', lines: [{ productId, qty: 5 }] })).body;
+    transferId = t.id; expect(t.status).toBe('DRAFT');
+    const own = ok(await as('wh.assoc').put(`/api/transfers/${transferId}/edit`).send({ notes: 'for Mayon opening', lines: [{ productId, qty: 6 }] })).body;
+    expect(own.applied).toBe(true);
+    expect(qtyOf(ok(await as('wh.assoc').get(`/api/transfers/${transferId}`)).body)).toBe(6);
+    const form = await as('wh.assoc').get(`/api/reports/forms/pull-out/${transferId}.pdf`).expect(200);
+    const html = form.text || form.body.toString();
+    expect(html).toContain('DRAFT'); expect(html).toContain('Warehouse Associate');
+    await as('sales.westave').put(`/api/transfers/${transferId}/edit`).send({ lines: [{ productId, qty: 1 }] }).expect(403);
+  });
+
+  it("In-Charge's edit changes nothing until the associate accepts it; only that associate can decide", async () => {
+    const p = ok(await as('wh.incharge').put(`/api/transfers/${transferId}/edit`).send({ lines: [{ productId, qty: 4 }] })).body;
+    expect(p.applied).toBe(false); expect(p.awaiting).toBe('Warehouse Associate'); expect(p.changes).toContain(`${P}: qty 6 → 4`);
+    expect(qtyOf(ok(await as('wh.assoc').get(`/api/transfers/${transferId}`)).body)).toBe(6);
+    await as('wh.incharge').put(`/api/transfers/${transferId}/edit`).send({ lines: [{ productId, qty: 3 }] }).expect(400); // one pending edit at a time
+    const inbox = ok(await as('wh.assoc').get('/api/approvals/inbox?type=WAREHOUSE_EDIT')).body.items as { id: string; documentId: string }[];
+    const req = inbox.find((i) => i.documentId === transferId)!; expect(req).toBeTruthy();
+    expect((ok(await as('head.auditor').get('/api/approvals/inbox?type=WAREHOUSE_EDIT')).body.items as { id: string }[]).some((i) => i.id === req.id)).toBe(false);
+    await as('head.auditor').post(`/api/approvals/${req.id}/decide`).send({ decision: 'APPROVE' }).expect(403);
+    await as('wh.incharge').post(`/api/approvals/${req.id}/decide`).send({ decision: 'APPROVE' }).expect(403);
+    ok(await as('wh.assoc').post(`/api/approvals/${req.id}/decide`).send({ decision: 'APPROVE' }));
+    const after = ok(await as('wh.assoc').get(`/api/transfers/${transferId}`)).body; expect(qtyOf(after)).toBe(4); expect(after.status).toBe('DRAFT');
+    const wic = await prisma.user.findUniqueOrThrow({ where: { username: 'wh.incharge' } });
+    expect(await prisma.auditLog.count({ where: { entityType: 'TransferDoc', entityId: transferId, action: 'EDIT_APPLIED', userId: wic.id } })).toBe(1);
+  });
+
+  it("receiving: In-Charge's edit to the associate's draft applies only after acceptance; the associate cannot see or enter cost", async () => {
+    const supplierId = (await prisma.supplier.findFirstOrThrow({ where: { name: `Secret Supplier ${run}-2` } })).id;
+    const r = ok(await as('wh.assoc').post('/api/receiving').send({ supplierId, supplierRef: 'INV-A', lines: [{ productId, qty: 12, expiryDate: '2028-03-31', batchNo: 'C2' }] })).body;
+    await as('wh.assoc').put(`/api/receiving/${r.id}/edit`).send({ lines: [{ productId, qty: 12, expiryDate: '2028-03-31', unitCost: 1 }] }).expect(403);
+    const p = ok(await as('wh.incharge').put(`/api/receiving/${r.id}/edit`).send({ supplierRef: 'INV-A2', lines: [{ productId, qty: 10, freeQty: 2, expiryDate: '2028-03-31', batchNo: 'C2' }] })).body;
+    expect(p.applied).toBe(false); expect(p.changes).toEqual(['Supplier ref: INV-A → INV-A2', `${P}: qty 12 → 10, free 0 → 2`]);
+    const req = (ok(await as('wh.assoc').get('/api/approvals/inbox?type=WAREHOUSE_EDIT')).body.items as { id: string; documentId: string }[]).find((i) => i.documentId === r.id)!;
+    expect(ok(await as('wh.assoc').get(`/api/receiving/${r.id}`)).body.lines[0].qty).toBe(12);
+    ok(await as('wh.assoc').post(`/api/approvals/${req.id}/decide`).send({ decision: 'APPROVE' }));
+    const d = ok(await as('wh.assoc').get(`/api/receiving/${r.id}`)).body;
+    expect(d.supplierRef).toBe('INV-A2'); expect(d.lines[0].qty).toBe(10); expect(d.lines[0].freeQty).toBe(2); expect(d.preparedByName).toBe('Warehouse Associate');
+    const form = await as('wh.assoc').get(`/api/reports/forms/supplier-form/${r.id}.pdf`).expect(200);
+    expect(form.text || form.body.toString()).toContain('DRAFT');
+  });
+
+  it('submitted transfer: rejected edit leaves it untouched; accepted edit resubmits it for approval (franchise → Admin)', async () => {
+    await as('wh.incharge').post(`/api/transfers/${transferId}/submit`).expect(403); // only the preparer submits a draft
+    ok(await as('wh.assoc').post(`/api/transfers/${transferId}/submit`));
+    const first = (ok(await as('admin').get('/api/approvals/inbox?type=TRANSFER_TO_FRANCHISE')).body.items as { id: string; documentId: string }[]).find((i) => i.documentId === transferId)!;
+    expect(first).toBeTruthy();
+    ok(await as('wh.incharge').put(`/api/transfers/${transferId}/edit`).send({ lines: [{ productId, qty: 3 }] }));
+    let req = (ok(await as('wh.assoc').get('/api/approvals/inbox?type=WAREHOUSE_EDIT')).body.items as { id: string; documentId: string }[]).find((i) => i.documentId === transferId)!;
+    ok(await as('wh.assoc').post(`/api/approvals/${req.id}/decide`).send({ decision: 'REJECT', note: 'I counted 4' }));
+    let doc = ok(await as('wh.assoc').get(`/api/transfers/${transferId}`)).body; expect(qtyOf(doc)).toBe(4); expect(doc.status).toBe('SUBMITTED');
+    ok(await as('wh.incharge').put(`/api/transfers/${transferId}/edit`).send({ toLocationId: westId, lines: [{ productId, qty: 2 }] }));
+    req = (ok(await as('wh.assoc').get('/api/approvals/inbox?type=WAREHOUSE_EDIT')).body.items as { id: string; documentId: string }[]).find((i) => i.documentId === transferId)!;
+    ok(await as('wh.assoc').post(`/api/approvals/${req.id}/decide`).send({ decision: 'APPROVE' }));
+    doc = ok(await as('wh.assoc').get(`/api/transfers/${transferId}`)).body;
+    expect(qtyOf(doc)).toBe(2); expect(doc.toLocation.code).toBe('WESTAVE'); expect(doc.status).toBe('SUBMITTED');
+    expect((await prisma.approvalRequest.findUniqueOrThrow({ where: { id: first.id } })).status).toBe('CANCELLED');
+    const internal = (ok(await as('asst.auditor').get('/api/approvals/inbox?type=TRANSFER_INTERNAL')).body.items as { documentId: string }[]).find((i) => i.documentId === transferId);
+    expect(internal).toBeTruthy(); // new destination is a company branch → internal approval
+    const edits = ok(await as('wh.assoc').get(`/api/transfers/${transferId}/edits`)).body as { status: string; proposedBy: string }[];
+    expect(edits.map((e) => e.status).sort()).toEqual(['APPROVED', 'APPROVED', 'REJECTED']); expect(edits[0].proposedBy).toBe('Warehouse In-Charge');
+    const hist = ok(await as('wh.assoc').get(`/api/history/TransferDoc/${transferId}`)).body as { action: string; by: string }[];
+    expect(hist.some((h) => h.action === 'EDIT_PROPOSED' && h.by === 'Warehouse In-Charge')).toBe(true);
+    expect(hist.some((h) => h.action === 'ACCEPTED EDIT' && h.by === 'Warehouse Associate')).toBe(true);
+    expect(hist.filter((h) => h.action === 'EDIT' && h.by === 'Warehouse In-Charge').length).toBe(0); // proposals are not shown as edits
+    expect(hist.some((h) => h.action === 'EDIT' && h.by === 'Warehouse Associate')).toBe(true); // the preparer's own draft edit
+    await as('sales.dasma').get(`/api/history/TransferDoc/${transferId}`).expect(403);
+  });
+
+  it('the receiving branch never sees the sender\'s draft; it gets the Transfer-In copy once sent and ticks items to accept', async () => {
+    const draft = ok(await as('wh.assoc').post('/api/transfers').send({ fromLocationId: whId, toLocationId: westId, transferType: 'RESTOCK', lines: [{ productId, qty: 1 }] })).body;
+    await as('sales.westave').get(`/api/transfers/${draft.id}`).expect(404);
+    expect((ok(await as('sales.westave').get('/api/transfers?direction=in')).body as { id: string }[]).some((t) => t.id === draft.id)).toBe(false);
+    await as('sales.westave').get(`/api/reports/forms/transfer-in/${draft.id}.pdf`).expect(403);
+    await as('sales.westave').post(`/api/transfers/${draft.id}/submit`).expect(404);
+    // the submitted transfer from the earlier steps: receiver sees it, prints only the Transfer-In copy
+    ok(await as('sales.westave').get(`/api/transfers/${transferId}`));
+    await as('sales.westave').get(`/api/reports/forms/pull-out/${transferId}.pdf`).expect(403);
+    await as('sales.westave').get(`/api/reports/forms/transfer-in/${transferId}.pdf`).expect(200);
+    const req = (ok(await as('asst.auditor').get('/api/approvals/inbox?type=TRANSFER_INTERNAL')).body.items as { id: string; documentId: string }[]).find((i) => i.documentId === transferId)!;
+    ok(await as('asst.auditor').post(`/api/approvals/${req.id}/decide`).send({ decision: 'APPROVE' }));
+    const lines = ok(await as('sales.westave').get(`/api/transfers/${transferId}`)).body.lines as { id: string; qtySent: number }[];
+    await as('sales.westave').post(`/api/transfers/${transferId}/confirm`).send({ lines: lines.map((l) => ({ lineId: l.id })) }).expect(400); // neither ticked nor counted
+    await as('sales.westave').post(`/api/transfers/${transferId}/confirm`).send({ lines: lines.map((l) => ({ lineId: l.id, qtyReceived: 0 })) }).expect(400); // short without a note
+    const done = ok(await as('sales.westave').post(`/api/transfers/${transferId}/confirm`).send({ lines: lines.map((l) => ({ lineId: l.id, checked: true })) })).body;
+    expect(done.status).toBe('RECEIVED');
+  });
+});
+
+describe('personal accounts: one person per account, every action tagged', () => {
+  it('new accounts need the person\'s ID, a personal password and the accountability statement before any work', async () => {
+    const wh = (ok(await as('admin').get('/api/locations')).body as { id: string; code: string }[]).find((l) => l.code === 'WH')!.id;
+    const base = { username: `e2e.${run}`, email: `e2e.${run}@gws.local`, fullName: 'Juan E2E Cruz', roleKey: 'WAREHOUSE_ASSOCIATE', password: 'Temporary#12345', locationIds: [wh] };
+    await as('admin').post('/api/users').send(base).expect(400);
+    ok(await as('admin').post('/api/users').send({ ...base, idNumber: `EMP-${run}` }));
+    const t = (await http.post('/api/auth/login').send({ identifier: base.username, password: base.password }).expect(201)).body;
+    expect(t.mustChangePassword).toBe(true);
+    const H = (r: request.Test) => r.set('Authorization', `Bearer ${t.token}`);
+    expect((await H(http.get('/api/products')).expect(403)).body.code).toBe('PASSWORD_CHANGE_REQUIRED');
+    await H(http.post('/api/auth/password')).send({ current: base.password, next: 'Juans-Own-Pass#2026' }).expect(201);
+    expect((await H(http.get('/api/products')).expect(403)).body.code).toBe('ACCOUNTABILITY_REQUIRED');
+    const me = (await H(http.get('/api/auth/me')).expect(200)).body;
+    expect(me.accountabilityStatement).toContain('Juan E2E Cruz'); expect(me.accountabilityStatement).toContain(`EMP-${run}`);
+    await H(http.post('/api/auth/accept-accountability')).expect(201);
+    await H(http.get('/api/products')).expect(200);
+    const u = await prisma.user.findUniqueOrThrow({ where: { username: base.username } });
+    expect(u.accountabilityAcceptedAt).toBeTruthy();
+    expect(await prisma.auditLog.count({ where: { userId: u.id, action: 'ACCOUNTABILITY_ACCEPTED' } })).toBe(1);
+  });
+
+  it('signing in on another device signs out the first one and tells the person', async () => {
+    const old = tokens['wh.assoc'];
+    const again = (await http.post('/api/auth/login').send({ identifier: 'wh.assoc', password: PW }).expect(201)).body.token as string;
+    const r = await http.get('/api/auth/me').set('Authorization', `Bearer ${old}`).expect(401);
+    expect(r.body.code).toBe('SESSION_REPLACED');
+    tokens['wh.assoc'] = again;
+    const notes = ok(await as('wh.assoc').get('/api/notifications')).body as { type: string }[] | { items: { type: string }[] };
+    expect(JSON.stringify(notes)).toContain('SESSION_REPLACED');
+    const whAssoc = await prisma.user.findUniqueOrThrow({ where: { username: 'wh.assoc' } });
+    expect(await prisma.auditLog.count({ where: { userId: whAssoc.id, action: 'SESSION_REPLACED' } })).toBeGreaterThan(0);
   });
 });

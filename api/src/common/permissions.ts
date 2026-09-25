@@ -23,6 +23,7 @@ export const APPROVAL_TYPES = [
   'PERIOD_LOCK',
   'PERIOD_UNLOCK',
   'CONSIGNMENT_OUT',
+  'WAREHOUSE_EDIT',
 ] as const;
 export type ApprovalType = (typeof APPROVAL_TYPES)[number];
 
@@ -31,7 +32,7 @@ const BASE_KEYS = [
   'price.edit', 'cost.view', 'cost.edit',
   'supplier.view.code', 'supplier.view.name', 'supplier.edit',
   'location.view.all', 'location.view.own', 'location.edit',
-  'receiving.create', 'receiving.approve_cost',
+  'receiving.create', 'receiving.approve_cost', 'warehouse.edit_others',
   'transfer.create', 'transfer.confirm', 'transfer.approve.internal', 'transfer.approve.franchise', 'transfer.resolve_discrepancy',
   'sale.create', 'sale.edit.sameday', 'sale.edit.postclose', 'sale.special_price.approve', 'sale.void',
   'ar.view', 'ar.collect',
@@ -139,17 +140,17 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
   {
     key: 'WAREHOUSE_IN_CHARGE',
     name: 'Warehouse In-Charge',
-    description: 'Warehouse reports; inputs warehouse transactions with Admin approval. No cost.',
+    description: 'Inputs warehouse receiving, transfers (to any branch or franchise), counts and write-offs through the same approvals as the associate; costs are entered and approved by the Head Auditor. Can edit an associate\'s entry, which takes effect only after that associate accepts it. No cost.',
     permissions: [
-      'product.view', 'supplier.view.code', 'location.view.own', 'receiving.create', 'transfer.create', 'transfer.confirm',
+      'product.view', 'supplier.view.code', 'location.view.own', 'receiving.create', 'transfer.create', 'transfer.confirm', 'warehouse.edit_others', 'approval.act.WAREHOUSE_EDIT',
       'count.create', 'writeoff.create', 'report.inventory.own', 'dashboard.view', 'notification.view', 'price.view.RETAIL',
     ],
   },
   {
     key: 'WAREHOUSE_ASSOCIATE',
     name: 'Warehouse Associate',
-    description: 'Creates receiving docs (qty, expiry, batch). Cost hidden.',
-    permissions: ['product.view', 'supplier.view.code', 'location.view.own', 'receiving.create', 'transfer.create', 'transfer.confirm', 'report.inventory.own', 'dashboard.view', 'notification.view'],
+    description: 'Creates receiving docs (qty, expiry, batch) and transfers from the warehouse to any branch or franchise. Accepts or rejects the In-Charge\'s edits to own entries. Cost hidden.',
+    permissions: ['product.view', 'supplier.view.code', 'location.view.own', 'receiving.create', 'transfer.create', 'transfer.confirm', 'report.inventory.own', 'dashboard.view', 'notification.view', 'approval.act.WAREHOUSE_EDIT'],
   },
   {
     key: 'SALES_ASSOCIATE',
@@ -242,6 +243,8 @@ export const APPROVAL_ROUTING: Record<ApprovalType, { roles: RoleKey[]; anyOf?: 
   PERIOD_LOCK: { roles: ['ADMIN'] },
   PERIOD_UNLOCK: { roles: ['ADMIN'] },
   CONSIGNMENT_OUT: { roles: ['ADMIN'] },
+  /** Person-targeted: the user who entered the document must accept an edit made by someone else (Warehouse In-Charge). */
+  WAREHOUSE_EDIT: { roles: [], dynamic: true },
 };
 
 /** EDIT_REQUEST approvers depend on who asks (§6.1). */

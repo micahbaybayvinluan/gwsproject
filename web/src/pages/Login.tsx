@@ -18,6 +18,7 @@ export function LoginPage() {
   const submitTotp = async (e: React.FormEvent) => { e.preventDefault(); setBusy(true); setError(null); try { await api.post('/api/auth/totp/verify', { code }); await refresh(); nav('/'); } catch (err) { setError(err); } finally { setBusy(false); } };
   return <div className="flex min-h-full items-center justify-center bg-slate-100 p-4">
     <Card className="w-full max-w-sm" title={<span className="text-brand">GWS-ERP</span>}>
+      {sp.get('replaced') && step === 'creds' && <p className="mb-3 rounded-md border border-amber-300 bg-amber-50 p-2 text-sm text-amber-900">You were signed out because your account was signed in on another device. Accounts are personal: if that was not you, tell the Admin and change your password.</p>}
       {step === 'creds' && <form onSubmit={submitCreds} className="space-y-4" data-testid="login-form">
         <Field label="Username or email"><Input autoFocus value={identifier} onChange={(e) => setIdentifier(e.target.value)} autoComplete="username" name="identifier" /></Field>
         <Field label="Password"><Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" name="password" /></Field>

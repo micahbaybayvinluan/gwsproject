@@ -76,22 +76,27 @@ model Role {
 }
 
 model User {
-  id                 String    @id @default(uuid())
-  username           String    @unique
-  email              String    @unique
-  fullName           String    @map("full_name")
-  roleId             String    @map("role_id")
-  passwordHash       String    @map("password_hash")
-  totpSecret         String?   @map("totp_secret")
-  totpEnabled        Boolean   @default(false) @map("totp_enabled")
-  active             Boolean   @default(true)
-  mustChangePassword Boolean   @default(true) @map("must_change_password")
-  emailDigest        Boolean   @default(true) @map("email_digest")
-  lastLoginAt        DateTime? @map("last_login_at")
-  createdAt          DateTime  @default(now()) @map("created_at")
-  createdBy          String?   @map("created_by")
-  updatedAt          DateTime  @updatedAt @map("updated_at")
-  updatedBy          String?   @map("updated_by")
+  id                       String    @id @default(uuid())
+  username                 String    @unique
+  email                    String    @unique
+  fullName                 String    @map("full_name")
+  roleId                   String    @map("role_id")
+  passwordHash             String    @map("password_hash")
+  totpSecret               String?   @map("totp_secret")
+  totpEnabled              Boolean   @default(false) @map("totp_enabled")
+  active                   Boolean   @default(true)
+  mustChangePassword       Boolean   @default(true) @map("must_change_password")
+  /// Company ID number of the one person this account belongs to (accounts are personal, never shared).
+  idNumber                 String?   @unique @map("id_number")
+  /// When the person accepted the accountability statement ("this account is mine; everything done under it is my responsibility").
+  accountabilityAcceptedAt DateTime? @map("accountability_accepted_at")
+  accountabilityIp         String?   @map("accountability_ip")
+  emailDigest              Boolean   @default(true) @map("email_digest")
+  lastLoginAt              DateTime? @map("last_login_at")
+  createdAt                DateTime  @default(now()) @map("created_at")
+  createdBy                String?   @map("created_by")
+  updatedAt                DateTime  @updatedAt @map("updated_at")
+  updatedBy                String?   @map("updated_by")
 
   role                Role                     @relation(fields: [roleId], references: [id])
   assignments         UserLocationAssignment[]
@@ -1148,20 +1153,22 @@ enum ApprovalStatus {
 }
 
 model ApprovalRequest {
-  id                    String         @id @default(uuid())
-  type                  String // COST_ON_RECEIVING, TRANSFER_INTERNAL, ...
-  documentType          String         @map("document_type")
-  documentId            String         @map("document_id")
-  requestedBy           String         @map("requested_by")
-  requiredApproverRoles String[]       @map("required_approver_roles")
-  anyOf                 Boolean        @default(false) @map("any_of") // true = any one listed role suffices
-  status                ApprovalStatus @default(PENDING)
-  summary               Json? // snapshot shown inline in the inbox
-  autoApproveAt         DateTime?      @map("auto_approve_at")
-  decidedAt             DateTime?      @map("decided_at")
-  discrepancyCaseId     String?        @map("discrepancy_case_id")
-  createdAt             DateTime       @default(now()) @map("created_at")
-  updatedAt             DateTime       @updatedAt @map("updated_at")
+  id                      String         @id @default(uuid())
+  type                    String // COST_ON_RECEIVING, TRANSFER_INTERNAL, ...
+  documentType            String         @map("document_type")
+  documentId              String         @map("document_id")
+  requestedBy             String         @map("requested_by")
+  requiredApproverRoles   String[]       @map("required_approver_roles")
+  /// Person-targeted requests (e.g. WAREHOUSE_EDIT: the associate who entered the document must accept the In-Charge's edit). Empty = role routing.
+  requiredApproverUserIds String[]       @default([]) @map("required_approver_user_ids")
+  anyOf                   Boolean        @default(false) @map("any_of") // true = any one listed role suffices
+  status                  ApprovalStatus @default(PENDING)
+  summary                 Json? // snapshot shown inline in the inbox
+  autoApproveAt           DateTime?      @map("auto_approve_at")
+  decidedAt               DateTime?      @map("decided_at")
+  discrepancyCaseId       String?        @map("discrepancy_case_id")
+  createdAt               DateTime       @default(now()) @map("created_at")
+  updatedAt               DateTime       @updatedAt @map("updated_at")
 
   decisions ApprovalDecision[]
 

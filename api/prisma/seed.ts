@@ -88,13 +88,15 @@ async function main() {
 
   console.log('Seeding test users…');
   const hash = await argon2.hash(DEV_PASSWORD);
-  for (const u of TEST_USERS) {
+  for (const [i, u] of TEST_USERS.entries()) {
     const role = await prisma.role.findUniqueOrThrow({ where: { key: u.role } });
     const user = await prisma.user.upsert({
       where: { username: u.username },
       create: { username: u.username, email: `${u.username}@gws.local`, fullName: u.fullName, roleId: role.id, passwordHash: hash, mustChangePassword: false },
       update: { roleId: role.id, fullName: u.fullName },
     });
+    // demo company ID so each simulation account is tagged to one (fictional) person; never overwrites an ID set by the Admin
+    if (!user.idNumber) await prisma.user.update({ where: { id: user.id }, data: { idNumber: `DEMO-${String(i + 1).padStart(3, '0')}` } });
     if (u.locations) {
       await prisma.userLocationAssignment.deleteMany({ where: { userId: user.id } });
       for (const code of u.locations) {

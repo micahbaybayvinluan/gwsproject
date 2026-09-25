@@ -11,6 +11,9 @@ export interface SessionUser {
   locationScoped: boolean;
   sessionId: string;
   totpVerified: boolean;
+  /** Personal-account gates: a temporary password must be replaced and the accountability statement accepted before any work. */
+  mustChangePassword?: boolean;
+  accountabilityAccepted?: boolean;
 }
 export interface RequestCtx { user?: SessionUser; ip?: string; userAgent?: string; requestId: string }
 

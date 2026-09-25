@@ -45,8 +45,9 @@ ${kv([['Rider/Driver expense', rep.expenseTotals.riderExpense], ['Shipping expen
   }
 
   /** Generic paper form (Pull-Out, Transfer-In, DR-Sales, Supplier's Form, Count, Discrepancy, Charge Form, Credit Note, Journal Voucher). */
-  formHtml(title: string, header: [string, unknown][], columns: string[], rows: unknown[][], footer: [string, unknown][] = [], signatures = ['Prepared by', 'Checked by', 'Received by']): string {
-    return `<!doctype html><html><head><meta charset="utf-8">${this.css}</head><body><h1>Get Wheysted Supplements — ${this.esc(title)}</h1>
+  formHtml(title: string, header: [string, unknown][], columns: string[], rows: unknown[][], footer: [string, unknown][] = [], signatures = ['Prepared by', 'Checked by', 'Received by'], watermark?: string): string {
+    const wm = watermark ? `<div style="position:fixed;top:40%;left:0;right:0;text-align:center;font-size:64px;font-weight:bold;color:rgba(200,0,0,.12);transform:rotate(-24deg);z-index:0;pointer-events:none">${this.esc(watermark.split(' — ')[0])}</div><div style="border:2px solid #c00;color:#c00;padding:4px 8px;margin:0 0 6px;font-weight:bold">${this.esc(watermark)}</div>` : '';
+    return `<!doctype html><html><head><meta charset="utf-8">${this.css}</head><body>${wm}<h1>Get Wheysted Supplements — ${this.esc(title)}</h1>
 <table>${header.map(([k, v]) => `<tr><td style="width:30%"><b>${this.esc(k)}</b></td><td>${this.esc(v)}</td></tr>`).join('')}</table>
 <table><tr>${columns.map((c) => `<th>${this.esc(c)}</th>`).join('')}</tr>${rows.map((r) => `<tr>${r.map((c) => `<td class="${typeof c === 'number' || (c && typeof c === 'object' && 'toNumber' in (c as object)) ? 'n' : ''}">${typeof c === 'object' && c && 'toNumber' in (c as object) ? this.m(c) : this.esc(c)}</td>`).join('')}</tr>`).join('')}</table>
 ${footer.length ? `<table>${footer.map(([k, v]) => `<tr><td style="width:70%"><b>${this.esc(k)}</b></td><td class="n">${typeof v === 'object' && v && 'toNumber' in (v as object) ? this.m(v) : this.esc(v)}</td></tr>`).join('')}</table>` : ''}

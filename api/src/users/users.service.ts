@@ -5,13 +5,13 @@ import { AuditService } from '../common/audit.service';
 import { SessionStore } from '../auth/session.store';
 import { PERMISSION_KEYS, ROLE_BY_KEY, SINGLE_LOCATION_ROLES } from '../common/permissions';
 
-export interface CreateUserInput { username: string; email: string; fullName: string; roleKey: string; password: string; locationIds?: string[]; mustChangePassword?: boolean }
+export interface CreateUserInput { username: string; email: string; fullName: string; idNumber: string; roleKey: string; password: string; locationIds?: string[] }
 
 @Injectable()
 export class UsersService {
   constructor(private prisma: PrismaService, private audit: AuditService, private sessions: SessionStore) {}
 
-  private select = { id: true, username: true, email: true, fullName: true, active: true, mustChangePassword: true, totpEnabled: true, lastLoginAt: true, createdAt: true, role: { select: { key: true, name: true } }, assignments: { select: { location: { select: { id: true, code: true, name: true, type: true } } } }, permissionOverrides: { select: { permissionKey: true, granted: true } } } as const;
+  private select = { id: true, username: true, email: true, fullName: true, idNumber: true, accountabilityAcceptedAt: true, active: true, mustChangePassword: true, totpEnabled: true, lastLoginAt: true, createdAt: true, role: { select: { key: true, name: true } }, assignments: { select: { location: { select: { id: true, code: true, name: true, type: true } } } }, permissionOverrides: { select: { permissionKey: true, granted: true } } } as const;
 
   list() { return this.prisma.db.user.findMany({ select: this.select, orderBy: { username: 'asc' } }); }
   async get(id: string) { const u = await this.prisma.db.user.findUnique({ where: { id }, select: this.select }); if (!u) throw new NotFoundException(); return u; }
@@ -23,7 +23,7 @@ export class UsersService {
     const user = await this.prisma.db.user.create({
       data: {
         username: input.username, email: input.email.toLowerCase(), fullName: input.fullName, roleId: role.id,
-        passwordHash: await argon2.hash(input.password), mustChangePassword: input.mustChangePassword ?? true, createdBy: actorId,
+        idNumber: input.idNumber, passwordHash: await argon2.hash(input.password), mustChangePassword: true, createdBy: actorId,
         assignments: { create: (input.locationIds ?? []).map((locationId) => ({ locationId })) },
       },
       select: this.select,
@@ -32,7 +32,7 @@ export class UsersService {
     return user;
   }
 
-  async update(id: string, patch: { fullName?: string; email?: string; roleKey?: string; active?: boolean; locationIds?: string[]; resetPassword?: string; resetTotp?: boolean }, actorId: string) {
+  async update(id: string, patch: { fullName?: string; idNumber?: string; email?: string; roleKey?: string; active?: boolean; locationIds?: string[]; resetPassword?: string; resetTotp?: boolean }, actorId: string) {
     const before = await this.get(id);
     const roleKey = patch.roleKey ?? before.role.key;
     if (patch.locationIds) this.validateAssignments(roleKey, patch.locationIds);
@@ -45,7 +45,7 @@ export class UsersService {
       return tx.user.update({
         where: { id },
         data: {
-          fullName: patch.fullName, email: patch.email?.toLowerCase(), active: patch.active, roleId: role?.id, updatedBy: actorId,
+          fullName: patch.fullName, idNumber: patch.idNumber, email: patch.email?.toLowerCase(), active: patch.active, roleId: role?.id, updatedBy: actorId,
           passwordHash: patch.resetPassword ? await argon2.hash(patch.resetPassword) : undefined,
           mustChangePassword: patch.resetPassword ? true : undefined,
           totpSecret: patch.resetTotp ? null : undefined, totpEnabled: patch.resetTotp ? false : undefined,
@@ -53,7 +53,9 @@ export class UsersService {
         select: this.select,
       });
     });
-    if (patch.active === false || patch.roleKey || patch.locationIds || patch.resetPassword) await this.sessions.destroyAllForUser(id);
+    const personChanged = (patch.fullName !== undefined && patch.fullName !== before.fullName) || (patch.idNumber !== undefined && patch.idNumber !== before.idNumber);
+    if (personChanged) await this.prisma.db.user.update({ where: { id }, data: { accountabilityAcceptedAt: null, accountabilityIp: null } });
+    if (patch.active === false || patch.roleKey || patch.locationIds || patch.resetPassword || personChanged) await this.sessions.destroyAllForUser(id);
     await this.audit.log({ action: patch.roleKey || patch.locationIds ? 'PERMISSION_CHANGE' : 'UPDATE', entityType: 'User', entityId: id, before, after: user });
     return user;
   }
@@ -69,6 +71,9 @@ export class UsersService {
     await this.audit.log({ action: 'PERMISSION_CHANGE', entityType: 'User', entityId: id, before: before.permissionOverrides, after: after.permissionOverrides });
     return after;
   }
+
+  /** Recent sign-ins (IP / device) so the Admin can spot an account used from unexpected places. */
+  logins(id: string) { return this.prisma.db.loginSessionRecord.findMany({ where: { userId: id }, orderBy: { createdAt: 'desc' }, take: 30 }); }
 
   private validateAssignments(roleKey: string, locationIds: string[]) {
     if (SINGLE_LOCATION_ROLES.includes(roleKey as never) && locationIds.length !== 1) {

@@ -18,6 +18,12 @@ describe('permissions & approval routing (§5, §6.1)', () => {
   it('cost-blind roles have no cost.view', () => {
     for (const k of ['AUDIT_ASSOCIATE', 'WAREHOUSE_IN_CHARGE', 'WAREHOUSE_ASSOCIATE', 'SALES_ASSOCIATE', 'FRANCHISE_SALES_ASSOCIATE', 'FRANCHISE_OWNER', 'HR_STAFF', 'FIELD_AUDITOR']) expect(ROLE_CATALOGUE.find((r) => r.key === k)!.permissions).not.toContain('cost.view');
   });
+  it('only the Warehouse In-Charge (and Admin) may edit other people\'s warehouse entries; both warehouse roles accept edits', () => {
+    const perms = (k: string) => ROLE_CATALOGUE.find((r) => r.key === k)!.permissions;
+    expect(perms('WAREHOUSE_IN_CHARGE')).toContain('warehouse.edit_others'); expect(perms('ADMIN')).toContain('warehouse.edit_others');
+    expect(perms('WAREHOUSE_ASSOCIATE')).not.toContain('warehouse.edit_others');
+    for (const k of ['WAREHOUSE_IN_CHARGE', 'WAREHOUSE_ASSOCIATE']) { expect(perms(k)).toContain('approval.act.WAREHOUSE_EDIT'); expect(perms(k)).not.toContain('cost.edit'); }
+  });
   it('overrides add and remove keys', () => {
     const p = effectivePermissions(['a', 'b'], [{ permissionKey: 'c', granted: true }, { permissionKey: 'b', granted: false }]);
     expect([...p].sort()).toEqual(['a', 'c']);

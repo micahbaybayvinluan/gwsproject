@@ -18,6 +18,7 @@ import type { SessionUser } from '../common/request-context';
 import { requestContext } from '../common/request-context';
 
 export interface ReceivingLineInput { productId: string; qty: number; freeQty?: number; expiryDate?: string | null; batchNo?: string | null; unitCost?: number | null; remarks?: string }
+export interface ReceivingEditInput { supplierId?: string; supplierRef?: string | null; docDate?: string; notes?: string | null; lines: ReceivingLineInput[] }
 export interface ReceivingInput { locationId?: string; supplierId: string; supplierRef?: string; docDate?: string; isConsignmentIn?: boolean; paidOnReceipt?: boolean; paymentAccountId?: string | null; notes?: string; lines: ReceivingLineInput[] }
 
 /** §7.2 Receiving from suppliers (Supplier's Form / PO-Purchases) with COST_ON_RECEIVING approval. */
@@ -38,7 +39,8 @@ export class ReceivingService implements OnModuleInit {
     if (!doc) throw new NotFoundException();
     if (user.locationScoped && !user.locationIds.includes(doc.locationId)) throw new ForbiddenException();
     const costs = await this.master.currentCosts(doc.lines.map((l) => l.productId));
-    return { ...doc, lines: doc.lines.map((l) => ({ ...l, currentStandardCost: costs.get(l.productId) ?? null })) , attachments: await this.attachments.list('ReceivingDoc', id) };
+    const preparer = await this.prisma.db.user.findUnique({ where: { id: doc.preparedBy }, select: { id: true, fullName: true } });
+    return { ...doc, preparedByName: preparer?.fullName ?? null, lines: doc.lines.map((l) => ({ ...l, currentStandardCost: costs.get(l.productId) ?? null })) , attachments: await this.attachments.list('ReceivingDoc', id) };
   }
 
   async create(input: ReceivingInput, user: SessionUser) {
@@ -46,21 +48,8 @@ export class ReceivingService implements OnModuleInit {
     if (user.locationScoped && !user.locationIds.includes(wh.id)) throw new ForbiddenException('You can only receive into your own location');
     if (!input.lines.length) throw new BadRequestException('At least one line is required');
     const supplier = await this.prisma.db.supplier.findUniqueOrThrow({ where: { id: input.supplierId } });
-    const products = await this.prisma.db.product.findMany({ where: { id: { in: input.lines.map((l) => l.productId) } } });
     const today = todayManila();
-    const warnings: string[] = [];
-    for (const l of input.lines) {
-      const p = products.find((x) => x.id === l.productId);
-      if (!p) throw new BadRequestException(`Unknown product ${l.productId}`);
-      if (l.qty <= 0 && (l.freeQty ?? 0) <= 0) throw new BadRequestException(`Qty must be positive for ${p.name}`);
-      if (p.trackExpiry) {
-        if (!l.expiryDate) throw new BadRequestException(`Expiry date required for ${p.name}`);
-        const exp = toDateOnly(l.expiryDate);
-        if (exp <= today) throw new BadRequestException(`Expiry for ${p.name} must be after today`);
-        if (exp < addMonths(today, 6)) warnings.push(`${p.name}: short-dated (expires ${dateStr(exp)})`);
-      }
-      if (l.unitCost != null && !user.permissions.has('cost.edit')) throw new ForbiddenException('You may not enter cost');
-    }
+    const warnings = await this.validateLines(input.lines, user);
     const doc = await this.prisma.db.$transaction(async (tx) => {
       const controlNo = await this.seq.next(tx, 'RCV', { locationId: wh.id, locationCode: wh.code });
       return tx.receivingDoc.create({
@@ -75,9 +64,68 @@ export class ReceivingService implements OnModuleInit {
     return { ...doc, warnings };
   }
 
+  /** Shared by create and edits: product exists, qty > 0, expiry rules (§7.2), cost only for cost.edit. Returns short-dated warnings. */
+  async validateLines(lines: ReceivingLineInput[], user: SessionUser | null, trusted = false): Promise<string[]> {
+    if (!lines.length) throw new BadRequestException('At least one line is required');
+    const products = await this.prisma.db.product.findMany({ where: { id: { in: lines.map((l) => l.productId) } } });
+    const today = todayManila(); const warnings: string[] = [];
+    for (const l of lines) {
+      const p = products.find((x) => x.id === l.productId);
+      if (!p) throw new BadRequestException(`Unknown product ${l.productId}`);
+      if (l.qty <= 0 && (l.freeQty ?? 0) <= 0) throw new BadRequestException(`Qty must be positive for ${p.name}`);
+      if (p.trackExpiry) {
+        if (!l.expiryDate) throw new BadRequestException(`Expiry date required for ${p.name}`);
+        const exp = toDateOnly(l.expiryDate);
+        if (exp <= today) throw new BadRequestException(`Expiry for ${p.name} must be after today`);
+        if (exp < addMonths(today, 6)) warnings.push(`${p.name}: short-dated (expires ${dateStr(exp)})`);
+      }
+      if (l.unitCost != null && !trusted && !user?.permissions.has('cost.edit')) throw new ForbiddenException('You may not enter cost');
+    }
+    return warnings;
+  }
+
+  /** Snapshot used for edit proposals (what the associate sees before accepting). No cost fields. */
+  async editSnapshot(id: string) {
+    const d = await this.prisma.db.receivingDoc.findUniqueOrThrow({ where: { id }, include: this.include });
+    return { id: d.id, controlNo: d.controlNo, status: d.status, locationId: d.locationId, locationName: d.location.name, createdBy: d.createdBy ?? d.preparedBy, header: { supplier: d.supplier.code, supplierRef: d.supplierRef ?? '', docDate: dateStr(d.docDate), notes: d.notes ?? '' }, lines: d.lines.map((l) => ({ productId: l.productId, product: l.product.name, qty: l.qty, freeQty: l.freeQty, expiryDate: l.expiryDate ? dateStr(l.expiryDate) : '', batchNo: l.batchNo ?? '', remarks: l.remarks ?? '' })) };
+  }
+
+  /**
+   * Replace header + lines of a DRAFT or SUBMITTED receiving doc (owner request 2026-09-25: drafts are editable before submission;
+   * In-Charge edits apply after the associate accepts). A submitted doc goes back through cost approval: its pending request is
+   * cancelled and it is resubmitted in the preparer's name, keeping any cost already entered for the same product.
+   */
+  async applyEdit(id: string, input: ReceivingEditInput, actorId: string, editor: SessionUser | null) {
+    const doc = await this.prisma.db.receivingDoc.findUniqueOrThrow({ where: { id }, include: this.include });
+    if (!['DRAFT', 'SUBMITTED'].includes(doc.status)) throw new BadRequestException(`A ${doc.status} receiving document can no longer be edited`);
+    await this.validateLines(input.lines, editor, editor === null); // editor null = accepted proposal, validated when proposed
+    if (input.supplierId) await this.prisma.db.supplier.findUniqueOrThrow({ where: { id: input.supplierId } });
+    const keptCost = new Map(doc.lines.filter((l) => l.unitCost != null).map((l) => [l.productId, l.unitCost]));
+    const wasSubmitted = doc.status === 'SUBMITTED';
+    if (wasSubmitted) await this.approvals.cancelForDocument('ReceivingDoc', id);
+    await this.prisma.db.$transaction(async (tx) => {
+      await tx.receivingLine.deleteMany({ where: { docId: id } });
+      await tx.receivingDoc.update({
+        where: { id },
+        data: {
+          supplierId: input.supplierId ?? undefined, supplierRef: input.supplierRef === undefined ? undefined : input.supplierRef, notes: input.notes === undefined ? undefined : input.notes,
+          docDate: input.docDate ? toDateOnly(input.docDate) : undefined, status: 'DRAFT', approvalRequestId: null, updatedBy: actorId,
+          lines: { create: input.lines.map((l) => ({ productId: l.productId, qty: l.qty, freeQty: l.freeQty ?? 0, expiryDate: l.expiryDate ? toDateOnly(l.expiryDate) : null, batchNo: l.batchNo ?? null, unitCost: l.unitCost != null ? D(l.unitCost).toFixed(2) : keptCost.get(l.productId) ?? null, remarks: l.remarks })) },
+        },
+      });
+    });
+    if (wasSubmitted) await this.submitDoc(id, doc.preparedBy ?? doc.createdBy ?? actorId);
+  }
+
   /** Submit → COST_ON_RECEIVING approval. Marks lines whose product exists with an unchanged cost; those docs auto-approve after 24 h. */
   async submit(id: string, user: SessionUser) {
     const doc = await this.get(id, user);
+    if (user.locationScoped && doc.preparedBy !== user.id) throw new ForbiddenException(`Only ${doc.preparedByName ?? 'the person who prepared it'} can submit this draft; propose an edit instead`);
+    await this.submitDoc(id, user.id);
+    return this.get(id, user);
+  }
+  private async submitDoc(id: string, requestedBy: string) {
+    const doc = await this.prisma.db.receivingDoc.findUniqueOrThrow({ where: { id }, include: this.include });
     if (doc.status !== 'DRAFT') throw new BadRequestException('Only drafts can be submitted');
     await this.attachments.assertRequired('ReceivingDoc', id);
     const costs = await this.master.currentCosts(doc.lines.map((l) => l.productId));
@@ -93,9 +141,8 @@ export class ReceivingService implements OnModuleInit {
     }
     const hours = await this.settings.get<number>('approval.cost_unchanged_auto_hours');
     const autoApproveAt = allUnchanged ? new Date(Date.now() + hours * 3600000) : null;
-    const req = await this.approvals.request({ type: 'COST_ON_RECEIVING', documentType: 'ReceivingDoc', documentId: id, requestedBy: user.id, autoApproveAt, summary: { controlNo: doc.controlNo, locationId: doc.locationId, locationName: doc.location.name, supplierCode: doc.supplier.code, lines: doc.lines.length, allUnchanged } });
-    await this.prisma.db.receivingDoc.update({ where: { id }, data: { status: 'SUBMITTED', approvalRequestId: req.id, updatedBy: user.id } });
-    return this.get(id, user);
+    const req = await this.approvals.request({ type: 'COST_ON_RECEIVING', documentType: 'ReceivingDoc', documentId: id, requestedBy, autoApproveAt, summary: { controlNo: doc.controlNo, locationId: doc.locationId, locationName: doc.location.name, supplierCode: doc.supplier.code, lines: doc.lines.length, allUnchanged } });
+    await this.prisma.db.receivingDoc.update({ where: { id }, data: { status: 'SUBMITTED', approvalRequestId: req.id, updatedBy: requestedBy } });
   }
 
   /** Head Auditor enters/confirms costs on a submitted doc before approving (§7.2 step 2). */

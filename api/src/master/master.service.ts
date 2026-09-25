@@ -17,11 +17,13 @@ export class MasterService {
   constructor(private prisma: PrismaService, private audit: AuditService) {}
 
   // ── Locations ──
-  listLocations(user: SessionUser, includeInactive = false) {
+  async listLocations(user: SessionUser, includeInactive = false) {
     const where: Prisma.LocationWhereInput = includeInactive ? {} : { active: true };
     if (user.locationScoped) {
-      // location-scoped roles see own locations + the warehouse (availability only, §5.4 ASSUMPTION 1) + virtual customer-return locations
-      where.OR = [{ id: { in: user.locationIds } }, { type: 'WAREHOUSE' }, { type: 'VIRTUAL' }];
+      // location-scoped roles see own locations + the warehouse (availability only, §5.4 ASSUMPTION 1) + virtual customer-return locations.
+      // Warehouse staff ship to every branch, franchise and consignee, so they get the full list (names only; stock stays scoped).
+      const ownWarehouse = await this.prisma.db.location.count({ where: { id: { in: user.locationIds }, type: 'WAREHOUSE' } });
+      if (!ownWarehouse) where.OR = [{ id: { in: user.locationIds } }, { type: 'WAREHOUSE' }, { type: 'VIRTUAL' }];
     }
     return this.prisma.db.location.findMany({ where, orderBy: [{ type: 'asc' }, { name: 'asc' }] });
   }

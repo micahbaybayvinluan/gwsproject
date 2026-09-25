@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { api, setToken } from './api';
 
-export interface Me { id: string; username: string; fullName: string; roleKey: string; permissions: string[]; locations: { id: string; code: string; name: string; type: string; isSelling: boolean }[]; locationScoped: boolean; totpVerified: boolean }
+export interface Me { id: string; username: string; fullName: string; roleKey: string; permissions: string[]; locations: { id: string; code: string; name: string; type: string; isSelling: boolean }[]; locationScoped: boolean; totpVerified: boolean; roleName?: string; idNumber?: string | null; mustChangePassword?: boolean; accountabilityAcceptedAt?: string | null; accountabilityStatement?: string }
 interface Ctx { me: Me | null; loading: boolean; refresh: () => Promise<void>; logout: () => Promise<void>; can: (...keys: string[]) => boolean; canAny: (...keys: string[]) => boolean }
 const AuthCtx = createContext<Ctx>(null!);
 

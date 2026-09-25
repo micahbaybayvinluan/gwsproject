@@ -23,6 +23,8 @@ import { DailySalesReport, asNum } from './daily-sales-report';
 export class PdfService {
   private log = new Logger('Pdf');
   async render(html: string): Promise<{ buffer: Buffer; contentType: string; ext: 'pdf' | 'html' }> {
+    // tests read the form text, so they can ask for the HTML version
+    if (process.env.PDF_FORCE_HTML === 'true') return { buffer: Buffer.from(html), contentType: 'text/html', ext: 'html' };
     const exe = findBrowser();
     if (!exe) { this.log.warn('No Chrome/Edge/Chromium found for PDFs; returning HTML. Install Google Chrome or set PUPPETEER_EXECUTABLE_PATH.'); return { buffer: Buffer.from(html), contentType: 'text/html', ext: 'html' }; }
     try {

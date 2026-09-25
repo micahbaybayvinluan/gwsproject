@@ -10,3 +10,4 @@ if (fs.existsSync(envPath)) {
   }
 }
 process.env.NODE_ENV = 'test';
+process.env.PDF_FORCE_HTML ??= 'true'; // e2e reads the form text; real PDF output is checked by hand

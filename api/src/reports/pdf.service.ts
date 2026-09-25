@@ -1,13 +1,30 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { existsSync } from 'node:fs';
+
+/** Browsers tried when PUPPETEER_EXECUTABLE_PATH is empty or points to a missing file (Mac, Windows, Linux). */
+export const BROWSER_CANDIDATES = [
+  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+  '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
+  '/Applications/Chromium.app/Contents/MacOS/Chromium',
+  'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+  'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+  '/usr/bin/chromium', '/usr/bin/chromium-browser', '/usr/bin/google-chrome', '/opt/pw-browsers/chromium',
+];
+export function findBrowser(configured = process.env.PUPPETEER_EXECUTABLE_PATH, exists: (p: string) => boolean = existsSync): string | null {
+  const home = process.env.HOME;
+  const list = [configured, ...BROWSER_CANDIDATES, home ? `${home}/Applications/Google Chrome.app/Contents/MacOS/Google Chrome` : undefined].filter((x): x is string => !!x);
+  return list.find((p) => exists(p)) ?? null;
+}
 import { DailySalesReport, asNum } from './daily-sales-report';
 
-/** HTML → PDF via puppeteer-core (PUPPETEER_EXECUTABLE_PATH). Falls back to returning HTML when no browser is available. */
+/** HTML → PDF via puppeteer-core using PUPPETEER_EXECUTABLE_PATH, else an installed Chrome/Edge/Chromium. Falls back to returning HTML when no browser is available. */
 @Injectable()
 export class PdfService {
   private log = new Logger('Pdf');
   async render(html: string): Promise<{ buffer: Buffer; contentType: string; ext: 'pdf' | 'html' }> {
-    const exe = process.env.PUPPETEER_EXECUTABLE_PATH;
-    if (!exe) return { buffer: Buffer.from(html), contentType: 'text/html', ext: 'html' };
+    const exe = findBrowser();
+    if (!exe) { this.log.warn('No Chrome/Edge/Chromium found for PDFs; returning HTML. Install Google Chrome or set PUPPETEER_EXECUTABLE_PATH.'); return { buffer: Buffer.from(html), contentType: 'text/html', ext: 'html' }; }
     try {
       const puppeteer = await import('puppeteer-core');
       const browser = await puppeteer.launch({ executablePath: exe, args: ['--no-sandbox', '--disable-setuid-sandbox'] });

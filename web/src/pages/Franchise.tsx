@@ -14,7 +14,9 @@ export function FranchisePage() {
   const [exp, setExp] = useState({ category: 'Rent', payee: '', amount: '', notes: '' });
   const addExp = useMutation({ mutationFn: () => api.post('/api/expenses/franchise', { ...exp, amount: Number(exp.amount) }), onSuccess: () => { setExp({ ...exp, amount: '', payee: '' }); void pnl.refetch(); } });
   const [msg, setMsg] = useState(''); const request = useMutation({ mutationFn: () => api.put('/api/franchise/request-product', { message: msg }), onSuccess: () => setMsg('') });
-  const d = p.data; if (!d) return null;
+  const d = p.data;
+  if (p.error) return <div className="space-y-2"><h1 className="text-xl font-semibold">Franchise portal</h1><ErrorBox error={p.error} /><p className="text-sm text-slate-500">The franchise portal is for Franchise Owner / Franchise Sales Associate accounts assigned to a franchise location.</p></div>;
+  if (!d) return <p className="text-sm text-slate-500">Loading…</p>;
   return <div className="space-y-4">
     <h1 className="text-xl font-semibold">Franchise portal — {d.franchise.name}</h1>
     <div className="grid grid-cols-2 gap-3 md:grid-cols-4"><Stat label="Stock on hand" value={d.stockUnits} sub={`${d.stockLines} products`} /><Stat label="Today's sales" value={peso(d.todaySales.total)} sub={`${d.todaySales.count} DR`} /><Stat label="Owed to GWS (open AR)" value={peso(d.arToWarehouse.openInvoices)} sub={`transfers at franchise cost ${peso(d.arToWarehouse.transfersAtFranchiseCost)}`} /><Stat label="Expiring / expired" value={d.expiring.reduce((s, b) => s + b.qty, 0)} tone={d.expiring.find((b) => b.bucket === 'EXPIRED')?.qty ? 'red' : undefined} /></div>

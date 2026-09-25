@@ -159,6 +159,19 @@ describe('Phase 1 flow: receive → approve cost → transfer → confirm → FE
     expect(has(await prisma.stockLedger.findMany({ where: { productId, movementType: 'EXPIRED_WRITEOFF' } }), /EXPIRED_WRITEOFF/)).toBe(true);
     void batchNear; void batchFar;
   });
+  it('daily inventory report: associates get quantities only, cost-view roles get costing automatically, other branches forbidden', async () => {
+    const url = `/api/stock/daily-inventory?locationId=${branchId}&from=2026-01-01&to=2026-12-31`;
+    const assoc = ok(await as('sales.westave').get(url)).body as { days: string[]; products: { sales: number; end: number }[]; totals: Record<string, unknown> };
+    expect(assoc.days.length).toBe(365); expect(assoc.products.length).toBeGreaterThan(0); expect(assoc.products.some((p) => p.sales > 0)).toBe(true);
+    expect(has(assoc, /Cost|unitCost/)).toBe(false);
+    const head = ok(await as('head.auditor').get(url)).body as { totals: { salesCost: number; endCost: number } };
+    expect(typeof head.totals.salesCost).toBe('number'); expect(has(head, /salesCost/)).toBe(true);
+    await as('sales.westave').get(`/api/stock/daily-inventory?locationId=${whId}&from=2026-09-01&to=2026-09-02`).expect(403);
+    await as('hr.staff').get(url).expect(403);
+    await as('head.auditor').get(`/api/stock/daily-inventory?locationId=${branchId}&from=2026-09-05&to=2026-09-01`).expect(400);
+    const x = await as('sales.westave').get(`/api/reports/daily-inventory.xlsx?locationId=${branchId}&from=2026-09-01&to=2026-09-30`).expect(200);
+    expect(x.headers['content-type']).toContain('spreadsheet');
+  });
   it('AR/PDC sale, partial payment → credit note, overdue list; daily sales report exports (xlsx + pdf/html) with no cost', async () => {
     const dealer = (ok(await as('sales.westave').get('/api/customers?type=DEALER')).body as { id: string }[])[0];
     const ar = ok(await as('sales.westave').post('/api/sales').send({ channel: 'DEALER', paymentMode: 'AR_PDC', customerId: dealer.id, drSiNo: `DR-${run}-AR`, dueDate: '2026-01-01', lines: [{ productId, qty: 1 }] })).body;

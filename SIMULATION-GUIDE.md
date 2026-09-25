@@ -93,6 +93,9 @@ HR → Payroll: add employees, create a run for a period (charge-form deductions
 **16. Custom role** — `admin`
 Users & Roles → click `custom.user` → tick the exact permissions and approvals that person may have → Save overrides. Log in as `custom.user` to see only those menus.
 
+**17. Daily Inventory Report (every role)** — try `wh.assoc`, then `sales.westave`, then `head.auditor`
+Reports → Inventory Reports → Daily Inventory Report: pick From/To dates, press **Generate xlsx** or read it on screen. "Show" switches between the whole period and one day at a time. Columns: Beg, Receive, Transfer In, Returns, Pull Out, Sales, Other Out (freebies/tasting), Adj (count adjustments & write-offs), End. Associates, franchise users, field auditors and the audit associate get quantities only. Admin, the auditors, and Accounting get the same report with costing added automatically (Transfer In Cost, Pull Out Cost, Cost of Sales, End Value, average unit cost). Each user only sees their own location(s); `hr.staff` has no inventory access (§5.4).
+
 ## Where the files come out
 
-All exports download through the browser: Daily Sales Report (xlsx/PDF), every paper form (Pull-Out, Transfer-In, DR-Sales, Supplier's Form, Count sheet, Discrepancy Report, Charge Form, Credit Note, Journal Voucher), every list (Export xlsx / CSV buttons), Trial Balance and the financial statements.
+All exports download through the browser: Daily Sales Report (xlsx/PDF), Daily Inventory Report (xlsx, one sheet per day plus Summary and Per-day sheets), every paper form (Pull-Out, Transfer-In, DR-Sales, Supplier's Form, Count sheet, Discrepancy Report, Charge Form, Credit Note, Journal Voucher), every list (Export xlsx / CSV buttons), Trial Balance and the financial statements.

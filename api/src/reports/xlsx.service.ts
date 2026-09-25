@@ -4,19 +4,32 @@ import { DailySalesReport, asNum } from './daily-sales-report';
 import { loadWorkbook } from '../imports/workbook-readers';
 import { fillDailySalesTemplate, templatePath } from './daily-sales-template';
 
+export type Col = { header: string; key: string; width?: number; numFmt?: string };
+export type SheetOpts = { title?: string; subtitle?: string[]; totals?: string[] };
+
 /** exceljs renderers. Totals use formulas (not values) as the source workbooks do. */
 @Injectable()
 export class XlsxService {
   /** Generic list export: columns + rows → buffer. */
-  async table(sheetName: string, columns: { header: string; key: string; width?: number; numFmt?: string }[], rows: Record<string, unknown>[], opts: { title?: string; totals?: string[] } = {}): Promise<Buffer> {
-    const wb = new ExcelJS.Workbook(); const ws = wb.addWorksheet(sheetName.slice(0, 31));
-    let r = 1;
-    if (opts.title) { ws.getCell(r, 1).value = opts.title; ws.getCell(r, 1).font = { bold: true, size: 14 }; r += 2; }
-    ws.getRow(r).values = columns.map((c) => c.header); ws.getRow(r).font = { bold: true };
-    columns.forEach((c, i) => { ws.getColumn(i + 1).width = c.width ?? 18; if (c.numFmt) ws.getColumn(i + 1).numFmt = c.numFmt; });
-    const first = r + 1;
-    for (const row of rows) { r++; ws.getRow(r).values = columns.map((c) => norm(row[c.key])); }
-    if (opts.totals?.length && rows.length) { r++; ws.getCell(r, 1).value = 'TOTAL'; ws.getRow(r).font = { bold: true }; for (const k of opts.totals) { const i = columns.findIndex((c) => c.key === k) + 1; if (i > 0) { const col = ws.getColumn(i).letter; ws.getCell(r, i).value = { formula: `SUM(${col}${first}:${col}${r - 1})` }; } } }
+  async table(sheetName: string, columns: Col[], rows: Record<string, unknown>[], opts: SheetOpts = {}): Promise<Buffer> {
+    return this.workbook([{ name: sheetName, columns, rows, ...opts }]);
+  }
+  /** Several list sheets in one workbook (e.g. summary + per-day detail). */
+  async workbook(sheets: (SheetOpts & { name: string; columns: Col[]; rows: Record<string, unknown>[] })[]): Promise<Buffer> {
+    const wb = new ExcelJS.Workbook();
+    for (const sh of sheets) {
+      const ws = wb.addWorksheet(sh.name.slice(0, 31));
+      let r = 1;
+      if (sh.title) { ws.getCell(r, 1).value = sh.title; ws.getCell(r, 1).font = { bold: true, size: 14 }; r += 2; }
+      for (const line of sh.subtitle ?? []) { ws.getCell(r, 1).value = line; r++; }
+      if (sh.subtitle?.length) r++;
+      ws.getRow(r).values = sh.columns.map((c) => c.header); ws.getRow(r).font = { bold: true };
+      sh.columns.forEach((c, i) => { ws.getColumn(i + 1).width = c.width ?? 18; if (c.numFmt) ws.getColumn(i + 1).numFmt = c.numFmt; });
+      const first = r + 1;
+      for (const row of sh.rows) { r++; ws.getRow(r).values = sh.columns.map((c) => norm(row[c.key])); }
+      if (sh.totals?.length && sh.rows.length) { r++; ws.getCell(r, 1).value = 'TOTAL'; ws.getRow(r).font = { bold: true }; for (const k of sh.totals) { const i = sh.columns.findIndex((c) => c.key === k) + 1; if (i > 0) { const col = ws.getColumn(i).letter; ws.getCell(r, i).value = { formula: `SUM(${col}${first}:${col}${r - 1})` }; } } }
+      ws.views = [{ state: 'frozen', ySplit: first - 1 }];
+    }
     return Buffer.from(await wb.xlsx.writeBuffer());
   }
 

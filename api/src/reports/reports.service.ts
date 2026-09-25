@@ -1,6 +1,6 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../common/prisma.service';
-import { XlsxService } from './xlsx.service';
+import { XlsxService, type Col } from './xlsx.service';
 import { PdfService } from './pdf.service';
 import { AuditService } from '../common/audit.service';
 import { StockService } from '../stock/stock.service';
@@ -55,6 +55,28 @@ export class ReportsService {
     const rows = data.map((p) => { const o: Record<string, unknown> = { sku: p.product.sku, name: p.product.name, beg: p.beg, end: p.end }; for (const d of p.days) { o[`d${d.day}_IN-P`] = d.inP; o[`d${d.day}_IN-T`] = d.inT; o[`d${d.day}_OUT-P`] = d.outP; o[`d${d.day}_OUT-S`] = d.outS; o[`d${d.day}_Bal`] = d.bal; o[`d${d.day}_Act`] = d.act ?? ''; o[`d${d.day}_Var`] = d.var ?? ''; o[`d${d.day}_Loss`] = d.loss; o[`d${d.day}_End`] = d.end; } return o; });
     await this.logExport(user, 'DailyInventoryMovement.xlsx', { locationId, year, month });
     return { buffer: await this.xlsx.table('DAILY INVTY COUNT', cols, rows, { title: `Daily Inventory Movement ${year}-${String(month).padStart(2, '0')}` }), contentType: XLSX, fileName: `DailyInventory_${year}-${month}.xlsx` };
+  }
+  /** Daily Inventory Report xlsx: sheet 1 = period summary per product, sheet 2 = per-day detail. Cost columns only for cost.view. */
+  async dailyInventoryXlsx(user: SessionUser, locationId: string, from: string, to: string): Promise<Out> {
+    const rep = await this.stock.dailyInventory(locationId, from, to);
+    const canCost = user.permissions.has('cost.view');
+    const money = '#,##0.00;(#,##0.00);-';
+    const qtyCols: Col[] = [{ header: 'Beg', key: 'beg', width: 8 }, { header: 'Receive', key: 'receive', width: 9 }, { header: 'Transfer In', key: 'transferIn', width: 11 }, { header: 'Returns', key: 'returns', width: 9 }, { header: 'Pull Out', key: 'pullOut', width: 9 }, { header: 'Sales', key: 'sales', width: 8 }, { header: 'Other Out', key: 'other', width: 10 }, { header: 'Adj', key: 'adjust', width: 7 }, { header: 'End', key: 'end', width: 8 }];
+    const costCols: Col[] = canCost ? [{ header: 'Beg Value', key: 'begCost', numFmt: money }, { header: 'Transfer In Cost', key: 'transferInCost', numFmt: money }, { header: 'Pull Out Cost', key: 'pullOutCost', numFmt: money }, { header: 'Cost of Sales', key: 'salesCost', numFmt: money }, { header: 'End Value', key: 'endCost', numFmt: money }] : [];
+    const totals = [...qtyCols.map((c) => c.key), ...costCols.map((c) => c.key)];
+    const head = `Daily Inventory Report — ${rep.location.name} — ${from} to ${to}${canCost ? ' (with costing)' : ''}`;
+    const subtitle = [`Prepared by: ${user.fullName}`, `Generated: ${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC`];
+    const prodCols: Col[] = [{ header: 'SKU', key: 'sku', width: 12 }, { header: 'Brand', key: 'brand', width: 16 }, { header: 'Item', key: 'name', width: 44 }];
+    const flat = (p: (typeof rep.products)[number]) => ({ sku: p.product.sku, brand: p.product.brand ?? '', name: p.product.name });
+    const summary = rep.products.map((p) => ({ ...flat(p), ...p, ...(canCost ? { unitCost: p.unitCost } : {}) }));
+    const perDay = rep.products.flatMap((p) => p.days.filter((d) => d.receive || d.transferIn || d.returns || d.pullOut || d.sales || d.other || d.adjust).map((d) => ({ ...flat(p), ...d })));
+    const sheets = [
+      { name: 'Summary', title: head, subtitle, columns: [...prodCols, ...qtyCols, ...costCols, ...(canCost ? [{ header: 'Unit Cost (avg)', key: 'unitCost', numFmt: money }] : [])], rows: summary as Record<string, unknown>[], totals },
+      { name: 'Per day', title: `${head} — movements per day`, columns: [{ header: 'Date', key: 'date', width: 12 }, ...prodCols, ...qtyCols, ...costCols], rows: perDay as Record<string, unknown>[], totals },
+      ...rep.days.map((day) => ({ name: day, title: `${rep.location.name} — ${day}`, columns: [...prodCols, ...qtyCols, ...costCols], rows: rep.products.map((p) => ({ ...flat(p), ...p.days.find((d) => d.date === day)! })).filter((r) => r.beg || r.end || r.receive || r.transferIn || r.returns || r.pullOut || r.sales || r.other || r.adjust) as Record<string, unknown>[], totals })),
+    ];
+    await this.logExport(user, 'DailyInventoryReport.xlsx', { locationId, from, to, withCost: canCost });
+    return { buffer: await this.xlsx.workbook(sheets), contentType: XLSX, fileName: `DailyInventory_${rep.location.name.replace(/\W+/g, '')}_${from}_${to}.xlsx` };
   }
   /** Generic list export with current filters (any JSON rows). */
   async genericXlsx(user: SessionUser, name: string, rows: Record<string, unknown>[]): Promise<Out> {

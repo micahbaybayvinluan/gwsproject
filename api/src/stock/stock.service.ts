@@ -1,4 +1,5 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { buildDailyInventory, dateRange, type DailyInventoryReport } from './daily-inventory';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { MovementType, Prisma } from '@prisma/client';
 import { PrismaService, Tx } from '../common/prisma.service';
 import { manilaDateStr, toDateOnly, todayManila, dateStr } from '../common/manila';
@@ -124,6 +125,20 @@ export class StockService {
       }
       return { product: p, beg: begQty, days: daysOut, end: bal };
     });
+  }
+
+  /** Daily Inventory Report over a date range (inclusive, Manila business dates). Cost buckets are computed here and redacted per role on the way out. */
+  async dailyInventory(locationId: string, from: string, to: string): Promise<DailyInventoryReport & { location: { id: string; name: string } }> {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to) throw new BadRequestException('from/to must be YYYY-MM-DD and from ≤ to');
+    if (dateRange(from, to).length > 366) throw new BadRequestException('Date range is limited to one year');
+    const loc = await this.prisma.db.location.findUnique({ where: { id: locationId }, select: { id: true, name: true } }); if (!loc) throw new NotFoundException('Location not found');
+    const fromD = toDateOnly(from), toD = toDateOnly(to);
+    const beg = await this.prisma.db.$queryRaw<{ product_id: string; qty: bigint; cost: unknown }[]>`SELECT product_id, COALESCE(SUM(qty_delta),0)::bigint qty, COALESCE(SUM(qty_delta*unit_cost),0) cost FROM stock_ledger WHERE location_id=${locationId} AND business_date < ${fromD}::date GROUP BY product_id`;
+    const moves = await this.prisma.db.stockLedger.findMany({ where: { locationId, businessDate: { gte: fromD, lte: toD } }, select: { productId: true, qtyDelta: true, movementType: true, businessDate: true, unitCost: true } });
+    const ids = [...new Set([...beg.map((b) => b.product_id), ...moves.map((m) => m.productId)])];
+    const products = await this.prisma.db.product.findMany({ where: { id: { in: ids } }, select: { id: true, sku: true, name: true, brand: true } });
+    const rep = buildDailyInventory(from, to, products, beg.map((b) => ({ productId: b.product_id, qty: Number(b.qty), cost: Number(b.cost) })), moves.map((m) => ({ productId: m.productId, qtyDelta: m.qtyDelta, movementType: m.movementType, businessDate: dateStr(m.businessDate), unitCost: Number(m.unitCost) })));
+    return { location: loc, ...rep };
   }
 
   businessDate(d?: string | Date) { return d ? toDateOnly(d) : toDateOnly(manilaDateStr()); }

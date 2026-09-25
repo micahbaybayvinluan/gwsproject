@@ -1,8 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api, peso, today } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
-import { Button, Card, Field, Input, Select } from '@/components/ui/primitives';
+import { Badge, Button, Card, Field, Input, Select } from '@/components/ui/primitives';
+import { DataTable } from '@/components/ui/table';
+import type { ColumnDef } from '@tanstack/react-table';
 
 /** §8.5 Daily Branch Sales Report — on-screen FRONT view + xlsx/PDF exports in the sample layout. */
 export function DailySalesReportPage() {
@@ -32,17 +34,72 @@ export function DailySalesReportPage() {
   </div>;
 }
 
+interface DiBuckets { receive: number; transferIn: number; returns: number; pullOut: number; sales: number; other: number; adjust: number; receiveCost?: number; transferInCost?: number; returnsCost?: number; pullOutCost?: number; salesCost?: number; otherCost?: number; adjustCost?: number }
+interface DiDay extends DiBuckets { date: string; beg: number; begCost?: number; end: number; endCost?: number }
+interface DiProduct extends DiBuckets { product: { id: string; sku: string; name: string; brand?: string | null }; beg: number; begCost?: number; end: number; endCost?: number; unitCost?: number; days: DiDay[] }
+interface DiReport { location: { id: string; name: string }; from: string; to: string; days: string[]; products: DiProduct[]; totals: DiBuckets & { beg: number; begCost?: number; end: number; endCost?: number } }
+
+/** Daily Inventory Report: date range + per-day view of Beg / Receive / Transfer In / Returns / Pull Out / Sales / Other / Adj / End.
+ *  Cost columns come from the API only for roles with cost.view (the server strips them for everyone else), so the same screen works for all roles. */
+function DailyInventoryReport({ locationId }: { locationId: string }) {
+  const { can } = useAuth(); const canCost = can('cost.view');
+  const [from, setFrom] = useState(today()); const [to, setTo] = useState(today()); const [day, setDay] = useState<string>('ALL'); const [hideIdle, setHideIdle] = useState(true);
+  const q = useQuery({ queryKey: ['daily-inventory', locationId, from, to], queryFn: () => api.get<DiReport>(`/api/stock/daily-inventory?locationId=${locationId}&from=${from}&to=${to}`), enabled: !!locationId && !!from && !!to && from <= to });
+  const rep = q.data;
+  const rows = (rep?.products ?? []).map((p) => { const d = day === 'ALL' ? null : p.days.find((x) => x.date === day); const b: DiDay | DiProduct = d ?? p; return { key: p.product.id, sku: p.product.sku, brand: p.product.brand ?? '', name: p.product.name, beg: b.beg, receive: b.receive, transferIn: b.transferIn, returns: b.returns, pullOut: b.pullOut, sales: b.sales, other: b.other, adjust: b.adjust, end: b.end, begCost: b.begCost, transferInCost: b.transferInCost, pullOutCost: b.pullOutCost, salesCost: b.salesCost, endCost: b.endCost, moved: !!(b.receive || b.transferIn || b.returns || b.pullOut || b.sales || b.other || b.adjust) }; }).filter((r) => !hideIdle || r.moved || day === 'ALL');
+  const sum = (k: keyof (typeof rows)[number]) => rows.reduce((t, r) => t + Number(r[k] ?? 0), 0);
+  const num = (v: unknown) => <span className="num block">{String(v ?? 0)}</span>;
+  const money = (v: unknown) => <span className="num block">{peso(v)}</span>;
+  type Row = (typeof rows)[number];
+  const columns: ColumnDef<Row, unknown>[] = [
+    { header: 'SKU', accessorKey: 'sku' }, { header: 'Item', accessorKey: 'name' },
+    { header: 'Beg', accessorKey: 'beg', cell: (c) => num(c.getValue()) }, { header: 'Receive', accessorKey: 'receive', cell: (c) => num(c.getValue()) },
+    { header: 'Transfer In', accessorKey: 'transferIn', cell: (c) => num(c.getValue()) }, { header: 'Returns', accessorKey: 'returns', cell: (c) => num(c.getValue()) },
+    { header: 'Pull Out', accessorKey: 'pullOut', cell: (c) => num(c.getValue()) }, { header: 'Sales', accessorKey: 'sales', cell: (c) => num(c.getValue()) },
+    { header: 'Other Out', accessorKey: 'other', cell: (c) => num(c.getValue()) }, { header: 'Adj', accessorKey: 'adjust', cell: (c) => num(c.getValue()) },
+    { header: 'End', accessorKey: 'end', cell: (c) => <span className="num block font-semibold">{String(c.getValue())}</span> },
+    ...(canCost ? [
+      { header: 'Transfer In Cost', accessorKey: 'transferInCost', cell: (c) => money(c.getValue()) }, { header: 'Pull Out Cost', accessorKey: 'pullOutCost', cell: (c) => money(c.getValue()) },
+      { header: 'Cost of Sales', accessorKey: 'salesCost', cell: (c) => money(c.getValue()) }, { header: 'End Value', accessorKey: 'endCost', cell: (c) => money(c.getValue()) },
+    ] as ColumnDef<Row, unknown>[] : []),
+  ];
+  const footer = <tr><td className="px-3 py-2" colSpan={2}>TOTAL ({rows.length} items)</td>{(['beg', 'receive', 'transferIn', 'returns', 'pullOut', 'sales', 'other', 'adjust', 'end'] as const).map((k) => <td key={k} className="num px-3 py-2">{sum(k)}</td>)}{canCost && (['transferInCost', 'pullOutCost', 'salesCost', 'endCost'] as const).map((k) => <td key={k} className="num px-3 py-2">{peso(sum(k))}</td>)}</tr>;
+  return <Card title={<span>Daily Inventory Report {canCost && <Badge tone="amber">with costing</Badge>}</span>}>
+    <div className="mb-3 flex flex-wrap items-end gap-2">
+      <Field label="From"><Input type="date" value={from} onChange={(e) => { setFrom(e.target.value); setDay('ALL'); }} /></Field>
+      <Field label="To"><Input type="date" value={to} onChange={(e) => { setTo(e.target.value); setDay('ALL'); }} /></Field>
+      <Field label="Show"><Select value={day} onChange={(e) => setDay(e.target.value)}><option value="ALL">Whole period ({rep?.days.length ?? 0} days)</option>{rep?.days.map((d) => <option key={d} value={d}>{d}</option>)}</Select></Field>
+      {day !== 'ALL' && <label className="flex items-center gap-1 pb-2 text-xs"><input type="checkbox" checked={hideIdle} onChange={(e) => setHideIdle(e.target.checked)} /> only items that moved</label>}
+      <div className="ml-auto flex gap-2">
+        <Button variant="outline" disabled={!locationId || from > to} onClick={() => api.download(`/api/reports/daily-inventory.xlsx?locationId=${locationId}&from=${from}&to=${to}`, `DailyInventory_${from}_${to}.xlsx`)}>Generate xlsx{canCost ? ' (with costing)' : ''}</Button>
+      </div>
+    </div>
+    {from > to && <p className="text-sm text-red-700">"From" must be on or before "To".</p>}
+    {q.isLoading && <p className="text-sm text-slate-500">Loading…</p>}
+    {q.error ? <p className="text-sm text-red-700">{(q.error as Error).message}</p> : null}
+    {rep && <>
+      <p className="mb-2 text-xs text-slate-500">{rep.location.name} · {day === 'ALL' ? `${rep.from} to ${rep.to}` : day} · Receive = supplier receiving, Transfer In = stock received from warehouse/branches, Pull Out = stock sent out, Other Out = freebies/tasting, Adj = count adjustments & write-offs.{canCost ? ' Values at batch cost.' : ''}</p>
+      <DataTable data={rows} columns={columns} footer={footer} />
+    </>}
+  </Card>;
+}
+
 export function InventoryReportsPage() {
   const { me } = useAuth();
   const [locationId, setLocationId] = useState(me!.locations[0]?.id ?? ''); const [ym, setYm] = useState(today().slice(0, 7));
   const locations = useQuery({ queryKey: ['locations'], queryFn: () => api.get<{ id: string; name: string }[]>('/api/locations') });
+  useEffect(() => { if (!locationId && locations.data?.length) setLocationId(locations.data.find((l) => l.name === 'Warehouse')?.id ?? locations.data[0].id); }, [locationId, locations.data]);
   const [y, m] = ym.split('-').map(Number);
   const dm = useQuery({ queryKey: ['daily-movement', locationId, ym], queryFn: () => api.get<{ product: { sku: string; name: string }; beg: number; end: number; days: { day: number; inP: number; inT: number; outP: number; outS: number; bal: number; act: number | null; var: number | null; loss: number; end: number }[] }[]>(`/api/stock/daily-movement/${locationId}?year=${y}&month=${m}`), enabled: !!locationId });
   const ledger = useQuery({ queryKey: ['ledger', locationId], queryFn: () => api.get<{ postedAt: string; movementType: string; qtyDelta: number; documentType: string; documentId: string; product: { name: string }; batch: { batchNo: string | null } }[]>(`/api/stock/ledger?locationId=${locationId}`), enabled: !!locationId });
   return <div className="space-y-4">
-    <div className="flex flex-wrap items-end gap-2"><h1 className="mr-auto text-xl font-semibold">Inventory reports</h1><Field label="Location"><Select value={locationId} onChange={(e) => setLocationId(e.target.value)}><option value="">—</option>{locations.data?.filter((l) => !me!.locationScoped || me!.locations.some((x) => x.id === l.id)).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</Select></Field><Field label="Month"><Input type="month" value={ym} onChange={(e) => setYm(e.target.value)} /></Field></div>
-    <div className="flex flex-wrap gap-2"><Button variant="outline" disabled={!locationId} onClick={() => api.download(`/api/reports/daily-movement.xlsx?locationId=${locationId}&year=${y}&month=${m}`, `DailyInventory_${ym}.xlsx`)}>Daily Inventory Movement xlsx (Beg / IN-P / IN-T / OUT-P / OUT-S / Bal / Act / Var / Loss / End)</Button><Button variant="outline" onClick={() => api.download(`/api/reports/stock-on-hand.xlsx${locationId ? `?locationId=${locationId}` : ''}`, 'StockOnHand.xlsx')}>Stock on hand xlsx</Button></div>
-    <Card title={`Daily movement summary ${ym}`}><div className="overflow-auto"><table className="text-xs"><thead><tr><th className="px-2 text-left">Item</th><th className="px-2">Beg</th><th className="px-2">IN-P</th><th className="px-2">IN-T</th><th className="px-2">OUT-P</th><th className="px-2">OUT-S</th><th className="px-2">Loss</th><th className="px-2">End</th></tr></thead><tbody>{dm.data?.map((p) => { const s = (k: 'inP' | 'inT' | 'outP' | 'outS' | 'loss') => p.days.reduce((t, d) => t + d[k], 0); return <tr key={p.product.sku} className="border-t"><td className="px-2 py-1">{p.product.name}</td><td className="num px-2">{p.beg}</td><td className="num px-2">{s('inP')}</td><td className="num px-2">{s('inT')}</td><td className="num px-2">{s('outP')}</td><td className="num px-2">{s('outS')}</td><td className="num px-2">{s('loss')}</td><td className="num px-2 font-medium">{p.end}</td></tr>; })}</tbody></table></div></Card>
+    <div className="flex flex-wrap items-end gap-2"><h1 className="mr-auto text-xl font-semibold">Inventory reports</h1><Field label="Location"><Select value={locationId} onChange={(e) => setLocationId(e.target.value)}><option value="">—</option>{locations.data?.filter((l) => !me!.locationScoped || me!.locations.some((x) => x.id === l.id)).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</Select></Field></div>
+    {!locationId && <p className="text-sm text-slate-500">Pick a location to generate reports.</p>}
+    {locationId && <DailyInventoryReport locationId={locationId} />}
+    <Card title="Monthly movement sheet (DAILY INVTY COUNT layout)">
+      <div className="mb-3 flex flex-wrap items-end gap-2"><Field label="Month"><Input type="month" value={ym} onChange={(e) => setYm(e.target.value)} /></Field><Button variant="outline" disabled={!locationId} onClick={() => api.download(`/api/reports/daily-movement.xlsx?locationId=${locationId}&year=${y}&month=${m}`, `DailyInventoryMovement_${ym}.xlsx`)}>Monthly movement xlsx (Beg / IN-P / IN-T / OUT-P / OUT-S / Bal / Act / Var / Loss / End)</Button><Button variant="outline" onClick={() => api.download(`/api/reports/stock-on-hand.xlsx${locationId ? `?locationId=${locationId}` : ''}`, 'StockOnHand.xlsx')}>Stock on hand xlsx</Button></div>
+      <div className="overflow-auto"><table className="text-xs"><thead><tr><th className="px-2 text-left">Item</th><th className="px-2">Beg</th><th className="px-2">IN-P</th><th className="px-2">IN-T</th><th className="px-2">OUT-P</th><th className="px-2">OUT-S</th><th className="px-2">Loss</th><th className="px-2">End</th></tr></thead><tbody>{dm.data?.map((p) => { const s = (k: 'inP' | 'inT' | 'outP' | 'outS' | 'loss') => p.days.reduce((t, d) => t + d[k], 0); return <tr key={p.product.sku} className="border-t"><td className="px-2 py-1">{p.product.name}</td><td className="num px-2">{p.beg}</td><td className="num px-2">{s('inP')}</td><td className="num px-2">{s('inT')}</td><td className="num px-2">{s('outP')}</td><td className="num px-2">{s('outS')}</td><td className="num px-2">{s('loss')}</td><td className="num px-2 font-medium">{p.end}</td></tr>; })}</tbody></table></div>
+    </Card>
     <Card title="Stock ledger (latest movements)"><div className="max-h-96 overflow-auto"><table className="w-full text-xs"><thead className="sticky top-0 bg-slate-50 text-left"><tr><th>When</th><th>Type</th><th>Product</th><th>Batch</th><th className="num">Qty</th><th>Document</th></tr></thead><tbody>{ledger.data?.map((l, i) => <tr key={i} className="border-t"><td>{new Date(l.postedAt).toLocaleString()}</td><td>{l.movementType}</td><td>{l.product.name}</td><td>{l.batch.batchNo}</td><td className={`num ${l.qtyDelta < 0 ? 'text-red-700' : 'text-emerald-700'}`}>{l.qtyDelta}</td><td>{l.documentType} {l.documentId.slice(0, 8)}</td></tr>)}</tbody></table></div></Card>
   </div>;
 }

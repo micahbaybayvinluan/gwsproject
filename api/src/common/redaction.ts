@@ -15,6 +15,8 @@ export interface RedactionUser {
 export const COST_FIELDS = new Set([
   'cost', 'unitCost', 'landedCost', 'originalUnitCost', 'batchCost', 'standardCost', 'costOld', 'costNew', 'totalCost', 'valueAtCost',
   'margin', 'marginPct', 'grossProfit', 'grossMargin', 'grossMarginPct', 'totalGain', 'gain', 'directCost', 'costOfSales', 'cogs',
+  // Daily Inventory Report value buckets
+  'begCost', 'endCost', 'receiveCost', 'transferInCost', 'returnsCost', 'pullOutCost', 'salesCost', 'otherCost', 'adjustCost',
 ]);
 /** Field names that carry the supplier's real name. */
 export const SUPPLIER_NAME_FIELDS = new Set(['supplierName']);

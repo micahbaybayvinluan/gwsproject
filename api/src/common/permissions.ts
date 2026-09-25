@@ -181,7 +181,7 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
     key: 'CUSTOM',
     name: 'Custom',
     description: 'Configurable role built from permission keys + per-user overrides.',
-    permissions: ['dashboard.view', 'notification.view'],
+    permissions: ['dashboard.view', 'notification.view', 'product.view', 'location.view.own', 'report.inventory.own'],
   },
   {
     key: 'ACCOUNTING_HEAD',

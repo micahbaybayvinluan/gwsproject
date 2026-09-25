@@ -1,9 +1,10 @@
-import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Bell, Menu, LogOut } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { api } from '@/lib/api';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { cn } from '@/lib/utils';
 
 interface NavItem { to: string; label: string; any?: string[]; hideFor?: string[] }
@@ -57,7 +58,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
 ];
 
 export function Layout() {
-  const { me, logout, canAny } = useAuth(); const nav = useNavigate(); const [open, setOpen] = useState(false);
+  const { me, logout, canAny } = useAuth(); const nav = useNavigate(); const { pathname } = useLocation(); const [open, setOpen] = useState(false);
   const unread = useQuery({ queryKey: ['unread'], queryFn: () => api.get<{ count: number }>('/api/notifications/unread-count'), refetchInterval: 30000 });
   const approvals = useQuery({ queryKey: ['approvals-count'], queryFn: () => api.get<{ count: number }>('/api/approvals/inbox').then((r) => ({ count: r.count })), refetchInterval: 30000, enabled: !!me });
   const groups = NAV.map((g) => ({ ...g, items: g.items.filter((i) => (!i.any || canAny(...i.any)) && !(i.hideFor?.includes(me?.roleKey ?? ''))) })).filter((g) => g.items.length);
@@ -74,7 +75,7 @@ export function Layout() {
         <button className="relative" onClick={() => nav('/notifications')} aria-label="Notifications"><Bell />{!!unread.data?.count && <span className="absolute -right-1 -top-1 rounded-full bg-red-600 px-1.5 text-[10px] text-white">{unread.data.count}</span>}</button>
         <button onClick={logout} aria-label="Sign out" title="Sign out"><LogOut size={20} /></button>
       </header>
-      <main className="flex-1 p-4 lg:p-6"><Outlet /></main>
+      <main className="flex-1 p-4 lg:p-6"><ErrorBoundary resetKey={pathname}><Outlet /></ErrorBoundary></main>
     </div>
   </div>;
 }

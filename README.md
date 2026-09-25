@@ -43,6 +43,7 @@ Full stack in containers: `docker compose up --build` (web on http://localhost:5
 Steps 1, 2, 3 and 5 of the migration plan (products, chart of accounts, opening stock at the Warehouse, beginning balances) run inside `prisma:seed` from the workbooks in `/seed/`. Re-running the seed is safe: it never duplicates and posts opening stock once. What is still manual:
 
 - **Product costs**: `inventory.xlsm` has an empty COST column, so opening stock is posted at ₱0 and no standard cost exists. Admin enters costs via **Catalogue → Price Changes** (cost column) or the Imports → Products template; receiving with Head Auditor cost approval sets them from then on.
+- **Daily Inventory Report** (Reports → Inventory Reports): any date range, viewable per day or for the whole period, with Beg / Receive / Transfer In / Returns / Pull Out / Sales / Other Out / Adj / End per product. Roles with `cost.view` automatically get the costed version (Transfer In Cost, Pull Out Cost, Cost of Sales, End Value); everyone else gets quantities only. Available to every role that has inventory access (all except HR Staff, per §5.4), always limited to the user's own location(s). API: `GET /api/stock/daily-inventory`, `GET /api/reports/daily-inventory.xlsx`.
 - **Opening stock at branches** (the workbook only has the Warehouse): Imports → "Opening stock per location" template.
 - **Open AR**: Imports → "Open AR" template.
 - **27 products flagged for review** (promo bundles, ambiguous names): Catalogue → Products, filter by the "review" badge.
@@ -76,7 +77,7 @@ All seeded users share the password `ChangeMe!2026` (override with `SEED_PASSWOR
 ## Tests
 
 ```bash
-pnpm test          # api: 47 unit tests (redaction per role, posting rules R1–R14, approval routing, importers, sales report builder)
+pnpm test          # api: 50 unit tests (redaction per role, posting rules R1–R14, approval routing, importers, sales report builder, daily inventory report)
                    #      + 18 end-to-end tests over HTTP against the real DB (receive → cost approve → transfer → confirm → FEFO sale →
                    #        special price → AR/credit note → reports → post-close edit needing Head+Asst → bulk approvals →
                    #        count → discrepancy → charge form → HR → alerts → scoping/redaction → Phase 2 posting, period lock, opening balances)

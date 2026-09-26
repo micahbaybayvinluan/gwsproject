@@ -1,8 +1,20 @@
 @import "tailwindcss";
+/* GWS brand (from the logo): crimson red, deep navy, silver white — light, premium surfaces */
 @theme {
-  --color-brand: #0f766e;
-  --color-brand-dark: #115e59;
+  --color-brand: #c8102e;
+  --color-brand-dark: #a00d24;
+  --color-brand-soft: #fdecef;
+  --color-navy: #0b1f3a;
+  --color-navy-2: #16305a;
+  --color-silver: #eef1f6;
+  --font-sans: "Inter", "Segoe UI", "Helvetica Neue", Arial, system-ui, sans-serif;
+  --font-display: "Oswald", "Arial Narrow", "Helvetica Neue Condensed", Impact, sans-serif;
 }
 html, body, #root { height: 100%; }
+body { background: #f5f6fa; color: #0f172a; -webkit-font-smoothing: antialiased; }
 input, select, textarea { font-size: 16px; } /* prevents iOS zoom */
 .num { font-variant-numeric: tabular-nums; text-align: right; }
+::selection { background: #fdecef; }
+/* thin, quiet scrollbars */
+* { scrollbar-width: thin; scrollbar-color: #cbd5e1 transparent; }
+@media print { aside, header { display: none !important; } main { padding: 0 !important; } }

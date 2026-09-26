@@ -33,23 +33,26 @@ export function ProductsPage() {
 }
 
 export function ProductDetailPage() {
-  const { id } = useParams(); const { can } = useAuth(); const qc = useQueryClient();
+  const { id } = useParams(); const { me, can } = useAuth(); const qc = useQueryClient(); const nav = useNavigate();
+  // owner rule: the Owner and the Head Auditor edit products; only the Owner deletes
+  const canEdit = me?.roleKey === 'ADMIN' || me?.roleKey === 'HEAD_AUDITOR'; const canDelete = me?.roleKey === 'ADMIN';
+  const del = useMutation({ mutationFn: () => api.delete<{ deleted: boolean; archived: boolean; message: string }>(`/api/products/${id}`), onSuccess: (r) => { alert(r.message); void qc.invalidateQueries({ queryKey: ['products-list'] }); nav('/products'); } });
   const q = useQuery({ queryKey: ['product', id], queryFn: () => api.get<Product & { priceHistory: { tier: string; price: string; effectiveFrom: string; approvedBy: string | null }[]; costHistory?: { cost: string; effectiveFrom: string }[] }>(`/api/products/${id}`) });
   const cats = useQuery({ queryKey: ['categories'], queryFn: () => api.get<{ id: string; name: string }[]>('/api/categories') });
   const [patch, setPatch] = useState<Record<string, unknown>>({});
   const m = useMutation({ mutationFn: () => api.patch(`/api/products/${id}`, patch), onSuccess: () => { setPatch({}); void qc.invalidateQueries({ queryKey: ['product', id] }); } });
   const p = q.data; if (!p) return null;
   return <div className="mx-auto max-w-4xl space-y-4">
-    <h1 className="text-xl font-semibold">{p.name} <span className="text-base text-slate-500">{p.sku}</span></h1>
-    <Card title="Master data" actions={can('product.edit') && <Button size="sm" disabled={!Object.keys(patch).length} onClick={() => m.mutate()}>Save</Button>}>
+    <div className="flex flex-wrap items-center gap-2"><h1 className="text-2xl font-bold tracking-tight text-navy">{p.name} <span className="text-base font-medium text-slate-400">{p.sku}</span></h1>{canDelete && <Button className="ml-auto" size="sm" variant="danger" disabled={del.isPending} onClick={() => { if (confirm(`Delete ${p.name}? If it was ever sold, received or transferred it is archived instead.`)) del.mutate(); }}>Delete</Button>}</div><ErrorBox error={del.error} />
+    <Card title="Master data" actions={canEdit && <Button size="sm" disabled={!Object.keys(patch).length} onClick={() => m.mutate()}>Save</Button>}>
       <div className="grid gap-3 md:grid-cols-3">
-        <Field label="Name"><Input defaultValue={p.name} disabled={!can('product.edit')} onChange={(e) => setPatch({ ...patch, name: e.target.value })} /></Field>
-        <Field label="Category"><Select defaultValue={p.category.id} disabled={!can('product.edit')} onChange={(e) => setPatch({ ...patch, categoryId: e.target.value })}>{cats.data?.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</Select></Field>
-        <Field label="Barcode"><Input defaultValue={p.barcode ?? ''} disabled={!can('product.edit')} onChange={(e) => setPatch({ ...patch, barcode: e.target.value || null })} /></Field>
-        <label className="flex items-center gap-2 text-sm"><input type="checkbox" defaultChecked={p.trackExpiry} disabled={!can('product.edit')} onChange={(e) => setPatch({ ...patch, trackExpiry: e.target.checked })} /> Track expiry</label>
-        <label className="flex items-center gap-2 text-sm"><input type="checkbox" defaultChecked={p.franchiseVisible} disabled={!can('product.edit')} onChange={(e) => setPatch({ ...patch, franchiseVisible: e.target.checked })} /> Franchise visible</label>
-        <label className="flex items-center gap-2 text-sm"><input type="checkbox" defaultChecked={p.active} disabled={!can('product.edit')} onChange={(e) => setPatch({ ...patch, active: e.target.checked })} /> Active</label>
-        {p.needsReview && can('product.edit') && <label className="flex items-center gap-2 text-sm"><input type="checkbox" onChange={(e) => setPatch({ ...patch, needsReview: !e.target.checked })} /> Reviewed (clear import flag)</label>}
+        <Field label="Name"><Input defaultValue={p.name} disabled={!canEdit} onChange={(e) => setPatch({ ...patch, name: e.target.value })} /></Field>
+        <Field label="Category"><Select defaultValue={p.category.id} disabled={!canEdit} onChange={(e) => setPatch({ ...patch, categoryId: e.target.value })}>{cats.data?.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</Select></Field>
+        <Field label="Barcode"><Input defaultValue={p.barcode ?? ''} disabled={!canEdit} onChange={(e) => setPatch({ ...patch, barcode: e.target.value || null })} /></Field>
+        <label className="flex items-center gap-2 text-sm"><input type="checkbox" defaultChecked={p.trackExpiry} disabled={!canEdit} onChange={(e) => setPatch({ ...patch, trackExpiry: e.target.checked })} /> Track expiry</label>
+        <label className="flex items-center gap-2 text-sm"><input type="checkbox" defaultChecked={p.franchiseVisible} disabled={!canEdit} onChange={(e) => setPatch({ ...patch, franchiseVisible: e.target.checked })} /> Franchise visible</label>
+        <label className="flex items-center gap-2 text-sm"><input type="checkbox" defaultChecked={p.active} disabled={!canEdit} onChange={(e) => setPatch({ ...patch, active: e.target.checked })} /> Active</label>
+        {p.needsReview && canEdit && <label className="flex items-center gap-2 text-sm"><input type="checkbox" onChange={(e) => setPatch({ ...patch, needsReview: !e.target.checked })} /> Reviewed (clear import flag)</label>}
       </div><ErrorBox error={m.error} />
     </Card>
     <Card title="Prices in effect"><div className="flex flex-wrap gap-3">{Object.entries(p.tierPrices).map(([t, v]) => <div key={t} className="rounded border px-3 py-2 text-sm"><div className="text-xs text-slate-500">{t}</div><div className="font-medium">{peso(v)}</div></div>)}{can('cost.view') && <div className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm"><div className="text-xs text-slate-500">Standard cost</div><div className="font-medium">{p.cost != null ? peso(p.cost) : '—'}</div></div>}</div></Card>
@@ -80,7 +83,11 @@ export function PriceChangesPage() {
 }
 
 export function SuppliersPage() {
-  const { can } = useAuth(); const qc = useQueryClient();
+  const { can, me } = useAuth(); const qc = useQueryClient();
+  const canEdit = me?.roleKey === 'ADMIN' || me?.roleKey === 'HEAD_AUDITOR'; const canDelete = me?.roleKey === 'ADMIN';
+  const [edit, setEdit] = useState<{ id: string; contact: string; termsDays: string } | null>(null); const [info, setInfo] = useState('');
+  const save = useMutation({ mutationFn: () => api.patch(`/api/suppliers/${edit!.id}`, { contact: edit!.contact, termsDays: Number(edit!.termsDays) }), onSuccess: () => { setEdit(null); void qc.invalidateQueries({ queryKey: ['suppliers'] }); } });
+  const del = useMutation({ mutationFn: (id: string) => api.delete<{ message: string }>(`/api/suppliers/${id}`), onSuccess: (r) => { setInfo(r.message); void qc.invalidateQueries({ queryKey: ['suppliers'] }); } });
   const q = useQuery({ queryKey: ['suppliers'], queryFn: () => api.get<{ id: string; code: string; supplierName?: string; contact: string | null; termsDays: number; isConsignor: boolean; active: boolean }[]>('/api/suppliers') });
   const [f, setF] = useState({ name: '', contact: '', termsDays: '30', isConsignor: false });
   const [sent, setSent] = useState('');
@@ -88,7 +95,9 @@ export function SuppliersPage() {
   return <div className="space-y-4"><h1 className="text-xl font-semibold">Suppliers</h1>
     {can('supplier.edit') && <Card title="New supplier"><div className="grid gap-3 md:grid-cols-4"><Field label="Name (Admin/Head Auditor only)"><Input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></Field><Field label="Contact"><Input value={f.contact} onChange={(e) => setF({ ...f, contact: e.target.value })} /></Field><Field label="Terms (days)"><Input type="number" value={f.termsDays} onChange={(e) => setF({ ...f, termsDays: e.target.value })} /></Field><label className="flex items-end gap-2 pb-2 text-sm"><input type="checkbox" checked={f.isConsignor} onChange={(e) => setF({ ...f, isConsignor: e.target.checked })} /> Consignor (consignment-in)</label></div><Button className="mt-3" disabled={!f.name} onClick={() => m.mutate()}>Create</Button><ErrorBox error={m.error} /></Card>}
     {sent && <p className="text-sm text-amber-700">{sent}</p>}<PendingMaster kind="Supplier" label="New suppliers" />
-    <DataTable data={q.data ?? []} columns={[{ header: 'Code', accessorKey: 'code' }, ...(can('supplier.view.name') ? [{ header: 'Name', accessorKey: 'supplierName' }] : []), { header: 'Contact', accessorKey: 'contact' }, { header: 'Terms', accessorKey: 'termsDays' }, { header: '', cell: (c) => c.row.original.isConsignor ? <Badge tone="purple">consignor</Badge> : null }]} />
+    <DataTable data={q.data ?? []} columns={[{ header: 'Code', accessorKey: 'code' }, ...(can('supplier.view.name') ? [{ header: 'Name', accessorKey: 'supplierName' }] : []), { header: 'Contact', accessorKey: 'contact' }, { header: 'Terms', accessorKey: 'termsDays' }, { header: '', cell: (c) => c.row.original.isConsignor ? <Badge tone="purple">consignor</Badge> : null }, { header: 'Status', cell: (c) => c.row.original.active ? null : <Badge>archived</Badge> }, ...(canEdit ? [{ header: 'Actions', cell: (c: { row: { original: { id: string; contact: string | null; termsDays: number; code: string } } }) => <span className="flex gap-2"><button className="text-xs font-semibold text-navy underline" onClick={() => setEdit({ id: c.row.original.id, contact: c.row.original.contact ?? '', termsDays: String(c.row.original.termsDays) })}>Edit</button>{canDelete && <button className="text-xs font-semibold text-brand underline" onClick={() => { if (confirm(`Delete supplier ${c.row.original.code}? If it has deliveries it is archived instead.`)) del.mutate(c.row.original.id); }}>Delete</button>}</span> }] : [])]} />
+    {edit && <Card title="Edit supplier"><div className="flex flex-wrap items-end gap-2"><Field label="Contact"><Input value={edit.contact} onChange={(e) => setEdit({ ...edit, contact: e.target.value })} /></Field><Field label="Terms (days)"><Input type="number" min={0} value={edit.termsDays} onChange={(e) => setEdit({ ...edit, termsDays: e.target.value })} /></Field><Button onClick={() => save.mutate()}>Save</Button><Button variant="ghost" onClick={() => setEdit(null)}>Cancel</Button></div><ErrorBox error={save.error} /></Card>}
+    {info && <p className="text-sm text-emerald-700">{info}</p>}<ErrorBox error={del.error} />
     {!can('supplier.view.name') && <p className="text-xs text-slate-500">Supplier names are visible to Admin, Head Auditor and External Auditor only (§16).</p>}
   </div>;
 }

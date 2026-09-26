@@ -29,6 +29,7 @@ import { UsersPage, AuditLogPage, SettingsPage } from './pages/Admin';
 import { MyHrPage, WeeklyCompliancePage } from './pages/HrExtra';
 import { RevisionsPage } from './pages/Revisions';
 import { HelpPage } from './pages/Help';
+import { BankOfficePage } from './pages/BankOffice';
 import { CashFundPage } from './pages/CashFund';
 import { InspectionDetailPage, InspectionFormPage, InspectionsPage } from './pages/Inspections';
 import { CustomersReportPage, InventoryCostPage } from './pages/ReportsExtra';
@@ -94,6 +95,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
               <Route path="/hr/weekly-counts" element={<WeeklyCompliancePage />} />
               <Route path="/revisions" element={<RevisionsPage />} />
               <Route path="/help" element={<HelpPage />} />
+              <Route path="/bank" element={<BankOfficePage />} />
               <Route path="/cash-fund" element={<CashFundPage />} />
               <Route path="/inspections" element={<InspectionsPage />} />
               <Route path="/inspections/new" element={<InspectionFormPage />} />

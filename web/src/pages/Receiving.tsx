@@ -1,3 +1,4 @@
+import { ApprovalTimeline } from '@/components/ApprovalTimeline';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -53,7 +54,7 @@ export function ReceivingDetailPage() {
   const pending = approvals.data?.find((a) => a.status === 'PENDING');
   const draft = d.status === 'DRAFT';
   return <div className="mx-auto max-w-4xl space-y-4">
-    <div className="flex flex-wrap items-center gap-2"><h1 className="text-xl font-semibold">{d.controlNo}</h1><Badge tone={statusTone(d.status)}>{d.status}</Badge>{d.isConsignmentIn && <Badge tone="purple">consignment-in</Badge>}<span className="ml-auto flex flex-wrap gap-2">{rights.canEdit && !editing && <Button size="sm" onClick={() => { setEditing(true); setMsg(''); }}>{rights.own ? 'Edit draft' : 'Propose edit'}</Button>}<Button size="sm" variant="outline" onClick={() => api.download(`/api/reports/forms/supplier-form/${d.id}.pdf`, `${d.controlNo}${draft ? '-DRAFT' : ''}.pdf`)}>{draft ? 'Print draft' : 'Print'}</Button><Button size="sm" variant="outline" onClick={() => api.download(`/api/reports/forms/supplier-form/${d.id}.xlsx`, `${d.controlNo}${draft ? '-DRAFT' : ''}.xlsx`)}>xlsx</Button></span></div>
+    <div className="flex flex-wrap items-center gap-2"><h1 className="text-xl font-semibold">{d.controlNo}</h1><Badge tone={d.status === 'APPROVED' ? 'amber' : statusTone(d.status)}>{d.status === 'APPROVED' ? 'Cost approved · waiting for the In-Charge' : d.status}</Badge>{d.isConsignmentIn && <Badge tone="purple">consignment-in</Badge>}<span className="ml-auto flex flex-wrap gap-2">{rights.canEdit && !editing && <Button size="sm" onClick={() => { setEditing(true); setMsg(''); }}>{rights.own ? 'Edit draft' : 'Propose edit'}</Button>}<Button size="sm" variant="outline" onClick={() => api.download(`/api/reports/forms/supplier-form/${d.id}.pdf`, `${d.controlNo}${draft ? '-DRAFT' : ''}.pdf`)}>{draft ? 'Print draft' : 'Print'}</Button><Button size="sm" variant="outline" onClick={() => api.download(`/api/reports/forms/supplier-form/${d.id}.xlsx`, `${d.controlNo}${draft ? '-DRAFT' : ''}.xlsx`)}>xlsx</Button></span></div>
     <p className="text-sm text-slate-600">Prepared by <b>{d.preparedByName ?? '—'}</b>{draft ? ' · Draft: check it on paper, edit if needed, then submit.' : ''}</p>
     {msg && <p className="rounded bg-green-50 p-2 text-sm text-green-800">{msg}</p>}
     {editing && <ReceivingEditor doc={d} own={rights.own} preparedByName={d.preparedByName} onClose={(m) => { setEditing(false); if (m) setMsg(m); }} />}
@@ -68,6 +69,7 @@ export function ReceivingDetailPage() {
       <ErrorBox error={submit.error || setCost.error || decide.error} />
     </Card>
     <Attachments type="ReceivingDoc" id={d.id} />
+    <ApprovalTimeline documentType="ReceivingDoc" documentId={d.id} />
     <History entityType="ReceivingDoc" id={d.id} />
   </div>;
 }

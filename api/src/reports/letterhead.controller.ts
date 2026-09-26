@@ -1,7 +1,7 @@
 import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, Post, Put, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { z } from 'zod';
-import { CurrentUser, Audited } from '../common/decorators';
+import { CurrentUser, Audited, Public } from '../common/decorators';
 import { Z } from '../common/zod.pipe';
 import type { SessionUser } from '../common/request-context';
 import { SettingsService } from '../common/settings.service';
@@ -16,7 +16,8 @@ const owner = (u: SessionUser) => { if (u.roleKey !== 'ADMIN') throw new Forbidd
 export class LetterheadController {
   constructor(private settings: SettingsService) {}
   private async current() { return ((await this.settings.get<Letterhead | null>(LETTERHEAD_KEY)) ?? {}) as Letterhead; }
-  @Get() async get() { const l = await this.current(); return { name: l.name || 'Get Wheysted Supplements', address: l.address ?? '', contact: l.contact ?? '', tin: l.tin ?? '', logoDataUrl: l.logoDataUrl ?? null }; }
+  /** Public: the sign-in page shows the company logo too. */
+  @Get() @Public() async get() { const l = await this.current(); return { name: l.name || 'Get Wheysted Supplements', address: l.address ?? '', contact: l.contact ?? '', tin: l.tin ?? '', logoDataUrl: l.logoDataUrl ?? null }; }
   @Put() @Audited('Setting', 'LETTERHEAD') async put(@CurrentUser() u: SessionUser, @Body(Z(Details)) dto: z.infer<typeof Details>) { owner(u); await this.settings.set(LETTERHEAD_KEY, { ...(await this.current()), ...dto }, u.id); return this.get(); }
   @Post('logo') @Audited('Setting', 'LETTERHEAD_LOGO') @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 2 * 1024 * 1024 } }))
   async logo(@CurrentUser() u: SessionUser, @UploadedFile() f?: { buffer: Buffer; mimetype: string }) {

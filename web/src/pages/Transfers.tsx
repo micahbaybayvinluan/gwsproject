@@ -1,3 +1,4 @@
+import { ApprovalTimeline } from '@/components/ApprovalTimeline';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
@@ -8,7 +9,7 @@ import { DataTable } from '@/components/ui/table';
 import { Attachments } from '@/components/Attachments';
 import { CorrectionRequest, EditRequests, History, TransferEditor, useEditRights } from '@/components/DocEdits';
 
-interface Tr { id: string; controlNo: string; docDate: string; status: string; transferType: string; notes: string | null; preparedBy?: string; preparedByName?: string | null; receivedByName?: string | null; fromLocation: { id: string; name: string; type: string }; toLocation: { id: string; name: string; type: string }; lines: { id: string; qtySent: number; qtyReceived: number | null; discrepancyNote: string | null; checkerRemarks: string | null; product: { name: string; sku: string }; batch: { batchNo: string | null; expiryDate: string | null } }[] }
+interface Tr { pendingReceipt?: unknown; id: string; controlNo: string; docDate: string; status: string; transferType: string; notes: string | null; preparedBy?: string; preparedByName?: string | null; receivedByName?: string | null; fromLocation: { id: string; name: string; type: string }; toLocation: { id: string; name: string; type: string }; lines: { id: string; qtySent: number; qtyReceived: number | null; discrepancyNote: string | null; checkerRemarks: string | null; product: { name: string; sku: string }; batch: { batchNo: string | null; expiryDate: string | null } }[] }
 
 /** §7.3 Pull-Out (sender) / Transfer-In (receiver): one document, two views. */
 export function TransfersPage() {
@@ -61,12 +62,12 @@ export function TransferDetailPage() {
   const d = q.data; if (!d) return null;
   const draft = d.status === 'DRAFT'; const sfx = draft ? '-DRAFT' : '';
   const isReceiver = me!.locations.some((l) => l.id === d.toLocation.id) || !me!.locationScoped;
-  const receiving = d.status === 'APPROVED' && isReceiver && can('transfer.confirm');
+  const receiving = d.status === 'APPROVED' && !d.pendingReceipt && isReceiver && can('transfer.confirm');
   const allTicked = d.lines.length > 0 && d.lines.every((l) => recv[l.id]?.checked);
   const lineReady = (l: Tr['lines'][number]) => { const r = recv[l.id]; if (r?.checked) return true; if (!r || r.qty === '') return false; return Number(r.qty) >= l.qtySent || !!r.note.trim(); };
   const setLine = (lineId: string, patch: Partial<{ checked: boolean; qty: string; note: string }>) => setRecv((cur) => ({ ...cur, [lineId]: { ...{ checked: false, qty: '', note: '' }, ...cur[lineId], ...patch } }));
   return <div className="mx-auto max-w-4xl space-y-4">
-    <div className="flex flex-wrap items-center gap-2"><h1 className="text-xl font-semibold">{d.controlNo}</h1><Badge tone={statusTone(d.status)}>{d.status}</Badge><Badge>{d.transferType}</Badge><span className="ml-auto flex flex-wrap gap-2">
+    <div className="flex flex-wrap items-center gap-2"><h1 className="text-xl font-semibold">{d.controlNo}</h1><Badge tone={statusTone(d.status)}>{d.status}</Badge>{!!d.pendingReceipt && <Badge tone="amber">Received · waiting for the In-Charge</Badge>}<Badge>{d.transferType}</Badge><span className="ml-auto flex flex-wrap gap-2">
       {rights.canEdit && !editing && <Button size="sm" onClick={() => { setEditing(true); setMsg(''); }}>{rights.own ? 'Edit draft' : 'Propose edit'}</Button>}
       {isSender && <><Button size="sm" variant="outline" onClick={() => api.download(`/api/reports/forms/pull-out/${d.id}.pdf`, `PullOut-${d.controlNo}${sfx}.pdf`)}>{draft ? 'Print Pull-Out (draft)' : 'Pull-Out form'}</Button><Button size="sm" variant="outline" onClick={() => api.download(`/api/reports/forms/pull-out/${d.id}.xlsx`, `PullOut-${d.controlNo}${sfx}.xlsx`)}>xlsx</Button></>}
       <Button size="sm" variant="outline" onClick={() => api.download(`/api/reports/forms/transfer-in/${d.id}.pdf`, `TransferIn-${d.controlNo}${sfx}.pdf`)}>{draft ? 'Print Transfer-In (draft)' : isSender ? 'Transfer-In form' : 'Transfer-In copy'}</Button>
@@ -93,6 +94,7 @@ export function TransferDetailPage() {
     </Card>
     <Attachments type="TransferDoc" id={d.id} />
     {!draft && d.status !== 'VOIDED' && can('revision.request') && <CorrectionRequest documentType="TransferDoc" documentId={d.id} fields={[{ key: 'notes', label: 'Notes / remarks', current: d.notes }]} />}
+    <ApprovalTimeline documentType="TransferDoc" documentId={d.id} />
     <History entityType="TransferDoc" id={d.id} />
   </div>;
 }

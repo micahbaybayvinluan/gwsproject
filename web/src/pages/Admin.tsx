@@ -1,3 +1,5 @@
+import { useAuth } from '@/lib/auth';
+import { LetterheadSettings } from '@/components/LetterheadSettings';
 import { PendingMaster, pendingMessage } from '@/components/PendingMaster';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
@@ -54,13 +56,14 @@ export function AuditLogPage() {
 
 /** §6.1 thresholds, §7.4 consignment setting, Phase 2 posting switch, session timeouts, attachment rules. */
 export function SettingsPage() {
-  const qc = useQueryClient();
+  const qc = useQueryClient(); const { me } = useAuth();
   const q = useQuery({ queryKey: ['settings'], queryFn: () => api.get<Record<string, unknown>>('/api/settings') });
   const [edits, setEdits] = useState<Record<string, string>>({});
   const save = useMutation({ mutationFn: () => api.put('/api/settings', Object.fromEntries(Object.entries(edits).map(([k, v]) => [k, parse(v)]))), onSuccess: () => { setEdits({}); void qc.invalidateQueries({ queryKey: ['settings'] }); } });
   const parse = (v: string) => { try { return JSON.parse(v); } catch { return v; } };
   const HELP: Record<string, string> = { 'approval.cost_unchanged_auto_hours': 'COST_ON_RECEIVING auto-approves after N hours when every product exists with unchanged cost', 'approval.transfer_internal_auto_max': 'Auto-approve restock transfers from warehouse ≤ ₱X at cost (null = off)', 'approval.transfer_franchise_auto_max': 'Auto-approve transfers to franchise ≤ ₱X (null = off)', 'approval.special_price_auto_discount_pct': 'Discount ≤ N% auto-approved (default 0)', consignment_in_on_balance_sheet: 'false = off-balance-sheet until sold (correct accounting); true = legacy treatment', 'gl.auto_posting_enabled': 'Phase 2 switch: post R1–R14 journal entries automatically', 'gl.ni_allocation_basis': 'REVENUE (pro-rata) or EQUAL', 'attachments.required': 'Required-attachment rules per document type', 'alerts.near_expiry_days': 'Sales of batches expiring within N days show a warning', 'discrepancy.window_days': 'Days before a discrepancy case finalizes into a charge form' };
-  return <div className="space-y-4"><h1 className="text-xl font-semibold">Settings</h1>
+  return <div className="space-y-4">
+    {me?.roleKey === 'ADMIN' && <LetterheadSettings />}<h1 className="text-xl font-semibold">Settings</h1>
     <Card actions={<Button disabled={!Object.keys(edits).length} onClick={() => save.mutate()}>Save</Button>}><table className="w-full text-sm"><tbody>{Object.entries(q.data ?? {}).map(([k, v]) => <tr key={k} className="border-t"><td className="py-2 pr-4 align-top"><div className="font-mono text-xs">{k}</div><div className="text-xs text-slate-500">{HELP[k]}</div></td><td className="py-2"><Input value={edits[k] ?? (typeof v === 'string' ? v : JSON.stringify(v))} onChange={(e) => setEdits({ ...edits, [k]: e.target.value })} /></td></tr>)}</tbody></table><ErrorBox error={save.error} /></Card>
   </div>;
 }

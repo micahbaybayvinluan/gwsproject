@@ -1,3 +1,4 @@
+import { ApprovalTimeline } from '@/components/ApprovalTimeline';
 import { History, CorrectionRequest } from '@/components/DocEdits';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
@@ -110,6 +111,7 @@ export function SaleDetailPage() {
     {!s.voidedAt && (can('sale.void') || can('sale.edit.sameday')) && <Card title="Void / correct"><div className="flex flex-wrap items-end gap-2"><Field label="Reason" className="flex-1"><Input value={reason} onChange={(e) => setReason(e.target.value)} /></Field><Button variant="danger" disabled={!reason} onClick={() => voidM.mutate()}>Void sale</Button>{closedErr && <Button variant="outline" onClick={() => edit.mutate()}>Request post-close void (needs Head + Asst Auditor)</Button>}</div><ErrorBox error={voidM.error} /><ErrorBox error={edit.error} /></Card>}
     {s.voidedAt && <div className="rounded bg-red-50 p-3 text-sm text-red-800">Voided: {s.voidReason}</div>}
     {!s.voidedAt && can('revision.request') && <CorrectionRequest documentType="SalesDoc" documentId={s.id} fields={[{ key: 'drSiNo', label: 'DR/SI number', current: s.drSiNo }, { key: 'customerName', label: 'Customer name', current: s.customerName }, { key: 'deliveryFee', label: 'Delivery fee', current: s.deliveryFee, type: 'number' }, { key: 'shippingFee', label: 'Shipping fee', current: s.shippingFee, type: 'number' }, { key: 'notes', label: 'Notes', current: s.notes }]} />}
+    <ApprovalTimeline documentType="SalesDoc" documentId={s.id} />
     <History entityType="SalesDoc" id={s.id} />
   </div>;
 }

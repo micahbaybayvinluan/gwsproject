@@ -35,6 +35,7 @@ Two-factor codes are switched off for the simulation (`AUTH_TOTP_OPTIONAL=true` 
 | XIII | Accounting Associate | `acct.assoc` | Finance (payroll totals only) | Yes |
 | XIV | HR Staff | `hr.staff` | Payroll & charge forms only | No |
 | XV | Field Auditor | `field.auditor` | Every branch, franchise and the warehouse (inventory only, counts, inspections) | No |
+| XVI | Executive Assistant | `exec.assistant` | Main-office bank accounts, supplier payables, office expenses, balance-sheet accounts | No |
 
 Admin can add more users of any role under **Admin → Users & Roles** (for example a Sales Associate for another branch or a Franchise Owner for Parañaque): username, email, the person's full name, their **company ID number** (required), role, a temporary password, and the branch(es) to assign. At first sign-in that person must set their own password and accept the accountability statement. Users & Roles shows each person's ID, whether they accepted, their last sign-in and recent devices; **Activity** opens everything they did in the Audit Log.
 
@@ -136,6 +137,30 @@ Transfers → "Request stock from the warehouse" → add items → Send. The pul
 
 **30. Help & Guide** — any account, e.g. `sales.westave`, then `hr.staff`
 Menu → Help & Guide. The guide shows only your role's sections: compare `sales.westave` with `hr.staff`. Type a question in Ask (e.g. "How do I request stock from the warehouse?"). Without an AI key you get the matching sections; with a key in `api/.env` (see README → Help & Guide and the AI assistant) you get a written answer with "Read more" links.
+
+**31. Owner approves new products, suppliers and employees** — `head.auditor` or `hr.staff`, then `admin`
+As `head.auditor`: Products → New product → Save. The list shows "Product waiting for the Owner's approval". As `hr.staff`: Payroll & Contributions → Employees → Add employee (same). As `admin`: Approvals → "New master data (Owner approves)" → Approve. The item is created and the person who entered it is notified. Admin's own new items are created at once.
+
+**32. HR creates a user account** — `hr.staff`, then `admin`
+Employees → an approved employee → "Create user account…" → username, role, temporary password, branch → Send. As `admin`: Approvals → Approve. The person can now sign in with that password.
+
+**33. Warehouse In-Charge approval** — `wh.assoc`, then `head.auditor`, then `wh.incharge`
+As `wh.assoc`: Receiving → New → Submit. As `head.auditor`: approve the cost. The receiving shows "Cost approved · waiting for the In-Charge". As `wh.incharge`: Approvals → "Goods into the warehouse" → Approve; only now does stock go up. A transfer out prepared by `wh.assoc` also waits for "Goods out of the warehouse". Repeat as `wh.incharge` yourself: only the cost approval is needed. Warehouse sales need no In-Charge approval.
+
+**34. Visual workflow and price notices** — `sales.westave`, `admin`, `fr.mayon.owner`
+Open any document waiting for approval: the workflow bar shows each step, who must approve and who already did. The dashboard's "My requests" shows the same. As `admin`: Price Changes → change a retail and a franchise price → approve. `sales.westave` sees the retail change under "Price updates"; `fr.mayon.owner` sees only the franchise price. A cost change on receiving shows only for `admin`, `head.auditor`, `ext.auditor` and `acct.head`.
+
+**35. Franchise owner controls** — `fr.mayon.owner`, then `fr.mayon.assoc`
+Franchise Portal → Overview → allow or stop the associate receiving stock. With it on, `fr.mayon.assoc` confirms a delivery and the owner is notified (the associate never sees franchise cost). Staff pay & charges → record a salary for the associate (it becomes a franchise expense) and a charge. Income statement & balance sheet → pick dates. As `fr.mayon.assoc`: My Pay & Charges shows only that person's own pay. `hr.staff` cannot see any of it.
+
+**36. Executive Assistant** — `exec.assistant`
+Bank & Office → Bank entries → choose the bank account, the book (e.g. Advances to), the account, amount and payee → Save; a journal voucher is posted. Supplier payables, Office expenses and Balance sheet accounts are view-only. Reports, cost and branch pages are not in the menu.
+
+**37. Journal edit and deletions** — `acct.head`, then `admin`
+Accounting → Journal Vouchers → open one → Edit entry → change the lines (they must balance) → Save. The voucher's maker and `admin` are notified. As `admin`: Products → delete a product never used (removed) and one already sold (archived instead).
+
+**38. Company letterhead and logo** — `admin`
+Settings → Company letterhead → type the details → Save details. Upload a logo… → slide "Remove the background" until the background is checkered → Use this logo. Print any form: the letterhead is at the top; the sign-in page and menu show the logo.
 
 ## Where the files come out
 

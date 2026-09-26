@@ -1,7 +1,8 @@
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
-import { Bell, Menu, LogOut } from 'lucide-react';
+import { Bell, Menu, LogOut, X } from 'lucide-react';
+import { BrandMark } from '@/components/Brand';
 import { useAuth } from '@/lib/auth';
 import { api } from '@/lib/api';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
@@ -19,7 +20,8 @@ const NAV: { group: string; items: NavItem[] }[] = [
     { to: '/closing', label: 'Daily Close', any: ['sale.create', 'report.sales.own', 'report.sales.all'] },
     { to: '/cash-fund', label: 'Cash Fund', any: ['cashfund.view.all', 'cashfund.use', 'cashfund.manage', 'cashfund.check'] },
     { to: '/inspections', label: 'Store Inspections', any: ['inspection.create', 'inspection.view', 'inspection.review'] },
-    { to: '/my-hr', label: 'My Pay & Charges', hideFor: ['ADMIN'] },
+    { to: '/bank', label: 'Bank & Office', any: ['bank.entry'] },
+    { to: '/my-hr', label: 'My Pay & Charges', hideFor: ['ADMIN', 'FRANCHISE_OWNER'] },
   ] },
   { group: 'Inventory', items: [
     { to: '/stock', label: 'Stock on Hand', any: ['report.inventory.own', 'report.inventory.all'] },
@@ -67,25 +69,35 @@ const NAV: { group: string; items: NavItem[] }[] = [
   ] },
 ];
 
+const ROLE_LABEL = (k?: string) => (k ?? '').replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
+const initials = (n?: string) => (n ?? '?').split(/\s+/).filter((w) => /^[A-Za-z]/.test(w)).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
+
 export function Layout() {
   const { me, logout, canAny } = useAuth(); const nav = useNavigate(); const { pathname } = useLocation(); const [open, setOpen] = useState(false);
   const unread = useQuery({ queryKey: ['unread'], queryFn: () => api.get<{ count: number }>('/api/notifications/unread-count'), refetchInterval: 30000 });
   const approvals = useQuery({ queryKey: ['approvals-count'], queryFn: () => api.get<{ count: number }>('/api/approvals/inbox').then((r) => ({ count: r.count })), refetchInterval: 30000, enabled: !!me });
   const groups = NAV.map((g) => ({ ...g, items: g.items.filter((i) => (!i.any || canAny(...i.any)) && !(i.hideFor?.includes(me?.roleKey ?? ''))) })).filter((g) => g.items.length);
   return <div className="flex min-h-full">
-    <aside className={cn('fixed inset-y-0 left-0 z-30 w-64 transform overflow-y-auto border-r border-slate-200 bg-slate-900 text-slate-100 transition lg:static lg:translate-x-0', open ? 'translate-x-0' : '-translate-x-full')}>
-      <div className="flex items-center justify-between px-4 py-4"><div><div className="text-lg font-bold">GWS-ERP</div><div className="text-xs text-slate-400">Get Wheysted Supplements</div></div><button className="lg:hidden" onClick={() => setOpen(false)} aria-label="Close menu">✕</button></div>
-      <nav className="px-2 pb-6">{groups.map((g) => <div key={g.group} className="mb-3"><div className="px-2 py-1 text-[11px] uppercase tracking-wider text-slate-500">{g.group}</div>{g.items.map((i) => <NavLink key={i.to} to={i.to} end={i.to === '/' || i.to === '/sales'} onClick={() => setOpen(false)} className={({ isActive }) => cn('flex items-center justify-between rounded-md px-2 py-2 text-sm hover:bg-slate-800', isActive && 'bg-brand text-white')}>{i.label}{i.to === '/approvals' && !!approvals.data?.count && <span className="rounded-full bg-amber-400 px-2 text-xs font-semibold text-slate-900">{approvals.data.count}</span>}</NavLink>)}</div>)}</nav>
+    <aside className={cn('fixed inset-y-0 left-0 z-30 flex w-72 transform flex-col border-r border-slate-200/80 bg-white transition-transform duration-200 lg:sticky lg:top-0 lg:h-screen lg:translate-x-0', open ? 'translate-x-0 shadow-2xl' : '-translate-x-full')}>
+      <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4"><BrandMark size="sm" /><button className="rounded-lg p-1 text-slate-500 hover:bg-slate-100 lg:hidden" onClick={() => setOpen(false)} aria-label="Close menu"><X size={18} /></button></div>
+      <nav className="flex-1 overflow-y-auto px-3 py-4">{groups.map((g) => <div key={g.group} className="mb-5">
+        <div className="px-3 pb-1.5 text-[10.5px] font-semibold uppercase tracking-[.14em] text-slate-400">{g.group}</div>
+        {g.items.map((i) => <NavLink key={i.to} to={i.to} end={i.to === '/' || i.to === '/sales'} onClick={() => setOpen(false)} className={({ isActive }) => cn('group relative flex items-center justify-between rounded-xl px-3 py-2 text-[13.5px] font-medium transition-colors', isActive ? 'bg-brand-soft text-brand-dark' : 'text-slate-600 hover:bg-slate-50 hover:text-navy')}>
+          {({ isActive }) => <><span className={cn('absolute left-0 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full bg-brand transition-opacity', isActive ? 'opacity-100' : 'opacity-0')} /><span>{i.label}</span>{i.to === '/approvals' && !!approvals.data?.count && <span className="rounded-full bg-brand px-2 py-0.5 text-[10px] font-bold text-white shadow-sm shadow-brand/30">{approvals.data.count}</span>}</>}
+        </NavLink>)}
+      </div>)}</nav>
+      <div className="border-t border-slate-100 px-5 py-3 text-[11px] text-slate-400">GWS-ERP · Get Wheysted Supplements</div>
     </aside>
-    {open && <div className="fixed inset-0 z-20 bg-black/40 lg:hidden" onClick={() => setOpen(false)} />}
+    {open && <div className="fixed inset-0 z-20 bg-navy/30 backdrop-blur-[2px] lg:hidden" onClick={() => setOpen(false)} />}
     <div className="flex min-w-0 flex-1 flex-col">
-      <header className="sticky top-0 z-10 flex items-center gap-3 border-b border-slate-200 bg-white px-4 py-2">
-        <button className="lg:hidden" onClick={() => setOpen(true)} aria-label="Menu"><Menu /></button>
-        <div className="min-w-0 flex-1 truncate text-sm"><span className="font-medium">{me?.fullName}</span> <span className="text-slate-500">· {me?.roleKey.replace(/_/g, ' ')}{me?.locations.length ? ` · ${me.locations.map((l) => l.name).join(', ')}` : ''}</span></div>
-        <button className="relative" onClick={() => nav('/notifications')} aria-label="Notifications"><Bell />{!!unread.data?.count && <span className="absolute -right-1 -top-1 rounded-full bg-red-600 px-1.5 text-[10px] text-white">{unread.data.count}</span>}</button>
-        <button onClick={logout} aria-label="Sign out" title="Sign out"><LogOut size={20} /></button>
+      <header className="sticky top-0 z-10 flex items-center gap-3 border-b border-slate-200/70 bg-white/85 px-4 py-2.5 backdrop-blur-md lg:px-8">
+        <button className="rounded-lg p-1.5 text-navy hover:bg-slate-100 lg:hidden" onClick={() => setOpen(true)} aria-label="Menu"><Menu /></button>
+        <div className="min-w-0 flex-1 truncate text-sm"><span className="font-semibold text-navy">{me?.fullName}</span> <span className="ml-1 hidden rounded-full bg-silver px-2 py-0.5 text-[11px] font-semibold text-navy-2 sm:inline">{ROLE_LABEL(me?.roleKey)}</span>{me?.locations.length ? <span className="ml-2 hidden text-xs text-slate-500 md:inline">{me.locations.map((l) => l.name).join(', ')}</span> : null}</div>
+        <button className="relative rounded-full p-2 text-navy transition hover:bg-slate-100" onClick={() => nav('/notifications')} aria-label="Notifications"><Bell size={20} />{!!unread.data?.count && <span className="absolute right-0.5 top-0.5 min-w-4 rounded-full bg-brand px-1 text-center text-[10px] font-bold leading-4 text-white ring-2 ring-white">{unread.data.count}</span>}</button>
+        <div className="hidden size-9 place-items-center rounded-full bg-navy text-xs font-bold text-white sm:grid" title={me?.fullName}>{initials(me?.fullName)}</div>
+        <button className="rounded-full p-2 text-slate-500 transition hover:bg-slate-100 hover:text-brand" onClick={logout} aria-label="Sign out" title="Sign out"><LogOut size={19} /></button>
       </header>
-      <main className="flex-1 p-4 lg:p-6"><ErrorBoundary resetKey={pathname}><Outlet /></ErrorBoundary></main>
+      <main className="mx-auto w-full max-w-[1400px] flex-1 p-4 lg:p-8"><ErrorBoundary resetKey={pathname}><Outlet /></ErrorBoundary></main>
     </div>
   </div>;
 }

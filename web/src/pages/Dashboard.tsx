@@ -1,11 +1,12 @@
+import { StepChips, approvalLabel, type TimelineItem } from '@/components/ApprovalTimeline';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, peso } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
-import { Button, Card, Stat, Empty, ErrorBox, Textarea } from '@/components/ui/primitives';
+import { Button, Card, Stat, Empty, ErrorBox, Textarea, Badge, statusTone } from '@/components/ui/primitives';
 
-interface Dash { today: string; unreadNotifications: number; approvals?: { pending: number; oldestDays: number }; todaySales?: { count: number; total: string; byMode: Record<string, string> }; ar?: { open: string; overdue: string }; criticalStock?: { product: { name: string }; location: { name: string }; onHand: number; minQty: number; warehouseAvailable: number }[]; expiring?: { bucket: string; qty: number; valueAtSrp: string; valueAtCost?: string }[]; incomingTransfers?: number; openDiscrepancies?: number; chargeFormsPending?: number; gl?: { vouchersThisMonth: number; lockedPeriods: number }; cashFunds?: CashFunds; discrepancyDeadlines?: Deadline[]; weeklyCount?: Weekly; weeklyCountsMissedLastWeek?: { name: string; branch: string }[]; inspectionsToReview?: number; myCharges?: { toAcknowledge: number; openBalance: string } }
+interface Dash { priceUpdates?: { id: string; product: string; what: string; oldValue: string | null; newValue: string | null; effectiveFrom: string; link: string | null; at: string }[]; myRequests?: TimelineItem[]; today: string; unreadNotifications: number; approvals?: { pending: number; oldestDays: number }; todaySales?: { count: number; total: string; byMode: Record<string, string> }; ar?: { open: string; overdue: string }; criticalStock?: { product: { name: string }; location: { name: string }; onHand: number; minQty: number; warehouseAvailable: number }[]; expiring?: { bucket: string; qty: number; valueAtSrp: string; valueAtCost?: string }[]; incomingTransfers?: number; openDiscrepancies?: number; chargeFormsPending?: number; gl?: { vouchersThisMonth: number; lockedPeriods: number }; cashFunds?: CashFunds; discrepancyDeadlines?: Deadline[]; weeklyCount?: Weekly; weeklyCountsMissedLastWeek?: { name: string; branch: string }[]; inspectionsToReview?: number; myCharges?: { toAcknowledge: number; openBalance: string } }
 interface CashFunds { total: string; imprestTotal: string; funds: { locationId: string; location: string; imprest: string; balance: string; spent: string; lastReplenishedAt: string | null; lastCheck: { at: string; variance: string } | null }[] }
 interface Deadline { caseId: string; caseNo: string | null; countNo: string; location: string; deadline: string; daysLeft: number; shortItems: number; shortUnits: number; explanationPending: boolean }
 interface Weekly { weekStart: string; dueDate: string; daysLeft: number; submitted: boolean; submittedAt: string | null; countId: string | null; draft: boolean }
@@ -17,7 +18,7 @@ export function DashboardPage() {
   const d = q.data;
   if (!d) return <div className="text-slate-500">Loading…</div>;
   return <div className="space-y-6">
-    <h1 className="text-xl font-semibold">Good day, {me?.fullName}</h1>
+    <div className="flex flex-wrap items-end justify-between gap-2"><div><div className="text-xs font-semibold uppercase tracking-[.16em] text-brand">{new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}</div><h1 className="text-2xl font-bold tracking-tight text-navy">Good day, {me?.fullName?.split(/[\s–-]/)[0]}</h1></div></div>
     {d.discrepancyDeadlines?.map((c) => <DeadlineAlert key={c.caseId} c={c} />)}
     {d.weeklyCount && !d.weeklyCount.submitted && <div className="rounded-md border-2 border-red-600 bg-red-50 p-3 text-red-800" data-testid="weekly-count-alarm">
       <p className="text-lg font-bold">Weekly inventory count sheet NOT yet submitted</p>
@@ -44,6 +45,12 @@ export function DashboardPage() {
     <div className="grid gap-4 lg:grid-cols-2">
       {d.criticalStock && <Card title="Critical stock" actions={<Link className="text-sm text-brand underline" to="/expiry">Suggested restock</Link>}>
         {!d.criticalStock.length ? <Empty>No products under minimum.</Empty> : <table className="w-full text-sm"><thead className="text-left text-xs text-slate-500"><tr><th>Product</th><th>Location</th><th className="num">On hand / Min</th><th className="num">WH avail.</th></tr></thead><tbody>{d.criticalStock.map((c, i) => <tr key={i} className="border-t"><td>{c.product.name}</td><td>{c.location.name}</td><td className="num text-red-700">{c.onHand} / {c.minQty}</td><td className="num">{c.warehouseAvailable}</td></tr>)}</tbody></table>}
+      </Card>}
+      {!!d.myRequests?.length && <Card title="My requests" actions={<span className="text-xs text-slate-500">who approved and who is next</span>}>
+        <ul className="divide-y divide-slate-100">{d.myRequests.map((r) => <li key={r.id} className="py-2.5"><div className="flex flex-wrap items-center justify-between gap-2"><Link to={r.link ?? '/'} className="text-sm font-semibold text-navy hover:text-brand">{approvalLabel(r.type)}{r.controlNo ? ` · ${r.controlNo}` : ''}</Link><Badge tone={statusTone(r.status)}>{r.status === 'PENDING' ? 'In progress' : r.status.replace('_', ' ').toLowerCase()}</Badge></div><div className="mt-1.5"><StepChips item={r} /></div></li>)}</ul>
+      </Card>}
+      {!!d.priceUpdates?.length && <Card title="Price updates" actions={<span className="text-xs text-slate-500">last 14 days</span>}>
+        <table className="w-full text-sm"><thead className="text-left text-[11px] uppercase tracking-wide text-slate-500"><tr><th className="pb-1">Product</th><th>What</th><th className="num">Old</th><th className="num">New</th><th className="text-right">From</th></tr></thead><tbody>{d.priceUpdates.map((p) => <tr key={p.id} className="border-t border-slate-100"><td className="py-1.5 font-medium text-navy">{p.product}</td><td className="text-xs text-slate-500">{p.what}</td><td className="num text-slate-400 line-through">{p.oldValue ? peso(p.oldValue) : '—'}</td><td className={`num font-semibold ${Number(p.newValue) > Number(p.oldValue ?? 0) ? 'text-brand-dark' : 'text-emerald-700'}`}>{peso(p.newValue)}</td><td className="text-right text-xs text-slate-500">{p.effectiveFrom}</td></tr>)}</tbody></table>
       </Card>}
       {d.expiring && <Card title="Expiring stock" actions={<Link className="text-sm text-brand underline" to="/expiry">Details</Link>}>
         <div className="grid grid-cols-2 gap-2 md:grid-cols-4">{d.expiring.map((b) => <Stat key={b.bucket} label={BUCKET[b.bucket]} value={b.qty} sub={can('cost.view') && b.valueAtCost !== undefined ? `cost ${peso(b.valueAtCost)}` : `SRP ${peso(b.valueAtSrp)}`} tone={b.bucket === 'EXPIRED' && b.qty ? 'red' : b.bucket === 'LT_1M' && b.qty ? 'amber' : undefined} />)}</div>

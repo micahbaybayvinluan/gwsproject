@@ -1,3 +1,4 @@
+import { ApprovalTimeline } from '@/components/ApprovalTimeline';
 import { History } from '@/components/DocEdits';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
@@ -62,6 +63,7 @@ export function CountDetailPage() {
       {revise.isSuccess && <p className="mt-2 text-sm text-emerald-700">Sent. The Head Auditor decides{d.countType === 'AUDIT' ? '; Admin was notified' : ''}.</p>}
       <ErrorBox error={revise.error} />
     </Card>}
+    <ApprovalTimeline documentType="CountDoc" documentId={d.id} />
     <History entityType="CountDoc" id={d.id} />
   </div>;
 }
@@ -86,6 +88,7 @@ export function DiscrepancyDetailPage() {
     <div className="flex flex-wrap items-center gap-2"><h1 className="text-xl font-semibold">Discrepancy {c.caseNo ?? ''} — {c.countDoc.controlNo} ({c.countDoc.location.name})</h1><Badge tone={statusTone(c.status)}>{c.status}</Badge><span className="ml-auto flex gap-2"><Button size="sm" variant="outline" onClick={() => api.download(`/api/reports/forms/discrepancy/${c.id}.pdf`, `Discrepancy-${c.countDoc.controlNo}.pdf`)}>{c.status === 'FINALIZED' ? 'Final report PDF' : 'Report PDF'}</Button><Button size="sm" variant="outline" onClick={() => api.download(`/api/reports/forms/discrepancy/${c.id}.xlsx`, `Discrepancy-${c.countDoc.controlNo}.xlsx`)}>xlsx</Button></span></div>
     <Card><dl className="grid grid-cols-2 gap-3 text-sm md:grid-cols-4">{[['Count date', fmtDate(c.countDoc.countDate)], ['Deadline (7 days)', fmtDate(c.deadline)], ['Correcting docs linked', `${c.linked?.sales ?? 0} sales · ${c.linked?.transfers ?? 0} transfers`], ['Resolution', c.resolutionNote ?? '—']].map(([k, v]) => <div key={k}><dt className="text-xs uppercase text-slate-500">{k}</dt><dd>{v}</dd></div>)}</dl></Card>
     <Card title="Variances"><table className="w-full text-sm"><thead className="text-left text-xs text-slate-500"><tr><th>SKU</th><th>Name</th><th className="num">System</th><th className="num">Actual</th><th className="num">Variance</th><th>Remarks</th></tr></thead><tbody>{c.variances?.map((v, i) => <tr key={i} className="border-t"><td className="text-xs">{v.product.sku}</td><td>{v.product.name}</td><td className="num">{v.systemQty}</td><td className="num">{v.actualQty}</td><td className={`num ${v.variance < 0 ? 'text-red-700' : 'text-emerald-700'}`}>{v.variance}</td><td>{v.remarks}</td></tr>)}</tbody></table></Card>
+    <ApprovalTimeline documentType="DiscrepancyCase" documentId={c.id} />
     {c.status === 'OPEN' && daysLeft >= 0 && <p className="text-base font-bold text-red-700">{daysLeft} day(s) left before the shortage is charged to the staff on duty.</p>}
     {explanations.length > 0 && <Card title="Explanations">{explanations.map((a, i) => <p key={i} className="text-sm">{a.summary?.explainedBy}: “{a.summary?.explanation}” <Badge tone={statusTone(a.status)}>{a.status === 'PENDING' ? 'waiting for the Head Auditor' : a.status}</Badge></p>)}</Card>}
     {c.status === 'OPEN' && can('discrepancy.explain') && !pendingExplanation && <Card title="Explain this discrepancy">

@@ -10,6 +10,25 @@ interface MyHr { employee: { id: string; employeeNo: string; fullName: string; p
 
 /** "My Pay & Charges": only the signed-in person's own charges (acknowledge in one click), loans/advances and payslips. */
 export function MyHrPage() {
+  const { me } = useAuth();
+  if (me?.roleKey === 'FRANCHISE_SALES_ASSOCIATE') return <FranchiseMyPay />;
+  return <CompanyMyPay />;
+}
+
+/** A franchise associate's own pay and charges, set by their franchise owner (not company HR). */
+function FranchiseMyPay() {
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: ['fr-my-pay'], queryFn: () => api.get<{ salaries: { id: string; periodFrom: string; periodTo: string; basic: string; allowances: string; otherDeductions: string; chargesDeducted: string; netPay: string }[]; charges: { id: string; kind: string; reason: string; amount: string; deducted: boolean; acknowledgedAt: string | null; createdAt: string }[] }>('/api/franchise/my-pay') });
+  const ack = useMutation({ mutationFn: (id: string) => api.post(`/api/franchise/charges/${id}/acknowledge`), onSuccess: () => void qc.invalidateQueries({ queryKey: ['fr-my-pay'] }) });
+  const d = q.data; if (!d) return <p className="text-sm text-slate-500">Loading…</p>;
+  return <div className="mx-auto max-w-4xl space-y-4">
+    <h1 className="text-2xl font-bold tracking-tight text-navy">My Pay & Charges</h1>
+    <Card title="My charges">{!d.charges.length ? <Empty>No charges.</Empty> : <ul className="divide-y divide-slate-100">{d.charges.map((c) => <li key={c.id} className="flex flex-wrap items-center justify-between gap-2 py-2.5 text-sm"><span>{c.reason} <span className="text-xs text-slate-400">{new Date(c.createdAt).toLocaleDateString()}</span></span><span className="flex items-center gap-2"><b className="text-navy">{peso(c.amount)}</b>{c.deducted ? <Badge tone="green">deducted from pay</Badge> : <Badge tone="amber">to be deducted</Badge>}{c.acknowledgedAt ? <Badge tone="blue">acknowledged</Badge> : <Button size="sm" onClick={() => ack.mutate(c.id)}>Acknowledge</Button>}</span></li>)}</ul>}<ErrorBox error={ack.error} /></Card>
+    <Card title="My salary">{!d.salaries.length ? <Empty>No salary recorded yet.</Empty> : <table className="w-full text-sm"><thead className="text-left text-[11px] uppercase tracking-wide text-slate-500"><tr><th>Period</th><th className="num">Basic</th><th className="num">Allowances</th><th className="num">Deductions</th><th className="num">Net pay</th></tr></thead><tbody>{d.salaries.map((x) => <tr key={x.id} className="border-t border-slate-100"><td className="py-1.5">{x.periodFrom} – {x.periodTo}</td><td className="num">{peso(x.basic)}</td><td className="num">{peso(x.allowances)}</td><td className="num text-brand-dark">{peso(Number(x.otherDeductions) + Number(x.chargesDeducted))}</td><td className="num font-bold text-navy">{peso(x.netPay)}</td></tr>)}</tbody></table>}</Card>
+  </div>;
+}
+
+function CompanyMyPay() {
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ['my-hr'], queryFn: () => api.get<MyHr>('/api/me/hr') });
   const ack = useMutation({ mutationFn: (id: string) => api.post(`/api/me/charges/${id}/acknowledge`), onSuccess: () => { void qc.invalidateQueries({ queryKey: ['my-hr'] }); void qc.invalidateQueries({ queryKey: ['dashboard'] }); } });

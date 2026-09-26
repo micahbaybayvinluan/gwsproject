@@ -20,6 +20,7 @@ export const api = {
   post: <T,>(p: string, b?: unknown) => req<T>('POST', p, b),
   put: <T,>(p: string, b?: unknown) => req<T>('PUT', p, b),
   patch: <T,>(p: string, b?: unknown) => req<T>('PATCH', p, b),
+  delete: <T,>(p: string) => req<T>('DELETE', p),
   upload: <T,>(p: string, file: File) => { const f = new FormData(); f.append('file', file); return req<T>('POST', p, undefined, { form: f }); },
   download: async (p: string, fileName: string) => { const blob = await req<Blob>('GET', p, undefined, { raw: true }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = fileName; a.click(); URL.revokeObjectURL(a.href); },
   downloadPost: async (p: string, body: unknown, fileName: string) => { const headers: Record<string, string> = { 'Content-Type': 'application/json' }; if (token) headers.Authorization = `Bearer ${token}`; const res = await fetch(`${BASE}${p}`, { method: 'POST', headers, credentials: 'include', body: JSON.stringify(body) }); const blob = await res.blob(); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = fileName; a.click(); },

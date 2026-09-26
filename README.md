@@ -101,11 +101,12 @@ All seeded users share the password `ChangeMe!2026` (override with `SEED_PASSWOR
 | `acct.assoc` | ACCOUNTING_ASSOCIATE | finance | |
 | `hr.staff` | HR_STAFF | payroll only | |
 | `field.auditor` | FIELD_AUDITOR | All branches, franchises and warehouse (inventory only, no cost) | |
+| `exec.assistant` | EXECUTIVE_ASSISTANT | Main-office bank entries, supplier payables, office expenses, balance-sheet accounts (no cost, no reports) | |
 
 ## Tests
 
 ```bash
-pnpm test          # api: 55 unit tests (redaction per role, posting rules R1–R14, approval routing, importers, sales report builder, daily inventory report)
+pnpm test          # api: unit tests (redaction per role, posting rules R1–R14, approval routing, importers, sales report builder, daily inventory report)
                    #      + 27 end-to-end tests over HTTP against the real DB (receive → cost approve → transfer → confirm → FEFO sale →
                    #        special price → AR/credit note → reports → post-close edit needing Head+Asst → bulk approvals →
                    #        count → discrepancy → charge form → HR → alerts → scoping/redaction → Phase 2 posting, period lock, opening balances →

@@ -1,3 +1,4 @@
+import { BrandMark } from '@/components/Brand';
 import { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api, setToken } from '@/lib/api';
@@ -16,8 +17,18 @@ export function LoginPage() {
     catch (err) { setError(err); } finally { setBusy(false); }
   };
   const submitTotp = async (e: React.FormEvent) => { e.preventDefault(); setBusy(true); setError(null); try { await api.post('/api/auth/totp/verify', { code }); await refresh(); nav('/'); } catch (err) { setError(err); } finally { setBusy(false); } };
-  return <div className="flex min-h-full items-center justify-center bg-slate-100 p-4">
-    <Card className="w-full max-w-sm" title={<span className="text-brand">GWS-ERP</span>}>
+  return <div className="grid min-h-full lg:grid-cols-[1.1fr_1fr]">
+    <div className="relative hidden overflow-hidden bg-navy lg:block">
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_20%_20%,rgba(200,16,46,.55),transparent_55%),radial-gradient(ellipse_at_90%_90%,rgba(200,16,46,.25),transparent_50%)]" />
+      <div className="relative flex h-full flex-col justify-between p-12 text-white">
+        <BrandMark size="lg" light />
+        <div><h1 className="font-[family-name:var(--font-display)] text-5xl font-bold uppercase leading-tight tracking-wide">Stronger stores,<br /><span className="text-[#ff5a6e]">every day.</span></h1><p className="mt-4 max-w-md text-white/70">Sales, stock, approvals, HR and accounting for every Get Wheysted branch and franchise, in one place.</p></div>
+        <div className="text-xs text-white/50">GWS-ERP · Philippines</div>
+      </div>
+    </div>
+    <div className="flex items-center justify-center bg-[#f5f6fa] p-4 sm:p-8">
+    <Card className="w-full max-w-sm" title={<span className="lg:hidden"><BrandMark size="sm" /></span>}>
+      <div className="mb-5 hidden lg:block"><div className="text-2xl font-bold tracking-tight text-navy">Welcome back</div><div className="text-sm text-slate-500">Sign in with your personal account.</div></div>
       {sp.get('replaced') && step === 'creds' && <p className="mb-3 rounded-md border border-amber-300 bg-amber-50 p-2 text-sm text-amber-900">You were signed out because your account was signed in on another device. Accounts are personal: if that was not you, tell the Admin and change your password.</p>}
       {step === 'creds' && <form onSubmit={submitCreds} className="space-y-4" data-testid="login-form">
         <Field label="Username or email"><Input autoFocus value={identifier} onChange={(e) => setIdentifier(e.target.value)} autoComplete="username" name="identifier" /></Field>
@@ -39,5 +50,6 @@ export function LoginPage() {
         <button type="button" className="w-full text-xs text-slate-500 underline" onClick={() => { setToken(null); setStep('creds'); }}>Use a different account</button>
       </form>}
     </Card>
+    </div>
   </div>;
 }

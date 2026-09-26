@@ -207,7 +207,7 @@ Each section below starts with a hidden line that says which roles it is for. Th
 - Download the report as PDF from the report page.
 
 ## Approvals
-<!-- for: approval.act.COST_ON_RECEIVING, approval.act.TRANSFER_INTERNAL, approval.act.TRANSFER_TO_FRANCHISE, approval.act.SPECIAL_PRICE, approval.act.POST_CLOSE_EDIT, approval.act.WRITEOFF, approval.act.PRICE_CHANGE, approval.act.DISCREPANCY_RESOLUTION, approval.act.PERIOD_LOCK, approval.act.COUNT_REVISION, approval.act.AR_PAYMENT, approval.act.DISCREPANCY_EXPLANATION, approval.act.AUDIT_REVISION, approval.act.WAREHOUSE_EDIT -->
+<!-- for: approval.act.COST_ON_RECEIVING, approval.act.TRANSFER_INTERNAL, approval.act.TRANSFER_TO_FRANCHISE, approval.act.SPECIAL_PRICE, approval.act.POST_CLOSE_EDIT, approval.act.WRITEOFF, approval.act.PRICE_CHANGE, approval.act.DISCREPANCY_RESOLUTION, approval.act.PERIOD_LOCK, approval.act.COUNT_REVISION, approval.act.AR_PAYMENT, approval.act.DISCREPANCY_EXPLANATION, approval.act.AUDIT_REVISION, approval.act.WAREHOUSE_EDIT, approval.act.MASTER_DATA_NEW, approval.act.WAREHOUSE_IN, approval.act.WAREHOUSE_OUT -->
 - **Approvals** lists everything waiting for you, grouped by kind. Click a row to see the details, then **Approve** or **Reject** (add a note if needed). Tick several and use **Approve selected** to do many at once.
 - Who approves what:
   - Receiving cost: Head Auditor (auto after 24 hours if the cost is unchanged).
@@ -217,6 +217,70 @@ Each section below starts with a hidden line that says which roles it is for. Th
   - Write-off, discrepancy resolution, count revision, discrepancy explanation, Audit Associate correction: Head Auditor.
   - AR payment entered by a branch: Accounting Associate **or** Accounting Head.
   - Warehouse edit: the person who prepared the document.
+  - New product, supplier, category, customer, agent, rider, branch, account, employee, user account or import file: Admin (Owner).
+  - Stock in or out of the warehouse entered by a Warehouse Associate: the Warehouse In-Charge (after the Head Auditor approves the cost for items received).
+- Each document that needs approval shows a **workflow bar**: every step, who must approve it, and who already did. With two or more approvers you can see that one has approved and the other has not yet.
+
+## Approval workflow and your requests
+<!-- for: all -->
+- Every document that needs approval (sale with special price, transfer, receiving, count, discrepancy case and others) shows a coloured **workflow bar** at the top: green steps are approved, amber steps are waiting, red is rejected, grey was cancelled.
+- Each step names who must approve it (for example "Head Auditor" or "Head Auditor and Asst Auditor") and, once approved, who did it and when.
+- The dashboard card **My requests** lists what you sent and where each one stands. You are notified each time one of your approvers acts, not only at the end.
+
+## New products, suppliers and other main records (Owner approval)
+<!-- for: product.create, employee.manage, user.manage, supplier.view.name -->
+- A new product, supplier, category, customer, agent, rider, branch, account, employee or user account entered by anyone except Admin is **waiting for the Owner**. The list shows it under "Waiting for Owner approval" and it cannot be used yet.
+- Admin sees it under **Approvals → New master data (Owner approves)**, checks the details and approves or rejects. On approval it is created and the person who entered it is notified.
+- Imports of product, employee and similar files work the same way: the file waits for Admin, then loads on approval.
+- Admin's own entries are created at once.
+
+## Editing and deleting products and back-office data
+<!-- for: product.create, master.delete -->
+- Only Admin (Owner) can delete products, suppliers, customers, agents, riders, categories and branches, and only Admin can edit branches and other back-office records.
+- The Head Auditor and Admin can edit products and suppliers.
+- A record that is already used in sales, transfers or other documents cannot be removed; it is **archived** instead (hidden from new forms, history kept).
+
+## Price update notices
+<!-- for: all -->
+- When a selling price changes (price change, new product), the dashboard card **Price updates** shows it, but only for the prices that apply to you. A franchise sees only its franchise price.
+- Changes in supplier **cost** are shown only to the Owner, the Head Auditor, the External Auditor and the Accounting Head.
+
+## HR: new employees and their user accounts
+<!-- for: employee.manage -->
+- **Payroll & Contributions → Employees → Add employee:** the employee waits for Owner approval before payroll can use it.
+- Open an approved employee and press **Create user account…**: username, role, temporary password and branch. The account waits for the Owner (or Admin). The person signs in once it is approved.
+- HR cannot create Admin or External Auditor accounts, and has no access to franchise staff or franchise payroll.
+
+## Warehouse: In-Charge approval of stock in and out
+<!-- for: approval.act.WAREHOUSE_IN, approval.act.WAREHOUSE_OUT, receiving.create -->
+- Stock that a **Warehouse Associate** receives (supplier deliveries, transfers in) or sends out (transfers, pull-outs) is not counted until the **Warehouse In-Charge** approves it.
+- For supplier deliveries the Head Auditor approves the cost first, then the In-Charge approves the receipt. The page shows "Cost approved · waiting for the In-Charge".
+- When the In-Charge enters the document personally, only the Head Auditor's cost approval is needed.
+- Sales from the warehouse do not need In-Charge approval.
+- Quantities on transfers and receivings can never be negative. Negative figures appear only in discrepancy results and pay computations.
+
+## Franchise owner: staff pay, charges and books
+<!-- for: franchise.portal -->
+- **Franchise Portal → Overview:** choose whether your franchise associate may receive stock from GWS. If yes, the associate confirms deliveries and you are notified. If no, only you can confirm. The associate never sees franchise cost.
+- **Staff pay & charges:** record your associates' salaries. Each salary is a franchise expense, visible only to you; each associate sees only their own pay under **My Pay & Charges**. Create charges for your own staff and branch here. GWS HR has no access to them.
+- **Income statement & balance sheet:** generate them for your branch only, separate from the other GWS branches.
+
+## Bank & Office (Executive Assistant)
+<!-- for: bank.entry -->
+- **Bank & Office → Bank entries:** choose the bank account, the book (advances to, advances from, supplier payables, office expense, receivables, fixed asset, equity or bank transfer), the account, the amount and the description, then save. A journal voucher is posted.
+- **Supplier payables** lists unpaid supplier bills (amounts only, no product cost). **Office expenses** lists main-office expenses.
+- **Balance sheet accounts** shows the balance of each balance sheet account. Branch reports, cost, income and other reports are not available to this role.
+
+## Accounting: editing journal entries
+<!-- for: gl.voucher.edit -->
+- The Accounting Head and the Accounting Associate can open a journal voucher and press **Edit entry** to change the lines. Debits and credits must balance, amounts cannot be negative, and the period must be open.
+- The person who made the voucher, the person who made its source document, and Admin (Owner) are notified. Every change is kept in the Revision Log.
+
+## Company letterhead and logo (Admin)
+<!-- for: user.manage -->
+- **Settings → Company letterhead:** type the company name, address, contact and TIN, then upload the logo (PNG, JPG, WEBP or SVG, up to 2 MB).
+- Use the **Remove the background** slider to cut away a plain background around the logo; the checkered preview shows the result; press **Use this logo** to save it.
+- The logo and details appear at the top of every printed form and PDF, on the sign-in page and in the menu.
 
 ## Corrections by the Audit Associate and the Revision Log
 <!-- for: revision.request, revision.view -->

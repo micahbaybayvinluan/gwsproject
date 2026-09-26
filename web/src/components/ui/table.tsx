@@ -16,14 +16,14 @@ export function DataTable<T>({ columns, data, exportName, onRowClick, selectable
   const flat = () => data.map((r) => Object.fromEntries(Object.entries(r as Record<string, unknown>).filter(([, v]) => typeof v !== 'object' || v === null)));
   return <div>
     {exportName && <div className="mb-2 flex justify-end gap-2"><Button size="sm" variant="outline" onClick={() => api.downloadPost('/api/reports/export.xlsx', { name: exportName, rows: flat() }, `${exportName}.xlsx`)}>Export xlsx</Button><Button size="sm" variant="outline" onClick={() => api.downloadPost('/api/reports/export.csv', { name: exportName, rows: flat() }, `${exportName}.csv`)}>CSV</Button></div>}
-    <div className="overflow-x-auto rounded-md border border-slate-200 bg-white">
+    <div className="overflow-x-auto rounded-2xl border border-slate-200/80 bg-white shadow-[0_1px_2px_rgba(11,31,58,.04)]">
       <table className="w-full text-sm">
-        <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+        <thead className="border-b border-slate-200 bg-slate-50/70 text-left text-[11px] uppercase tracking-[.06em] text-slate-500">
           {table.getHeaderGroups().map((hg) => <tr key={hg.id}>{selectable && <th className="w-8 px-3 py-2"><input type="checkbox" checked={!!allSelected} onChange={toggleAll} aria-label="Select all" /></th>}{hg.headers.map((h) => <th key={h.id} className="cursor-pointer select-none px-3 py-2 font-medium" onClick={h.column.getToggleSortingHandler()}>{flexRender(h.column.columnDef.header, h.getContext())}{{ asc: ' ▲', desc: ' ▼' }[h.column.getIsSorted() as string] ?? ''}</th>)}</tr>)}
         </thead>
         <tbody>
           {rows.length === 0 && <tr><td colSpan={cols.length + 1}><Empty /></td></tr>}
-          {rows.map((r) => <tr key={r.id} className={onRowClick ? 'cursor-pointer hover:bg-slate-50' : ''} onClick={() => onRowClick?.(r.original)}>{selectable && <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={!!selected?.has(r.id)} onChange={() => { const n = new Set(selected); n.has(r.id) ? n.delete(r.id) : n.add(r.id); onSelectedChange?.(n); }} /></td>}{r.getVisibleCells().map((c) => <td key={c.id} className="px-3 py-2 align-top">{flexRender(c.column.columnDef.cell, c.getContext())}</td>)}</tr>)}
+          {rows.map((r) => <tr key={r.id} className={`border-t border-slate-100 transition-colors ${onRowClick ? 'cursor-pointer hover:bg-brand-soft/40' : 'hover:bg-slate-50/60'}`} onClick={() => onRowClick?.(r.original)}>{selectable && <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={!!selected?.has(r.id)} onChange={() => { const n = new Set(selected); n.has(r.id) ? n.delete(r.id) : n.add(r.id); onSelectedChange?.(n); }} /></td>}{r.getVisibleCells().map((c) => <td key={c.id} className="px-3 py-2 align-top">{flexRender(c.column.columnDef.cell, c.getContext())}</td>)}</tr>)}
         </tbody>
         {footer && <tfoot className="bg-slate-50 font-medium">{footer}</tfoot>}
       </table>

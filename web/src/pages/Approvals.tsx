@@ -7,7 +7,7 @@ import { Badge, Button, Card, Empty, ErrorBox, Input, statusTone } from '@/compo
 
 interface Req { id: string; type: string; documentType: string; documentId: string; requestedBy: string; requesterName: string; requiredApproverRoles: string[]; anyOf: boolean; status: string; summary: Record<string, unknown> | null; autoApproveAt: string | null; createdAt: string; decisions: { roleKey: string; decision: string; note: string | null; user: { fullName: string } }[] }
 const LINKS: Record<string, string> = { ReceivingDoc: '/receiving', TransferDoc: '/transfers', SalesDoc: '/sales', ExpiryWriteoffDoc: '/writeoffs', PriceChangeDoc: '/price-changes', CountDoc: '/counts', DiscrepancyCase: '/discrepancies', PostCloseEdit: '/closing', Payment: '/ar' };
-const TYPE_LABEL: Record<string, string> = { AUDIT_REVISION: 'Audit Associate correction (Head Auditor only)', AR_PAYMENT: 'AR payment entered by branch', COUNT_REVISION: 'Count sheet revision', DISCREPANCY_EXPLANATION: 'Discrepancy explanation', WAREHOUSE_EDIT: 'Edit of your warehouse document' };
+const TYPE_LABEL: Record<string, string> = { AUDIT_REVISION: 'Audit Associate correction (Head Auditor only)', AR_PAYMENT: 'AR payment entered by branch', COUNT_REVISION: 'Count sheet revision', DISCREPANCY_EXPLANATION: 'Discrepancy explanation', WAREHOUSE_EDIT: 'Edit of your warehouse document', MASTER_DATA_NEW: 'New master data (Owner approves)', WAREHOUSE_IN: 'Goods into the warehouse (In-Charge approves)', WAREHOUSE_OUT: 'Goods out of the warehouse (In-Charge approves)' };
 
 /** §6.2 Approvals inbox: grouped by type, newest first, select-all + bulk approve/reject with one note, inline expand. */
 export function ApprovalsPage() {

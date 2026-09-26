@@ -1,3 +1,5 @@
+import { NotificationsService } from '../notifications/notifications.service';
+import { RevisionsService } from '../revisions/revisions.service';
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { Book, Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
@@ -13,7 +15,7 @@ import { requestContext } from '../common/request-context';
 /** §10.3 Journals, manual vouchers, period lock, beginning balances. */
 @Injectable()
 export class LedgerService implements OnModuleInit {
-  constructor(private prisma: PrismaService, private posting: PostingService, private approvals: ApprovalsService, private audit: AuditService, private settings: SettingsService) {}
+  constructor(private prisma: PrismaService, private posting: PostingService, private approvals: ApprovalsService, private audit: AuditService, private settings: SettingsService, private notify: NotificationsService, private revisions: RevisionsService) {}
 
   onModuleInit() {
     this.approvals.register('PERIOD_LOCK', (req, outcome) => this.onPeriodDecision(req.documentId, outcome, true));
@@ -41,6 +43,56 @@ export class LedgerService implements OnModuleInit {
     await this.audit.log({ action: 'CREATE', entityType: 'JournalVoucher', entityId: v.id, after: v });
     return v;
   }
+  /**
+   * Accounting Head / Associate edit a journal entry in an open period (owner request 2026-09-26): the lines must still balance;
+   * the before/after is kept; the person who made the entry, the person who made its source document and the Owner are notified,
+   * and the change is written to the revision log.
+   */
+  async edit(id: string, input: { reason: string; date?: string; reference?: string | null; remarks?: string | null; name?: string | null; lines?: { accountId: string; debit?: number; credit?: number; memo?: string }[] }, user: SessionUser) {
+    const before = await this.voucher(id);
+    if (before.voidedAt) throw new BadRequestException('This entry is voided');
+    if (before.voucherNo.startsWith('OB-')) throw new BadRequestException('Opening balances are changed through Periods & Opening');
+    await this.posting.assertPeriodOpen(null, before.date);
+    const date = input.date ? toDateOnly(input.date) : before.date;
+    if (input.date) await this.posting.assertPeriodOpen(null, date);
+    if (input.lines) {
+      if (input.lines.some((l) => (l.debit ?? 0) < 0 || (l.credit ?? 0) < 0)) throw new BadRequestException('Use the other column instead of a negative amount');
+      const dr = input.lines.reduce((s, l) => s.plus(l.debit ?? 0), ZERO); const cr = input.lines.reduce((s, l) => s.plus(l.credit ?? 0), ZERO);
+      if (!dr.equals(cr) || dr.isZero()) throw new BadRequestException(`Lines must balance (Dr ${dr} vs Cr ${cr})`);
+    }
+    const after = await this.prisma.db.$transaction(async (tx) => {
+      if (input.lines) {
+        await tx.journalLine.deleteMany({ where: { voucherId: id } });
+        await tx.journalLine.createMany({ data: input.lines.map((l, i) => ({ voucherId: id, lineNo: i + 1, accountId: l.accountId, debit: D(l.debit ?? 0).toFixed(2), credit: D(l.credit ?? 0).toFixed(2), memo: l.memo })) });
+      }
+      return tx.journalVoucher.update({ where: { id }, data: { date, reference: input.reference === undefined ? undefined : input.reference, remarks: input.remarks === undefined ? undefined : input.remarks, name: input.name === undefined ? undefined : input.name }, include: { lines: { include: { account: true }, orderBy: { lineNo: 'asc' } } } });
+    });
+    const summary = (v: typeof before) => ({ date: v.date.toISOString().slice(0, 10), reference: v.reference, remarks: v.remarks, name: v.name, lines: v.lines.map((l) => `${l.account.code} ${l.account.title}: Dr ${l.debit} Cr ${l.credit}`) });
+    await this.audit.log({ action: 'EDIT', entityType: 'JournalVoucher', entityId: id, before: summary(before), after: { ...summary(after), reason: input.reason } });
+    // who is involved: the entry's author and the author of its source document
+    const involved = new Set<string>(); if (before.createdBy) involved.add(before.createdBy);
+    const src = await this.sourceCreator(before.sourceDocumentType, before.sourceDocumentId); if (src) involved.add(src);
+    involved.delete(user.id);
+    const msg = { type: 'JOURNAL_EDITED', title: `${user.fullName} edited journal entry ${before.voucherNo}`, body: input.reason, link: '/accounting/vouchers' };
+    await this.notify.toUsers([...involved], msg);
+    await this.notify.toRoles(['ADMIN'], msg);
+    await this.revisions.record({ source: 'ACCOUNTING_EDIT', documentType: 'JournalVoucher', documentId: id, controlNo: before.voucherNo, staffUserId: src ?? before.createdBy, requestedBy: user.id, approvedBy: user.id, reason: input.reason, changes: { before: summary(before), after: summary(after) }, link: '/accounting/vouchers' });
+    return after;
+  }
+  private async sourceCreator(type: string | null, id: string | null): Promise<string | null> {
+    if (!type || !id) return null;
+    const db = this.prisma.db;
+    const pick = (r: { createdBy?: string | null; preparedBy?: string | null } | null) => r?.createdBy ?? r?.preparedBy ?? null;
+    switch (type) {
+      case 'SalesDoc': return pick(await db.salesDoc.findUnique({ where: { id }, select: { createdBy: true } }));
+      case 'ExpenseDoc': return pick(await db.expenseDoc.findUnique({ where: { id }, select: { createdBy: true } }));
+      case 'ReceivingDoc': return pick(await db.receivingDoc.findUnique({ where: { id }, select: { preparedBy: true, createdBy: true } }));
+      case 'TransferDoc': return pick(await db.transferDoc.findUnique({ where: { id }, select: { preparedBy: true, createdBy: true } }));
+      case 'Payment': return pick(await db.payment.findUnique({ where: { id }, select: { createdBy: true } }));
+      default: return null;
+    }
+  }
+
   async reverse(id: string, reason: string, user: SessionUser) {
     const v = await this.voucher(id);
     const date = todayManila();

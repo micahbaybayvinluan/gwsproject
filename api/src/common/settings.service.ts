@@ -39,7 +39,8 @@ export class SettingsService {
   async all() {
     const rows = await this.prisma.db.setting.findMany();
     const out: Record<string, unknown> = { ...SETTING_DEFAULTS };
-    for (const r of rows) out[r.key] = r.value;
+    // the letterhead (with its logo image) has its own screen
+    for (const r of rows) if (r.key !== 'company.letterhead') out[r.key] = r.value;
     return out;
   }
 }

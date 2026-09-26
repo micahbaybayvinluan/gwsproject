@@ -21,7 +21,7 @@ export class UsersController {
   @Get('permission-keys') keys() { return this.users.permissionKeys(); }
   @Get(':id') get(@Param('id') id: string) { return this.users.get(id); }
   @Get(':id/logins') logins(@Param('id') id: string) { return this.users.logins(id); }
-  @Post() @Audited('User', 'CREATE') create(@Body(Z(CreateUser)) dto: z.infer<typeof CreateUser>, @CurrentUser() u: SessionUser) { return this.users.create(dto, u.id); }
+  @Post() @Audited('User', 'CREATE') create(@Body(Z(CreateUser)) dto: z.infer<typeof CreateUser>, @CurrentUser() u: SessionUser) { return this.users.createGated(dto, u); }
   @Patch(':id') @Audited('User', 'UPDATE') update(@Param('id') id: string, @Body(Z(UpdateUser)) dto: z.infer<typeof UpdateUser>, @CurrentUser() u: SessionUser) { return this.users.update(id, dto, u.id); }
   @Put(':id/overrides') @Audited('User', 'PERMISSION_CHANGE') overrides(@Param('id') id: string, @Body(Z(Overrides)) dto: z.infer<typeof Overrides>, @CurrentUser() u: SessionUser) { return this.users.setOverrides(id, dto.overrides, u.id); }
 }
@@ -44,4 +44,14 @@ export class AuditLogController {
       include: { user: { select: { username: true, fullName: true, idNumber: true, role: { select: { name: true } } } } }, orderBy: { at: 'desc' }, take: Math.min(Number(take) || 200, 1000),
     });
   }
+}
+
+const HrAccount = z.object({ username: z.string().trim().min(3), email: z.string().email(), roleKey: z.string(), password: z.string().min(10), locationIds: z.array(z.string().uuid()).optional() });
+
+/** HR opens user accounts for employees; the Owner approves (owner request 2026-09-26). */
+@Controller('api/hr/employees')
+export class HrAccountsController {
+  constructor(private users: UsersService) {}
+  @Get('roles') @RequirePermission('employee.manage') roles() { return this.users.roles().then((r) => (r as { key: string; name: string }[]).filter((x) => !['ADMIN', 'EXTERNAL_AUDITOR'].includes(x.key)).map((x) => ({ key: x.key, name: x.name }))); }
+  @Post(':id/account') @RequirePermission('employee.manage') @Audited('User', 'REQUEST_ACCOUNT') account(@Param('id') id: string, @Body(Z(HrAccount)) dto: z.infer<typeof HrAccount>, @CurrentUser() u: SessionUser) { return this.users.requestAccountForEmployee(id, dto, u); }
 }

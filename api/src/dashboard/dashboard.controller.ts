@@ -1,4 +1,6 @@
-import { BadRequestException, Body, Controller, Get, Put, Query } from '@nestjs/common';
+import { requestContext } from '../common/request-context';
+import { PriceUpdatesService } from '../notifications/price-updates.service';
+import { BadRequestException, ForbiddenException, Body, Controller, Get, Put, Query } from '@nestjs/common';
 import { PrismaService } from '../common/prisma.service';
 import { ApprovalsService } from '../approvals/approvals.service';
 import { AlertsService } from '../alerts/alerts.service';
@@ -16,7 +18,7 @@ import { D, ZERO } from '../common/money';
 /** Role dashboards (§20.14), franchise portal (§8.7), Admin settings (§6.1 thresholds etc.). */
 @Controller('api')
 export class DashboardController {
-  constructor(private prisma: PrismaService, private approvals: ApprovalsService, private alerts: AlertsService, private notify: NotificationsService, private settings: SettingsService, private master: MasterService, private fin: FinReportsService, private cashFund: CashFundService, private counts: CountsService) {}
+  constructor(private prisma: PrismaService, private approvals: ApprovalsService, private alerts: AlertsService, private notify: NotificationsService, private settings: SettingsService, private master: MasterService, private fin: FinReportsService, private cashFund: CashFundService, private counts: CountsService, private priceUpdates: PriceUpdatesService) {}
 
   @Get('dashboard') @RequirePermission('dashboard.view')
   async dashboard(@CurrentUser() u: SessionUser) {
@@ -60,6 +62,10 @@ export class DashboardController {
     const emp = await this.prisma.db.employee.findUnique({ where: { userId: u.id }, select: { id: true } });
     if (emp) { const al = await this.prisma.db.chargeFormAllocation.findMany({ where: { employeeId: emp.id }, select: { amount: true, deductedToDate: true, acknowledgedAt: true } }); out.myCharges = { toAcknowledge: al.filter((a) => !a.acknowledgedAt).length, openBalance: al.reduce((t, a) => t.plus(a.amount).minus(a.deductedToDate), ZERO) }; }
     if (u.permissions.has('gl.view')) { const y = today.getUTCFullYear(); out.gl = { vouchersThisMonth: await this.prisma.db.journalVoucher.count({ where: { voidedAt: null, date: { gte: new Date(Date.UTC(y, today.getUTCMonth(), 1)) } } }), lockedPeriods: await this.prisma.db.accountingPeriod.count({ where: { year: y, locked: true } }) }; }
+    // price changes this person uses (supplier cost only for Owner, Head Auditor, External Auditor, Accounting Head)
+    out.priceUpdates = await this.priceUpdates.recentFor(u);
+    // the person's own requests and how far each got in its approval
+    out.myRequests = (await this.approvals.mine(u.id)).slice(0, 8);
     return out;
   }
 
@@ -74,14 +80,16 @@ export class DashboardController {
     const sales = await this.prisma.db.salesDoc.aggregate({ where: { locationId, docDate: today, voidedAt: null }, _sum: { grandTotal: true }, _count: true });
     // what they owe GWS = open AR on the franchise customer (transfers from warehouse at franchise cost + any AR sales)
     const cust = await this.prisma.db.customer.findFirst({ where: { locationId, type: 'FRANCHISE' } });
-    const owed = cust ? await this.prisma.db.salesDoc.aggregate({ where: { customerId: cust.id, voidedAt: null }, _sum: { grandTotal: true, amountPaid: true } }) : null;
+    // what the franchise owes GWS sits on GWS invoices (warehouse locations): the owner only, read outside the branch scope
+    const owed = cust && u.roleKey === 'FRANCHISE_OWNER' ? await requestContext.runSystem(async () => await this.prisma.db.salesDoc.aggregate({ where: { customerId: cust.id, voidedAt: null }, _sum: { grandTotal: true, amountPaid: true } })) : null;
     const transfersIn = await this.prisma.db.transferLine.findMany({ where: { doc: { toLocationId: locationId, status: { in: ['RECEIVED', 'RESOLVED'] } }, qtyReceived: { gt: 0 } }, include: { doc: { select: { docDate: true } } } });
     let transferValue = ZERO; for (const t of transfersIn) transferValue = transferValue.plus(D(await this.master.priceFor(t.productId, 'FRANCHISE', t.doc.docDate) ?? 0).mul(t.qtyReceived!));
-    return { franchise: loc, stockLines: stock.length, stockUnits: stock.reduce((s, x) => s + (x._sum.qty ?? 0), 0), incoming: incoming.map((t) => ({ id: t.id, controlNo: t.controlNo, from: t.fromLocation.name, lines: t.lines.length })), todaySales: { count: sales._count, total: sales._sum.grandTotal ?? ZERO }, arToWarehouse: { openInvoices: D(owed?._sum.grandTotal).minus(D(owed?._sum.amountPaid)), transfersAtFranchiseCost: transferValue }, expiring: (await this.alerts.expiring(u, locationId)).summary };
+    return { franchise: loc, stockLines: stock.length, stockUnits: stock.reduce((s, x) => s + (x._sum.qty ?? 0), 0), incoming: incoming.map((t) => ({ id: t.id, controlNo: t.controlNo, from: t.fromLocation.name, lines: t.lines.length })), todaySales: { count: sales._count, total: sales._sum.grandTotal ?? ZERO }, arToWarehouse: u.roleKey === 'FRANCHISE_OWNER' ? { openInvoices: D(owed?._sum.grandTotal).minus(D(owed?._sum.amountPaid)), transfersAtFranchiseCost: transferValue } : null, isOwner: u.roleKey === 'FRANCHISE_OWNER', associateReceives: loc.franchiseAssociateReceives, expiring: (await this.alerts.expiring(u, locationId)).summary };
   }
   /** §8.7 Franchise Income Statement = Sales (their retail) − COGS at franchise cost − their expenses. */
   @Get('franchise/pnl') @RequirePermission('franchise.pnl')
   async pnl(@CurrentUser() u: SessionUser, @Query('from') from: string, @Query('to') to: string) {
+    if (u.roleKey !== 'FRANCHISE_OWNER') throw new ForbiddenException('Only the franchise owner sees the franchise income statement');
     const locationId = u.locationIds[0]; const f = toDateOnly(from), t = toDateOnly(to);
     const lines = await this.prisma.db.salesLine.findMany({ where: { doc: { locationId, voidedAt: null, docDate: { gte: f, lte: t } } }, include: { doc: { select: { docDate: true, deliveryFee: true, shippingFee: true } } } });
     let sales = ZERO, cogs = ZERO;

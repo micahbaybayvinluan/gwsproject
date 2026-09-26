@@ -29,10 +29,11 @@ import { CashFundModule } from './cashfund/cashfund.module';
 import { InspectionsModule } from './inspections/inspections.module';
 
 import { HelpModule } from './help/help.module';
+import { FranchiseModule } from './franchise/franchise.module';
 @Module({
   imports: [
     CommonModule, ChargesModule, RevisionsModule, AuthModule, UsersModule, MasterModule, StockModule, NotificationsModule, ApprovalsModule, AttachmentsModule, GlModule,
-    ReceivingModule, TransfersModule, PricingModule, ClosingModule, SalesModule, ExpensesModule, AlertsModule, CountsModule, ReportsModule, ImportsModule, PayrollModule, DashboardModule, JobsModule, EditsModule, CashFundModule, InspectionsModule, HelpModule,
+    ReceivingModule, TransfersModule, PricingModule, ClosingModule, SalesModule, ExpensesModule, AlertsModule, CountsModule, ReportsModule, ImportsModule, PayrollModule, DashboardModule, JobsModule, EditsModule, CashFundModule, InspectionsModule, HelpModule, FranchiseModule,
   ],
   controllers: [HealthController],
 })

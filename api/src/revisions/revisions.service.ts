@@ -4,8 +4,8 @@ import { PrismaService } from '../common/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { dateStr, toDateOnly } from '../common/manila';
 
-export type RevisionSource = 'AUDIT_REVISION' | 'POST_CLOSE_EDIT' | 'WAREHOUSE_EDIT' | 'COUNT_REVISION';
-const SOURCE_LABEL: Record<string, string> = { AUDIT_REVISION: 'Audit revision (Audit Associate → Head Auditor)', POST_CLOSE_EDIT: 'Post-close edit', WAREHOUSE_EDIT: 'Warehouse edit (In-Charge, accepted by preparer)', COUNT_REVISION: 'Count sheet revision' };
+export type RevisionSource = 'AUDIT_REVISION' | 'POST_CLOSE_EDIT' | 'WAREHOUSE_EDIT' | 'COUNT_REVISION' | 'ACCOUNTING_EDIT';
+const SOURCE_LABEL: Record<string, string> = { AUDIT_REVISION: 'Audit revision (Audit Associate → Head Auditor)', POST_CLOSE_EDIT: 'Post-close edit', WAREHOUSE_EDIT: 'Warehouse edit (In-Charge, accepted by preparer)', COUNT_REVISION: 'Count sheet revision', ACCOUNTING_EDIT: 'Journal entry edited by Accounting' };
 
 /** Revision log (owner request 2026-09-26): every approved correction is recorded against the person whose document it was. */
 @Injectable()

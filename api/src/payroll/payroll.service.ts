@@ -1,3 +1,4 @@
+import { MasterDataApprovals } from '../approvals/master-data.service';
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
@@ -15,11 +16,15 @@ import Decimal from 'decimal.js';
 /** §11 Payroll & HR. Per-employee lines visible to HR_STAFF / ACCOUNTING_HEAD / EXTERNAL_AUDITOR / ADMIN; others see totals only. */
 @Injectable()
 export class PayrollService {
-  constructor(private prisma: PrismaService, private posting: PostingService, private accounts: AccountsService, private notify: NotificationsService, private audit: AuditService) {}
+  constructor(private prisma: PrismaService, private posting: PostingService, private accounts: AccountsService, private notify: NotificationsService, private audit: AuditService, md: MasterDataApprovals) {
+    md.registerKind('Employee', { label: 'Employee', apply: async (p, by) => this.createEmployee(p as never, await md.sessionUserOf(by)), link: () => '/payroll' });
+  }
 
   // ── Employees ──
   employees(active = true) { return this.prisma.db.employee.findMany({ where: { active }, include: { location: { select: { code: true, name: true } }, loans: { where: { active: true } }, user: { select: { id: true, username: true, fullName: true } } }, orderBy: { fullName: 'asc' } }); }
-  async createEmployee(data: Prisma.EmployeeUncheckedCreateInput, user: SessionUser) { const e = await this.prisma.db.employee.create({ data: { ...data, createdBy: user.id } }); await this.audit.log({ action: 'CREATE', entityType: 'Employee', entityId: e.id, after: e }); return e; }
+  /** Franchise associates are paid by their franchise owner, never by company payroll. */
+  async assertCompanyLocation(locationId?: string | null) { if (locationId) { const loc = await this.prisma.db.location.findUnique({ where: { id: locationId } }); if (loc?.type === 'FRANCHISE') throw new BadRequestException('Franchise associates are paid by their franchise owner (Franchise Portal), not company payroll'); } }
+  async createEmployee(data: Prisma.EmployeeUncheckedCreateInput, user: SessionUser) { await this.assertCompanyLocation(data.locationId as string | null | undefined); const e = await this.prisma.db.employee.create({ data: { ...data, createdBy: user.id } }); await this.audit.log({ action: 'CREATE', entityType: 'Employee', entityId: e.id, after: e }); return e; }
   async updateEmployee(id: string, data: Prisma.EmployeeUncheckedUpdateInput) { const before = await this.prisma.db.employee.findUniqueOrThrow({ where: { id } }); const after = await this.prisma.db.employee.update({ where: { id }, data }); await this.audit.log({ action: 'UPDATE', entityType: 'Employee', entityId: id, before, after }); return after; }
   linkableUsers() { return this.prisma.db.user.findMany({ where: { active: true }, select: { id: true, username: true, fullName: true, idNumber: true, role: { select: { name: true } }, employee: { select: { id: true } } }, orderBy: { fullName: 'asc' } }); }
   addLoan(data: { employeeId: string; kind: string; principal: number; perPeriod: number }) { return this.prisma.db.employeeLoan.create({ data: { ...data, principal: D(data.principal).toFixed(2), balance: D(data.principal).toFixed(2), perPeriod: D(data.perPeriod).toFixed(2) } }); }

@@ -26,7 +26,11 @@ export class StockService {
         create: { locationId: r.locationId, productId: r.productId, batchId: r.batchId, qty: r.qtyDelta },
         update: { qty: { increment: r.qtyDelta } },
       });
-      if (bal.qty < 0) throw new BadRequestException(`Insufficient stock for product ${r.productId} (batch ${r.batchId}) at location ${r.locationId}`);
+      if (bal.qty < 0) {
+        // stock may never go negative (owner rule): name the product and place so staff can act
+        const [p, l, b] = await Promise.all([tx.product.findUnique({ where: { id: r.productId }, select: { name: true } }), tx.location.findUnique({ where: { id: r.locationId }, select: { name: true } }), tx.batch.findUnique({ where: { id: r.batchId }, select: { batchNo: true, expiryDate: true } })]);
+        throw new BadRequestException(`Not enough stock: ${p?.name ?? r.productId} at ${l?.name ?? 'this location'}${b?.batchNo || b?.expiryDate ? ` (batch ${b.batchNo ?? ''}${b.expiryDate ? ` exp ${b.expiryDate.toISOString().slice(0, 10)}` : ''})` : ''} would go below zero by ${-bal.qty}. Quantities cannot be negative.`);
+      }
     }
   }
 

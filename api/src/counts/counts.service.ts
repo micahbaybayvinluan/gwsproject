@@ -289,7 +289,7 @@ export class CountsService implements OnModuleInit {
   private hideAllocations<T extends { allocations: unknown[] }>(user: SessionUser, cf: T) { return this.canSeeAllocations(user) ? cf : { ...cf, allocations: [], allocationsHidden: cf.allocations.length }; }
   async chargeForms(user: SessionUser, q: { kind?: string; status?: string } = {}) {
     if (user.roleKey === 'FIELD_AUDITOR') throw new ForbiddenException('The Field Auditor sees inventory only');
-    const rows = await this.prisma.db.chargeForm.findMany({ where: { ...(user.locationScoped ? { locationId: { in: user.locationIds } } : {}), kind: (q.kind || undefined) as never, finalizedByHrAt: q.status === 'OPEN' ? null : q.status === 'FINALIZED' ? { not: null } : undefined }, include: { location: { select: { code: true, name: true } }, allocations: { include: { employee: { select: { fullName: true, employeeNo: true } } } } }, orderBy: { createdAt: 'desc' } });
+    const rows = await this.prisma.db.chargeForm.findMany({ where: { ...(user.locationScoped ? { locationId: { in: user.locationIds } } : {}), ...(user.roleKey === 'HR_STAFF' ? { location: { type: { not: 'FRANCHISE' } } } : {}), kind: (q.kind || undefined) as never, finalizedByHrAt: q.status === 'OPEN' ? null : q.status === 'FINALIZED' ? { not: null } : undefined }, include: { location: { select: { code: true, name: true } }, allocations: { include: { employee: { select: { fullName: true, employeeNo: true } } } } }, orderBy: { createdAt: 'desc' } });
     return rows.map((r) => ({ ...this.hideAllocations(user, r), kindLabel: KIND_LABEL[r.kind] }));
   }
   async chargeForm(id: string, user?: SessionUser) {
@@ -297,6 +297,7 @@ export class CountsService implements OnModuleInit {
     const cf = await this.prisma.db.chargeForm.findUnique({ where: { id }, include: { location: true, lines: { include: { product: { select: { sku: true, name: true } } } }, allocations: { include: { employee: { select: { id: true, employeeNo: true, fullName: true } } } } } });
     if (!cf) throw new NotFoundException();
     if (user?.locationScoped && !user.locationIds.includes(cf.locationId)) throw new ForbiddenException();
+    if (user?.roleKey === 'HR_STAFF' && cf.location.type === 'FRANCHISE') throw new ForbiddenException('Franchise staff charges are handled by the franchise owner');
     const out = { ...cf, kindLabel: KIND_LABEL[cf.kind] };
     return user ? this.hideAllocations(user, out) : out;
   }
@@ -314,6 +315,7 @@ export class CountsService implements OnModuleInit {
   }
   async allocate(id: string, allocations: { employeeId: string; amount: number }[], schedule: { periods: number } | undefined, user: SessionUser) {
     const cf = await this.chargeForm(id);
+    if (cf.location.type === 'FRANCHISE' && user.roleKey !== 'ADMIN') throw new ForbiddenException('Franchise staff charges are assigned by the franchise owner in the Franchise Portal');
     if (cf.finalizedByHrAt) throw new BadRequestException('Charge form already finalized');
     const total = allocations.reduce((s, a) => s.plus(a.amount), ZERO);
     if (!total.equals(cf.totalAmount)) throw new BadRequestException(`Allocations (${total}) must equal total ${cf.totalAmount}`);
@@ -327,6 +329,7 @@ export class CountsService implements OnModuleInit {
   /** HR clicks Finalize: R11 moves the loss to Advances to Employees; payroll deducts it from the next runs; staff are told. */
   async finalize(id: string, user: SessionUser, schedule?: { periods: number }) {
     const cf = await this.chargeForm(id);
+    if (cf.location.type === 'FRANCHISE' && user.roleKey !== 'ADMIN') throw new ForbiddenException('Franchise staff charges are assigned by the franchise owner in the Franchise Portal');
     if (cf.finalizedByHrAt) throw new BadRequestException('Already finalized');
     if (!cf.allocations.length) throw new BadRequestException('Add allocations first');
     const lines = await this.prisma.db.chargeFormLine.findMany({ where: { chargeFormId: id }, include: { product: { include: { category: true } } } });

@@ -3,7 +3,7 @@ import { ApprovalStatus, Prisma } from '@prisma/client';
 import { PrismaService, Tx } from '../common/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AuditService } from '../common/audit.service';
-import { APPROVAL_ROUTING, ApprovalType, RoleKey, editRequestApprovers } from '../common/permissions';
+import { APPROVAL_ROUTING, ApprovalType, ROLE_BY_KEY, RoleKey, editRequestApprovers } from '../common/permissions';
 import type { SessionUser } from '../common/request-context';
 import { requestContext } from '../common/request-context';
 
@@ -20,7 +20,8 @@ export class ApprovalsService {
   private handlers = new Map<string, ApprovalHandler>();
   constructor(private prisma: PrismaService, private notify: NotificationsService, private audit: AuditService) {}
 
-  register(type: ApprovalType, handler: ApprovalHandler) { this.handlers.set(type, handler); }
+  /** One handler per type, or per type + document type when one approval type covers several documents (WAREHOUSE_IN). */
+  register(type: ApprovalType, handler: ApprovalHandler, documentType?: string) { this.handlers.set(documentType ? `${type}:${documentType}` : type, handler); }
 
   async request(input: { type: ApprovalType; documentType: string; documentId: string; requestedBy: string; requesterRole?: RoleKey; summary?: unknown; autoApproveAt?: Date | null; extraRoles?: RoleKey[]; discrepancyCaseId?: string | null; approverUserIds?: string[] }, tx: Tx | null = null) {
     const db = (tx ?? this.prisma.db);
@@ -59,7 +60,48 @@ export class ApprovalsService {
     const byId = new Map(requesters.map((u) => [u.id, u.fullName]));
     return { count: rows.length, oldestDays: oldest, items: rows.map((r) => ({ ...r, requesterName: byId.get(r.requestedBy) ?? r.requestedBy })) };
   }
-  async mine(userId: string) { return this.prisma.db.approvalRequest.findMany({ where: { requestedBy: userId }, include: { decisions: true }, orderBy: { createdAt: 'desc' }, take: 100 }); }
+  /** The requester's own requests with their progress (dashboard: pending, and decided in the last 3 days). */
+  async mine(userId: string) {
+    const rows = await this.prisma.db.approvalRequest.findMany({ where: { requestedBy: userId, OR: [{ status: 'PENDING' }, { decidedAt: { gte: new Date(Date.now() - 3 * 86400000) } }] }, include: { decisions: { include: { user: { select: { fullName: true } } } } }, orderBy: { createdAt: 'desc' }, take: 50 });
+    return this.describe(rows);
+  }
+
+  /** Every approval a document went through, oldest first, as steps for the visual workflow. */
+  async timeline(documentType: string, documentId: string) {
+    const rows = await this.prisma.db.approvalRequest.findMany({ where: { documentType, documentId }, include: { decisions: { include: { user: { select: { fullName: true } } } } }, orderBy: { createdAt: 'asc' } });
+    return this.describe(rows);
+  }
+
+  /** Steps per request: one per required role (all must approve), one shared step (any one of the roles), or one per named person. */
+  async describe(rows: Prisma.ApprovalRequestGetPayload<{ include: { decisions: { include: { user: { select: { fullName: true } } } } } }>[]) {
+    const roleName = (r: string) => ROLE_BY_KEY[r]?.name ?? r;
+    const roleUsers = new Map<string, string[]>();
+    const peopleFor = async (role: string) => { if (!roleUsers.has(role)) roleUsers.set(role, (await this.prisma.db.user.findMany({ where: { active: true, role: { key: role } }, select: { fullName: true } })).map((u) => u.fullName)); return roleUsers.get(role)!; };
+    const reqIds = [...new Set(rows.map((r) => r.requestedBy).concat(rows.flatMap((r) => r.requiredApproverUserIds)))];
+    const names = new Map((await this.prisma.db.user.findMany({ where: { id: { in: reqIds } }, select: { id: true, fullName: true } })).map((u) => [u.id, u.fullName]));
+    type Step = { who: string; status: 'approved' | 'rejected' | 'waiting' | 'auto' | 'cancelled'; by?: string; at?: Date; note?: string | null; people?: string[] };
+    const out: { id: string; type: string; label: string; documentType: string; documentId: string; link: string; controlNo: string | null; locationName: string | null; status: string; createdAt: Date; decidedAt: Date | null; requestedBy: string; steps: Step[]; nextSteps: string[] }[] = [];
+    for (const r of rows) {
+      const auto = r.status === 'AUTO_APPROVED';
+      const steps: Step[] = [];
+      const decisionOf = (match: (d: (typeof r.decisions)[number]) => boolean) => r.decisions.find(match);
+      const stepFor = async (who: string, match: (d: (typeof r.decisions)[number]) => boolean, people?: string[]): Promise<Step> => {
+        const d = decisionOf(match);
+        if (d) return { who, status: d.decision === 'APPROVE' ? 'approved' : 'rejected', by: d.user.fullName, at: d.decidedAt, note: d.note };
+        if (auto) return { who, status: 'auto', at: r.decidedAt ?? undefined };
+        if (r.status === 'CANCELLED') return { who, status: 'cancelled' };
+        if (r.status !== 'PENDING') return { who, status: 'approved' };
+        return { who, status: 'waiting', people };
+      };
+      if (r.requiredApproverUserIds.length) for (const u of r.requiredApproverUserIds) steps.push(await stepFor(names.get(u) ?? 'named person', (d) => d.userId === u, [names.get(u) ?? '']));
+      else if (r.anyOf) steps.push(await stepFor(r.requiredApproverRoles.map(roleName).join(' or '), (d) => r.requiredApproverRoles.includes(d.roleKey), (await Promise.all(r.requiredApproverRoles.map(peopleFor))).flat()));
+      else for (const role of r.requiredApproverRoles) steps.push(await stepFor(roleName(role), (d) => d.roleKey === role, await peopleFor(role)));
+      const summary = (r.summary ?? {}) as { controlNo?: string; nextSteps?: string[]; locationName?: string };
+      out.push({ id: r.id, type: r.type, label: humanType(r.type), documentType: r.documentType, documentId: r.documentId, link: documentLink(r.documentType, r.documentId), controlNo: summary.controlNo ?? null, locationName: summary.locationName ?? null, status: r.status, createdAt: r.createdAt, decidedAt: r.decidedAt, requestedBy: names.get(r.requestedBy) ?? '', steps, nextSteps: r.status === 'PENDING' || r.status === 'APPROVED' || r.status === 'AUTO_APPROVED' ? summary.nextSteps ?? [] : [] });
+    }
+    // an upcoming step is dropped once a later request for the same document exists
+    return out.map((t, i) => (out.slice(i + 1).some((x) => x.documentId === t.documentId) ? { ...t, nextSteps: [] } : t));
+  }
   async get(id: string) { const r = await this.prisma.db.approvalRequest.findUnique({ where: { id }, include: { decisions: { include: { user: { select: { fullName: true } } } } } }); if (!r) throw new NotFoundException(); return r; }
   forDocument(documentType: string, documentId: string) { return this.prisma.db.approvalRequest.findMany({ where: { documentType, documentId }, include: { decisions: { include: { user: { select: { fullName: true } } } } }, orderBy: { createdAt: 'desc' } }); }
 
@@ -87,6 +129,12 @@ export class ApprovalsService {
     }
     await this.audit.log({ action: decision, entityType: 'ApprovalRequest', entityId: id, after: { type: req.type, documentType: req.documentType, documentId: req.documentId, note } });
     if (final) await this.finalize(req.id, final, { id: user.id, note });
+    else {
+      // tell the requester how far it got: who approved, who is still to decide
+      const t = (await this.describe([await this.get(id)]))[0];
+      const waiting = t.steps.filter((x) => x.status === 'waiting').map((x) => x.who).join(', ');
+      await this.notify.toUsers([req.requestedBy], { type: 'APPROVAL_PROGRESS', title: `${humanType(req.type)}: approved by ${user.fullName} (${ROLE_BY_KEY[user.roleKey]?.name ?? user.roleKey}); waiting for ${waiting}`, link: documentLink(req.documentType, req.documentId) });
+    }
     return this.get(id);
   }
 
@@ -102,7 +150,7 @@ export class ApprovalsService {
 
   private async finalize(id: string, status: ApprovalStatus, actor: { id: string; note?: string } | null) {
     const req = await this.prisma.db.approvalRequest.update({ where: { id }, data: { status, decidedAt: new Date() } });
-    const handler = this.handlers.get(req.type);
+    const handler = this.handlers.get(`${req.type}:${req.documentType}`) ?? this.handlers.get(req.type);
     const outcome: ApprovalOutcome = status === 'REJECTED' ? 'REJECTED' : 'APPROVED';
     if (handler) {
       try { await handler({ id: req.id, type: req.type, documentType: req.documentType, documentId: req.documentId, requestedBy: req.requestedBy, summary: req.summary }, outcome, actor); }

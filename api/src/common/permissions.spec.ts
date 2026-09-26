@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { LOCATION_SCOPED_ROLES, APPROVAL_ROUTING, PERMISSION_KEYS, ROLE_CATALOGUE, effectivePermissions, editRequestApprovers, TOTP_REQUIRED_ROLES, SINGLE_LOCATION_ROLES } from './permissions';
 
 describe('permissions & approval routing (§5, §6.1)', () => {
-  it('has 15 roles and every role permission is a known key', () => {
-    expect(ROLE_CATALOGUE).toHaveLength(15);
+  it('has 16 roles and every role permission is a known key', () => {
+    expect(ROLE_CATALOGUE).toHaveLength(16);
     for (const r of ROLE_CATALOGUE) for (const k of r.permissions) expect(PERMISSION_KEYS, `${r.key}:${k}`).toContain(k);
   });
   it('financial statements are Admin + External Auditor only (§9)', () => {

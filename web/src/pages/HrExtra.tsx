@@ -67,16 +67,41 @@ export function ContributionsPanel() {
 /** HR links each employee record to that person's login account (so charges and payslips reach them) and prints ledgers. */
 export function EmployeeLinks() {
   const qc = useQueryClient();
-  const emps = useQuery({ queryKey: ['employees'], queryFn: () => api.get<{ id: string; employeeNo: string; fullName: string; location: { name: string } | null; user: { id: string; username: string } | null }[]>('/api/payroll/employees') });
+  const emps = useQuery({ queryKey: ['employees'], queryFn: () => api.get<{ id: string; employeeNo: string; fullName: string; locationId: string | null; location: { name: string } | null; user: { id: string; username: string } | null }[]>('/api/payroll/employees') });
   const users = useQuery({ queryKey: ['linkable-users'], queryFn: () => api.get<{ id: string; username: string; fullName: string; idNumber: string | null; role: { name: string }; employee: { id: string } | null }[]>('/api/payroll/linkable-users') });
+  const [accFor, setAccFor] = useState<{ id: string; fullName: string; employeeNo: string; locationId?: string | null } | null>(null); const [accMsg, setAccMsg] = useState('');
   const link = useMutation({ mutationFn: ({ id, userId }: { id: string; userId: string | null }) => api.patch(`/api/payroll/employees/${id}`, { userId }), onSuccess: () => { void qc.invalidateQueries({ queryKey: ['employees'] }); void qc.invalidateQueries({ queryKey: ['linkable-users'] }); } });
   return <Card title="Employee ↔ account links (charges and payslips reach the person)">
     <table className="w-full text-sm"><thead className="text-left text-xs text-slate-500"><tr><th>Employee</th><th>Branch</th><th>Login account</th><th /></tr></thead>
       <tbody>{emps.data?.map((e) => <tr key={e.id} className="border-t"><td>{e.fullName} <span className="text-xs text-slate-400">{e.employeeNo}</span></td><td>{e.location?.name ?? 'Office'}</td>
         <td><Select value={e.user?.id ?? ''} onChange={(ev) => link.mutate({ id: e.id, userId: ev.target.value || null })}><option value="">— not linked —</option>{users.data?.filter((u) => !u.employee || u.employee.id === e.id).map((u) => <option key={u.id} value={u.id}>{u.fullName} ({u.username}{u.idNumber ? ` · ${u.idNumber}` : ''}) — {u.role.name}</option>)}</Select></td>
-        <td><button className="text-xs text-brand underline" onClick={() => api.download(`/api/reports/forms/employee-ledger/${e.id}.pdf`, `Ledger-${e.employeeNo}.pdf`)}>Ledger</button></td></tr>)}</tbody></table>
+        <td className="whitespace-nowrap"><button className="text-xs text-brand underline" onClick={() => api.download(`/api/reports/forms/employee-ledger/${e.id}.pdf`, `Ledger-${e.employeeNo}.pdf`)}>Ledger</button>{!e.user && <button className="ml-3 text-xs text-brand underline" onClick={() => setAccFor(e)}>Create user account…</button>}</td></tr>)}</tbody></table>
     <ErrorBox error={link.error} />
+    {accFor && <NewAccountForm emp={accFor} onDone={(msg) => { setAccFor(null); setAccMsg(msg); }} />}
+    {accMsg && <p className="mt-2 text-sm text-amber-700">{accMsg}</p>}
   </Card>;
+}
+
+/** HR opens a login for an employee; the Owner approves before it exists. The person changes the temporary password at first sign-in. */
+function NewAccountForm({ emp, onDone }: { emp: { id: string; fullName: string; employeeNo: string; locationId?: string | null }; onDone: (msg: string) => void }) {
+  const qc = useQueryClient();
+  const roles = useQuery({ queryKey: ['hr-roles'], queryFn: () => api.get<{ key: string; name: string }[]>('/api/hr/employees/roles') });
+  const locations = useQuery({ queryKey: ['locations'], queryFn: () => api.get<{ id: string; name: string; type: string }[]>('/api/locations') });
+  const [f, setF] = useState({ username: '', email: '', roleKey: 'SALES_ASSOCIATE', locationId: emp.locationId ?? '', password: '' });
+  const m = useMutation({ mutationFn: () => api.post('/api/hr/employees/' + emp.id + '/account', { username: f.username, email: f.email, roleKey: f.roleKey, password: f.password, locationIds: f.locationId ? [f.locationId] : [] }), onSuccess: (r) => { void qc.invalidateQueries({ queryKey: ['master-pending'] }); onDone((r as { message?: string }).message ?? 'Account created.'); } });
+  return <div className="mt-3 rounded-md border border-slate-200 p-3">
+    <div className="mb-2 text-sm font-medium">User account for {emp.fullName} <span className="text-xs text-slate-500">(company ID {emp.employeeNo})</span></div>
+    <div className="grid gap-2 md:grid-cols-5">
+      <Field label="Username"><Input value={f.username} onChange={(e) => setF({ ...f, username: e.target.value.trim() })} /></Field>
+      <Field label="Email"><Input type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value.trim() })} /></Field>
+      <Field label="Role"><Select value={f.roleKey} onChange={(e) => setF({ ...f, roleKey: e.target.value })}>{roles.data?.map((r) => <option key={r.key} value={r.key}>{r.name}</option>)}</Select></Field>
+      <Field label="Branch"><Select value={f.locationId} onChange={(e) => setF({ ...f, locationId: e.target.value })}><option value="">— none —</option>{locations.data?.filter((l) => l.type !== 'VIRTUAL').map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</Select></Field>
+      <Field label="Temporary password (10+)"><Input type="text" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></Field>
+    </div>
+    <p className="mt-1 text-xs text-slate-500">The Owner approves the account. Give the temporary password to the person; they set their own at first sign-in.</p>
+    <div className="mt-2 flex gap-2"><Button disabled={f.username.length < 3 || !f.email || f.password.length < 10 || m.isPending} onClick={() => m.mutate()}>Send to the Owner</Button><Button variant="outline" onClick={() => onDone('')}>Cancel</Button></div>
+    <ErrorBox error={m.error} />
+  </div>;
 }
 
 /** HR / auditors: who submitted the required weekly count sheet, week by week. */

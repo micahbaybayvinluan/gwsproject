@@ -52,8 +52,15 @@ export class ChargesService {
 
   /** After commit: HR, Head Auditor and Admin get the form to finalize; each charged staff member (if they have an account) is told. */
   async announce(chargeFormId: string) {
-    const cf = await this.prisma.db.chargeForm.findUniqueOrThrow({ where: { id: chargeFormId }, include: { location: { select: { name: true } }, allocations: { include: { employee: { select: { userId: true, fullName: true } } } } } });
+    const cf = await this.prisma.db.chargeForm.findUniqueOrThrow({ where: { id: chargeFormId }, include: { location: { select: { name: true, type: true, franchiseOwnerUserId: true } }, allocations: { include: { employee: { select: { userId: true, fullName: true } } } } } });
     const label = KIND_LABEL[cf.kind];
+    if (cf.location.type === 'FRANCHISE') {
+      // a franchise handles its own staff: the owner assigns it to their associates; company HR is not involved
+      const owners = cf.location.franchiseOwnerUserId ? [cf.location.franchiseOwnerUserId] : [];
+      await this.notify.toUsers(owners, { type: 'CHARGE_FORM_READY', title: `${label}: charge form ${cf.controlNo} (${cf.location.name}) — assign it to your associates in the Franchise Portal`, link: '/franchise' });
+      await this.notify.toRoles(['ADMIN'], { type: 'CHARGE_FORM_READY', title: `${label}: charge form ${cf.controlNo} (${cf.location.name}) sent to the franchise owner`, link: `/charge-forms/${cf.id}` });
+      return;
+    }
     await this.notify.toRoles(['HR_STAFF', 'HEAD_AUDITOR', 'ADMIN'], { type: 'CHARGE_FORM_READY', title: `${label}: charge form ${cf.controlNo} (${cf.location.name}) ready for HR`, body: cf.allocations.length ? `Charged to ${cf.allocations.map((a) => a.employee.fullName).join(', ')}` : 'Allocate to staff', link: `/charge-forms/${cf.id}` });
     const users = cf.allocations.map((a) => a.employee.userId).filter((u): u is string => !!u);
     if (users.length) await this.notify.toUsers(users, { type: 'CHARGE_TO_YOU', title: `${label}: you were charged (${cf.controlNo})`, body: 'Open "My Pay & Charges" to see the details and acknowledge.', link: '/my-hr' });

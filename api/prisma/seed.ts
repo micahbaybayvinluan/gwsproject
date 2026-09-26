@@ -72,6 +72,7 @@ const TEST_USERS: { username: string; role: string; fullName: string; locations?
   { username: 'acct.assoc', role: 'ACCOUNTING_ASSOCIATE', fullName: 'Accounting Associate' },
   { username: 'hr.staff', role: 'HR_STAFF', fullName: 'HR Staff' },
   { username: 'field.auditor', role: 'FIELD_AUDITOR', fullName: 'Field Auditor', locations: [] }, // inventory of every location
+  { username: 'exec.assistant', role: 'EXECUTIVE_ASSISTANT', fullName: 'Executive Assistant' },
 ];
 
 async function main() {

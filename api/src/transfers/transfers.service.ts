@@ -29,6 +29,9 @@ export class TransfersService implements OnModuleInit {
   onModuleInit() {
     for (const t of ['TRANSFER_INTERNAL', 'TRANSFER_TO_FRANCHISE', 'CONSIGNMENT_OUT'] as ApprovalType[]) this.approvals.register(t, (req, outcome, actor) => this.onDecision(req.documentId, outcome, actor?.id ?? null));
     this.approvals.register('WRITEOFF', (r, outcome, actor) => this.onWriteoffDecision(r.documentId, outcome, actor?.id ?? null));
+    // Warehouse In-Charge approves a Warehouse Associate's goods out (before the auditors) and goods in (owner request 2026-09-26)
+    this.approvals.register('WAREHOUSE_OUT', (r, outcome, actor) => this.onWarehouseOut(r.documentId, outcome, actor?.id ?? null), 'TransferDoc');
+    this.approvals.register('WAREHOUSE_IN', (r, outcome, actor) => this.onWarehouseIn(r.documentId, outcome, actor?.id ?? null), 'TransferDoc');
   }
 
   private static readonly INCLUDE = { fromLocation: { select: { id: true, code: true, name: true, type: true } }, toLocation: { select: { id: true, code: true, name: true, type: true } }, lines: { include: { product: { select: { id: true, sku: true, name: true, category: { select: { accountingClass: true } } } }, batch: { select: { id: true, batchNo: true, expiryDate: true, unitCost: true, isConsignmentIn: true } } } } } as const;
@@ -145,7 +148,8 @@ export class TransfersService implements OnModuleInit {
       const transferInNo = toLoc.id !== doc.toLocationId ? await this.seq.form(tx, 'TI', toLoc.id) : undefined;
       await tx.transferDoc.update({ where: { id }, data: { transferInNo, toLocationId: toLoc.id, transferType, returnReason: input.returnReason === undefined ? undefined : input.returnReason, notes: input.notes === undefined ? undefined : input.notes, docDate: input.docDate ? toDateOnly(input.docDate) : undefined, status: 'DRAFT', approvalRequestId: null, updatedBy: actorId, lines: { create: lines } } });
     });
-    if (wasSubmitted) await this.submitDoc(id, doc.preparedBy ?? doc.createdBy ?? actorId);
+    // the edit came from the In-Charge (or Admin) and the preparer accepted it: no second In-Charge approval
+    if (wasSubmitted) await this.submitDoc(id, doc.preparedBy ?? doc.createdBy ?? actorId, true);
   }
 
   async submit(id: string, user: SessionUser) {
@@ -155,9 +159,34 @@ export class TransfersService implements OnModuleInit {
     await this.submitDoc(id, user.id);
     return this.get(id, user);
   }
-  private async submitDoc(id: string, requestedBy: string) {
+  private async submitDoc(id: string, requestedBy: string, skipInCharge = false) {
     const doc = await this.prisma.db.transferDoc.findUniqueOrThrow({ where: { id }, include: TransfersService.INCLUDE });
     if (doc.status !== 'DRAFT') throw new BadRequestException('Only drafts can be submitted');
+    if (!doc.lines.length) throw new BadRequestException('Add at least one item');
+    // goods leaving the warehouse on a Warehouse Associate's pull-out need the In-Charge first
+    const preparer = await this.prisma.db.user.findUnique({ where: { id: doc.preparedBy ?? requestedBy }, select: { role: { select: { key: true } } } });
+    if (!skipInCharge && doc.fromLocation.type === 'WAREHOUSE' && preparer?.role.key === 'WAREHOUSE_ASSOCIATE') {
+      const req = await this.approvals.request({ type: 'WAREHOUSE_OUT', documentType: 'TransferDoc', documentId: id, requestedBy, summary: { controlNo: doc.controlNo, locationId: doc.fromLocationId, locationName: `${doc.fromLocation.name} → ${doc.toLocation.name}`, transferType: doc.transferType, lines: doc.lines.length, units: doc.lines.reduce((t, l) => t + l.qtySent, 0), step: 'In-Charge checks the goods going out; then the auditors (or Admin for a franchise) approve', nextSteps: [doc.toLocation.type === 'FRANCHISE' ? 'Admin approval' : 'Head Auditor or Asst Auditor approval'] } });
+      await this.prisma.db.transferDoc.update({ where: { id }, data: { status: 'SUBMITTED', approvalRequestId: req.id, updatedBy: requestedBy } });
+      return;
+    }
+    await this.requestRouteApproval(id, requestedBy);
+  }
+
+  private async onWarehouseOut(docId: string, outcome: 'APPROVED' | 'REJECTED', actorId: string | null) {
+    await requestContext.runSystem(async () => {
+      const doc = await this.prisma.db.transferDoc.findUniqueOrThrow({ where: { id: docId } });
+      if (doc.status !== 'SUBMITTED') return;
+      if (outcome === 'REJECTED') { await this.prisma.db.transferDoc.update({ where: { id: docId }, data: { status: 'REJECTED' } }); return; }
+      void actorId;
+      await this.requestRouteApproval(docId, doc.preparedBy ?? doc.createdBy ?? '', true);
+    });
+  }
+
+  /** The usual approval for a submitted transfer (auditors, or Admin for a franchise / consignment). */
+  private async requestRouteApproval(id: string, requestedBy: string, afterInCharge = false) {
+    const doc = await this.prisma.db.transferDoc.findUniqueOrThrow({ where: { id }, include: TransfersService.INCLUDE });
+    if (doc.status !== (afterInCharge ? 'SUBMITTED' : 'DRAFT')) throw new BadRequestException('Only drafts can be submitted');
     const type: ApprovalType = doc.transferType === 'CONSIGNMENT_OUT' ? 'CONSIGNMENT_OUT' : doc.toLocation.type === 'FRANCHISE' ? 'TRANSFER_TO_FRANCHISE' : 'TRANSFER_INTERNAL';
     const totalAtCost = sum(doc.lines.map((l) => l.batch.unitCost.mul(l.qtySent)));
     // Optional auto-approve thresholds (§6.1), default off
@@ -221,6 +250,41 @@ export class TransfersService implements OnModuleInit {
     const doc = await this.get(id, user);
     if (doc.status !== 'APPROVED') throw new BadRequestException('Transfer is not awaiting receipt');
     if (user.locationScoped && !user.locationIds.includes(doc.toLocationId)) throw new ForbiddenException('Only the receiving location can confirm');
+    for (const r of received) { const l = doc.lines.find((x) => x.id === r.lineId)!; if (r.qtyReceived < 0 || r.qtyReceived > l.qtySent || !Number.isInteger(r.qtyReceived)) throw new BadRequestException(`Received qty for ${l.product.name} must be a whole number from 0 to ${l.qtySent}`); }
+    // franchise: the associate receives only if the franchise owner allows it; the owner is told when they do
+    if (user.roleKey === 'FRANCHISE_SALES_ASSOCIATE') {
+      const loc = await this.prisma.db.location.findUniqueOrThrow({ where: { id: doc.toLocationId } });
+      if (!loc.franchiseAssociateReceives) throw new ForbiddenException('Your franchise owner receives the stock; ask them to confirm this transfer');
+    }
+    // goods into the warehouse confirmed by a Warehouse Associate wait for the In-Charge (owner request 2026-09-26)
+    if (user.roleKey === 'WAREHOUSE_ASSOCIATE' && doc.toLocation.type === 'WAREHOUSE') {
+      if (doc.pendingReceipt) throw new BadRequestException('This receipt is already waiting for the Warehouse In-Charge');
+      await this.prisma.db.transferDoc.update({ where: { id }, data: { pendingReceipt: received as unknown as Prisma.InputJsonValue, pendingReceiptBy: user.id } });
+      await this.approvals.request({ type: 'WAREHOUSE_IN', documentType: 'TransferDoc', documentId: id, requestedBy: user.id, summary: { controlNo: doc.transferInNo ?? doc.controlNo, locationId: doc.toLocationId, locationName: `${doc.fromLocation.name} → ${doc.toLocation.name}`, lines: received.length, units: received.reduce((t, r) => t + r.qtyReceived, 0), short: received.filter((r) => r.qtyReceived < doc.lines.find((l) => l.id === r.lineId)!.qtySent).length, step: 'Warehouse Associate checked the goods in; the In-Charge confirms before stock is added' } });
+      await this.audit.log({ action: 'CONFIRM_PENDING', entityType: 'TransferDoc', entityId: id, after: received });
+      return this.get(id, user);
+    }
+    return this.applyReceipt(id, received, user.id, user);
+  }
+
+  private async onWarehouseIn(docId: string, outcome: 'APPROVED' | 'REJECTED', actorId: string | null) {
+    await requestContext.runSystem(async () => {
+      const doc = await this.prisma.db.transferDoc.findUniqueOrThrow({ where: { id: docId } });
+      if (doc.status !== 'APPROVED' || !doc.pendingReceipt) return;
+      const by = doc.pendingReceiptBy!;
+      if (outcome === 'REJECTED') {
+        await this.prisma.db.transferDoc.update({ where: { id: docId }, data: { pendingReceipt: Prisma.DbNull, pendingReceiptBy: null } });
+        await this.notify.toUsers([by], { type: 'WAREHOUSE_IN_REJECTED', title: `The In-Charge did not accept your receipt of ${doc.controlNo}; check the goods and confirm again`, link: `/transfers/${docId}` });
+        return;
+      }
+      void actorId;
+      await this.applyReceipt(docId, doc.pendingReceipt as unknown as { lineId: string; qtyReceived: number; discrepancyNote?: string }[], by, null);
+    });
+  }
+
+  /** Stock in-transit → receiver for the confirmed quantities; a shortfall stays in transit for the Head Auditor. */
+  private async applyReceipt(id: string, received: { lineId: string; qtyReceived: number; discrepancyNote?: string }[], receivedBy: string, user: SessionUser | null) {
+    const doc = await this.prisma.db.transferDoc.findUniqueOrThrow({ where: { id }, include: TransfersService.INCLUDE });
     const transit = await this.stock.locationByCode(null, VIRTUAL_CODES.IN_TRANSIT);
     let shortfall = false;
     const result = await this.prisma.db.$transaction(async (tx) => {
@@ -232,16 +296,20 @@ export class TransfersService implements OnModuleInit {
         if (qty < l.qtySent) shortfall = true;
         await tx.transferLine.update({ where: { id: l.id }, data: { qtyReceived: qty, discrepancyNote: r?.discrepancyNote ?? (qty < l.qtySent ? 'Short on receipt' : null) } });
         if (qty > 0) posts.push(
-          { locationId: transit.id, productId: l.productId, batchId: l.batchId, qtyDelta: -qty, movementType: 'TRANSFER_IN', documentType: 'TransferDoc', documentId: doc.id, unitCost: l.batch.unitCost, createdBy: user.id },
-          { locationId: doc.toLocationId, productId: l.productId, batchId: l.batchId, qtyDelta: qty, movementType: 'TRANSFER_IN', documentType: 'TransferDoc', documentId: doc.id, unitCost: l.batch.unitCost, createdBy: user.id },
+          { locationId: transit.id, productId: l.productId, batchId: l.batchId, qtyDelta: -qty, movementType: 'TRANSFER_IN', documentType: 'TransferDoc', documentId: doc.id, unitCost: l.batch.unitCost, createdBy: receivedBy },
+          { locationId: doc.toLocationId, productId: l.productId, batchId: l.batchId, qtyDelta: qty, movementType: 'TRANSFER_IN', documentType: 'TransferDoc', documentId: doc.id, unitCost: l.batch.unitCost, createdBy: receivedBy },
         );
       }
       await this.stock.post(tx, posts);
-      const updated = await tx.transferDoc.update({ where: { id }, data: { status: shortfall ? 'DISCREPANCY' : 'RECEIVED', receivedBy: user.id, receivedAt: new Date() }, include: TransfersService.INCLUDE });
-      await this.postTransferJournal(tx, updated, user.id);
+      const updated = await tx.transferDoc.update({ where: { id }, data: { status: shortfall ? 'DISCREPANCY' : 'RECEIVED', receivedBy, receivedAt: new Date(), pendingReceipt: Prisma.DbNull, pendingReceiptBy: null }, include: TransfersService.INCLUDE });
+      await this.postTransferJournal(tx, updated, receivedBy);
       return updated;
     });
-    await this.audit.log({ action: 'CONFIRM', entityType: 'TransferDoc', entityId: id, after: received });
+    await this.audit.log({ action: 'CONFIRM', entityType: 'TransferDoc', entityId: id, after: received, userId: receivedBy });
+    if (doc.toLocation.type === 'FRANCHISE' && user?.roleKey === 'FRANCHISE_SALES_ASSOCIATE') {
+      const owner = await this.prisma.db.location.findUnique({ where: { id: doc.toLocationId }, select: { franchiseOwnerUserId: true } });
+      if (owner?.franchiseOwnerUserId) await this.notify.toUsers([owner.franchiseOwnerUserId], { type: 'FRANCHISE_RECEIVED', title: `${user.fullName} received transfer ${doc.transferInNo ?? doc.controlNo} from ${doc.fromLocation.name}${shortfall ? ' (with a shortfall)' : ''}`, link: `/transfers/${id}` });
+    }
     if (shortfall) {
       await this.notify.toUsers([doc.preparedBy], { type: 'TRANSFER_DISCREPANCY', title: `Discrepancy on transfer ${doc.controlNo}`, link: `/transfers/${id}` });
       await this.notify.toRoles(['HEAD_AUDITOR', 'ADMIN'], { type: 'TRANSFER_DISCREPANCY', title: `Discrepancy on transfer ${doc.controlNo} (${doc.fromLocation.name} → ${doc.toLocation.name})`, link: `/transfers/${id}` });

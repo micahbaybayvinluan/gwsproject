@@ -1,3 +1,4 @@
+import { PriceUpdatesService } from '../notifications/price-updates.service';
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
@@ -24,9 +25,13 @@ export interface ReceivingInput { locationId?: string; supplierId: string; suppl
 /** §7.2 Receiving from suppliers (Supplier's Form / PO-Purchases) with COST_ON_RECEIVING approval. */
 @Injectable()
 export class ReceivingService implements OnModuleInit {
-  constructor(private prisma: PrismaService, private seq: SequenceService, private stock: StockService, private approvals: ApprovalsService, private master: MasterService, private notify: NotificationsService, private audit: AuditService, private settings: SettingsService, private posting: PostingService, private attachments: AttachmentsService, private scope: ScopeService) {}
+  constructor(private prisma: PrismaService, private seq: SequenceService, private stock: StockService, private approvals: ApprovalsService, private master: MasterService, private notify: NotificationsService, private audit: AuditService, private settings: SettingsService, private posting: PostingService, private attachments: AttachmentsService, private scope: ScopeService, private priceUpdates: PriceUpdatesService) {}
 
-  onModuleInit() { this.approvals.register('COST_ON_RECEIVING', (req, outcome, actor) => this.onCostDecision(req.documentId, outcome, actor?.id ?? null)); }
+  onModuleInit() {
+    this.approvals.register('COST_ON_RECEIVING', (req, outcome, actor) => this.onCostDecision(req.documentId, outcome, actor?.id ?? null));
+    // goods a Warehouse Associate received wait for the In-Charge after the cost is approved (owner request 2026-09-26)
+    this.approvals.register('WAREHOUSE_IN', (req, outcome, actor) => this.onInChargeDecision(req.documentId, outcome, actor?.id ?? null), 'ReceivingDoc');
+  }
 
   private include = { supplier: { select: { id: true, code: true, name: true } }, location: { select: { id: true, code: true, name: true } }, lines: { include: { product: { select: { id: true, sku: true, name: true, trackExpiry: true, category: { select: { accountingClass: true } } } } } } } as const;
 
@@ -141,7 +146,9 @@ export class ReceivingService implements OnModuleInit {
     }
     const hours = await this.settings.get<number>('approval.cost_unchanged_auto_hours');
     const autoApproveAt = allUnchanged ? new Date(Date.now() + hours * 3600000) : null;
-    const req = await this.approvals.request({ type: 'COST_ON_RECEIVING', documentType: 'ReceivingDoc', documentId: id, requestedBy, autoApproveAt, summary: { controlNo: doc.controlNo, locationId: doc.locationId, locationName: doc.location.name, supplierCode: doc.supplier.code, lines: doc.lines.length, allUnchanged } });
+    const preparer = await this.prisma.db.user.findUnique({ where: { id: doc.preparedBy ?? requestedBy }, select: { role: { select: { key: true } } } });
+    const nextSteps = preparer?.role.key === 'WAREHOUSE_ASSOCIATE' ? ['Warehouse In-Charge confirms the goods'] : [];
+    const req = await this.approvals.request({ type: 'COST_ON_RECEIVING', documentType: 'ReceivingDoc', documentId: id, requestedBy, autoApproveAt, summary: { controlNo: doc.controlNo, locationId: doc.locationId, locationName: doc.location.name, supplierCode: doc.supplier.code, lines: doc.lines.length, allUnchanged, nextSteps } });
     await this.prisma.db.receivingDoc.update({ where: { id }, data: { status: 'SUBMITTED', approvalRequestId: req.id, updatedBy: requestedBy } });
   }
 
@@ -157,7 +164,10 @@ export class ReceivingService implements OnModuleInit {
     return this.get(id, user);
   }
 
-  /** Approval outcome → create batches, post RECEIVE ledger rows, journal R1/R2. */
+  /**
+   * Cost approved by the Head Auditor. The costs are fixed on the lines. A receiving entered by a Warehouse Associate then waits
+   * for the Warehouse In-Charge (WAREHOUSE_IN) before the stock is posted; the In-Charge's own (or Admin's / auditors') entries post now.
+   */
   private async onCostDecision(docId: string, outcome: 'APPROVED' | 'REJECTED', actorId: string | null) {
     await requestContext.runSystem(async () => {
       const doc = await this.prisma.db.receivingDoc.findUniqueOrThrow({ where: { id: docId }, include: this.include });
@@ -165,26 +175,56 @@ export class ReceivingService implements OnModuleInit {
       if (outcome === 'REJECTED') { await this.prisma.db.receivingDoc.update({ where: { id: docId }, data: { status: 'REJECTED' } }); return; }
       const stdCosts = await this.master.currentCosts(doc.lines.map((l) => l.productId));
       for (const l of doc.lines) if (l.unitCost == null && stdCosts.get(l.productId) == null) throw new BadRequestException(`Line ${l.product.name} has no cost; Head Auditor must enter it before approval`);
-      const consignmentOnBS = await this.settings.get<boolean>('consignment_in_on_balance_sheet');
-      await this.prisma.db.$transaction(async (tx) => {
-        const businessDate = doc.docDate;
-        for (const l of doc.lines) {
-          const cost = D(l.unitCost ?? stdCosts.get(l.productId)!);
-          const batch = await tx.batch.create({ data: { productId: l.productId, batchNo: l.batchNo, expiryDate: l.expiryDate, receivedRef: doc.controlNo, unitCost: cost.toFixed(2), supplierId: doc.supplierId, isConsignmentIn: doc.isConsignmentIn, createdBy: actorId } });
-          await tx.receivingLine.update({ where: { id: l.id }, data: { batchId: batch.id, unitCost: cost.toFixed(2) } });
-          await this.stock.post(tx, [{ locationId: doc.locationId, productId: l.productId, batchId: batch.id, qtyDelta: l.qty + l.freeQty, movementType: 'RECEIVE', documentType: 'ReceivingDoc', documentId: doc.id, unitCost: cost.toFixed(2), businessDate, createdBy: actorId ?? undefined }]);
-          // standard cost: record when new or changed (approved by Head Auditor)
-          const std = stdCosts.get(l.productId);
-          if (std == null || !D(std).equals(cost)) await tx.productCost.upsert({ where: { productId_effectiveFrom: { productId: l.productId, effectiveFrom: businessDate } }, create: { productId: l.productId, effectiveFrom: businessDate, cost: cost.toFixed(2), approvedBy: actorId, sourceDocId: doc.id }, update: { cost: cost.toFixed(2), approvedBy: actorId, sourceDocId: doc.id } });
-        }
-        await tx.receivingDoc.update({ where: { id: docId }, data: { status: 'POSTED', postedAt: new Date() } });
-        await this.posting.post(tx, { type: 'ReceivingDoc', id: doc.id, date: businessDate, createdBy: actorId }, (r) => r1Receiving(r, {
-          warehouseId: doc.locationId, supplierId: doc.supplierId, controlNo: doc.controlNo, paidOnReceipt: doc.paidOnReceipt, paymentAccountId: doc.paymentAccountId, isConsignmentIn: doc.isConsignmentIn, consignmentInOnBalanceSheet: consignmentOnBS,
-          lines: doc.lines.map((l) => ({ accountingClass: l.product.category.accountingClass, qty: l.qty, freeQty: l.freeQty, unitCost: l.unitCost ?? stdCosts.get(l.productId)!, stdCost: stdCosts.get(l.productId) ?? l.unitCost ?? 0 })),
-        }));
-      });
-      await this.notify.toLocation(doc.locationId, { type: 'RECEIVING_POSTED', title: `Receiving ${doc.controlNo} posted`, link: `/receiving/${doc.id}` });
+      for (const l of doc.lines) if (l.unitCost == null) await this.prisma.db.receivingLine.update({ where: { id: l.id }, data: { unitCost: D(stdCosts.get(l.productId)!).toFixed(2) } });
+      const preparer = doc.preparedBy ? await this.prisma.db.user.findUnique({ where: { id: doc.preparedBy }, select: { role: { select: { key: true } } } }) : null;
+      if (preparer?.role.key === 'WAREHOUSE_ASSOCIATE') {
+        await this.prisma.db.receivingDoc.update({ where: { id: docId }, data: { status: 'APPROVED' } });
+        await this.approvals.request({ type: 'WAREHOUSE_IN', documentType: 'ReceivingDoc', documentId: docId, requestedBy: doc.preparedBy!, summary: { controlNo: doc.controlNo, locationId: doc.locationId, locationName: doc.location.name, supplierCode: doc.supplier.code, lines: doc.lines.length, units: doc.lines.reduce((t, l) => t + l.qty + l.freeQty, 0), step: 'Cost approved by the Head Auditor; In-Charge to confirm the goods before stock is posted' } });
+        return;
+      }
+      await this.postReceiving(docId, actorId, 'SUBMITTED');
     });
+  }
+
+  /** In-Charge accepted (post the stock) or rejected (the receiving goes back as rejected). */
+  private async onInChargeDecision(docId: string, outcome: 'APPROVED' | 'REJECTED', actorId: string | null) {
+    await requestContext.runSystem(async () => {
+      const doc = await this.prisma.db.receivingDoc.findUniqueOrThrow({ where: { id: docId } });
+      if (doc.status !== 'APPROVED') return;
+      if (outcome === 'REJECTED') { await this.prisma.db.receivingDoc.update({ where: { id: docId }, data: { status: 'REJECTED' } }); return; }
+      await this.postReceiving(docId, actorId, 'APPROVED');
+    });
+  }
+
+  /** Create batches, post RECEIVE ledger rows, journal R1/R2; supplier-cost changes are announced to the cost roles only. */
+  private async postReceiving(docId: string, actorId: string | null, expected: 'SUBMITTED' | 'APPROVED') {
+    const doc = await this.prisma.db.receivingDoc.findUniqueOrThrow({ where: { id: docId }, include: this.include });
+    if (doc.status !== expected) return;
+    const stdCosts = await this.master.currentCosts(doc.lines.map((l) => l.productId));
+    const consignmentOnBS = await this.settings.get<boolean>('consignment_in_on_balance_sheet');
+    const costChanges: { productId: string; productName: string; tier: null; oldValue: Prisma.Decimal | string | null; newValue: string }[] = [];
+    await this.prisma.db.$transaction(async (tx) => {
+      const businessDate = doc.docDate;
+      for (const l of doc.lines) {
+        const cost = D(l.unitCost ?? stdCosts.get(l.productId)!);
+        const batch = await tx.batch.create({ data: { productId: l.productId, batchNo: l.batchNo, expiryDate: l.expiryDate, receivedRef: doc.controlNo, unitCost: cost.toFixed(2), supplierId: doc.supplierId, isConsignmentIn: doc.isConsignmentIn, createdBy: actorId } });
+        await tx.receivingLine.update({ where: { id: l.id }, data: { batchId: batch.id, unitCost: cost.toFixed(2) } });
+        await this.stock.post(tx, [{ locationId: doc.locationId, productId: l.productId, batchId: batch.id, qtyDelta: l.qty + l.freeQty, movementType: 'RECEIVE', documentType: 'ReceivingDoc', documentId: doc.id, unitCost: cost.toFixed(2), businessDate, createdBy: actorId ?? undefined }]);
+        // standard cost: record when new or changed (approved by Head Auditor)
+        const std = stdCosts.get(l.productId);
+        if (std == null || !D(std).equals(cost)) {
+          await tx.productCost.upsert({ where: { productId_effectiveFrom: { productId: l.productId, effectiveFrom: businessDate } }, create: { productId: l.productId, effectiveFrom: businessDate, cost: cost.toFixed(2), approvedBy: actorId, sourceDocId: doc.id }, update: { cost: cost.toFixed(2), approvedBy: actorId, sourceDocId: doc.id } });
+          if (!costChanges.some((c) => c.productId === l.productId)) costChanges.push({ productId: l.productId, productName: l.product.name, tier: null, oldValue: std ?? null, newValue: cost.toFixed(2) });
+        }
+      }
+      await tx.receivingDoc.update({ where: { id: docId }, data: { status: 'POSTED', postedAt: new Date() } });
+      await this.posting.post(tx, { type: 'ReceivingDoc', id: doc.id, date: businessDate, createdBy: actorId }, (r) => r1Receiving(r, {
+        warehouseId: doc.locationId, supplierId: doc.supplierId, controlNo: doc.controlNo, paidOnReceipt: doc.paidOnReceipt, paymentAccountId: doc.paymentAccountId, isConsignmentIn: doc.isConsignmentIn, consignmentInOnBalanceSheet: consignmentOnBS,
+        lines: doc.lines.map((l) => ({ accountingClass: l.product.category.accountingClass, qty: l.qty, freeQty: l.freeQty, unitCost: l.unitCost ?? stdCosts.get(l.productId)!, stdCost: stdCosts.get(l.productId) ?? l.unitCost ?? 0 })),
+      }));
+    });
+    await this.notify.toLocation(doc.locationId, { type: 'RECEIVING_POSTED', title: `Receiving ${doc.controlNo} posted`, link: `/receiving/${doc.id}` });
+    await this.priceUpdates.announce(costChanges, { effectiveFrom: doc.docDate, source: 'RECEIVING_COST', sourceRef: doc.controlNo, link: `/receiving/${doc.id}` });
   }
 
   async void(id: string, reason: string, user: SessionUser) {

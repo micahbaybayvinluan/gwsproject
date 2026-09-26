@@ -5,7 +5,7 @@ import { Audited, CurrentUser, RequireAnyPermission } from '../common/decorators
 import { Z } from '../common/zod.pipe';
 import type { SessionUser } from '../common/request-context';
 
-const RcvLine = z.object({ productId: z.string().uuid(), qty: z.number().int().min(0), freeQty: z.number().int().min(0).optional(), expiryDate: z.string().nullable().optional(), batchNo: z.string().nullable().optional(), unitCost: z.number().nonnegative().nullable().optional(), remarks: z.string().optional() });
+const RcvLine = z.object({ productId: z.string().uuid(), qty: z.number().int().min(0), freeQty: z.number().int().min(0).optional(), expiryDate: z.string().nullable().optional(), batchNo: z.string().nullable().optional(), unitCost: z.number().nonnegative().nullable().optional(), remarks: z.string().optional() }).refine((l) => l.qty + (l.freeQty ?? 0) > 0, { message: 'Quantity must be more than zero (no negative or empty lines)' });
 const RcvEdit = z.object({ supplierId: z.string().uuid().optional(), supplierRef: z.string().nullable().optional(), docDate: z.string().optional(), notes: z.string().nullable().optional(), lines: z.array(RcvLine).min(1) });
 const TrLine = z.object({ productId: z.string().uuid(), qty: z.number().int().positive(), batchId: z.string().uuid().nullable().optional(), checkerRemarks: z.string().optional() });
 const TrEdit = z.object({ toLocationId: z.string().uuid().optional(), transferType: z.enum(['RESTOCK', 'RETURN', 'REPLACEMENT', 'CONSIGNMENT_OUT', 'CONSIGNMENT_RETURN', 'INTERNAL']).optional(), returnReason: z.string().nullable().optional(), docDate: z.string().optional(), notes: z.string().nullable().optional(), lines: z.array(TrLine).min(1) });

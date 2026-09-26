@@ -1,3 +1,4 @@
+import { PriceUpdatesService } from '../notifications/price-updates.service';
 import { BadRequestException, Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../common/prisma.service';
 import { Prisma } from '@prisma/client';
@@ -18,7 +19,7 @@ export interface PriceChangeLineInput { productId: string; tier?: string | null;
 /** §17 Price change process + §10.4 R12 revaluation. */
 @Injectable()
 export class PriceChangeService implements OnModuleInit {
-  constructor(private prisma: PrismaService, private seq: SequenceService, private approvals: ApprovalsService, private master: MasterService, private notify: NotificationsService, private audit: AuditService, private posting: PostingService) {}
+  constructor(private prisma: PrismaService, private seq: SequenceService, private approvals: ApprovalsService, private master: MasterService, private notify: NotificationsService, private audit: AuditService, private posting: PostingService, private priceUpdates: PriceUpdatesService) {}
 
   onModuleInit() {
     this.approvals.register('PRICE_CHANGE', (req, outcome, actor) => this.onPriceDecision(req.documentId, outcome, actor?.id ?? null));
@@ -76,9 +77,8 @@ export class PriceChangeService implements OnModuleInit {
     if (doc.notifiedAt) return;
     const soon = addDays(doc.effectiveFrom, -1) <= todayManila();
     if (!soon) return;
-    const title = `Price update effective ${dateStr(doc.effectiveFrom)}`;
-    const body = doc.lines.filter((l) => l.tier).map((l) => `${l.product.name} (${l.tier}): ${l.oldPrice ?? '-'} → ${l.newPrice}`).join('; ');
-    await this.notify.toRoles(['SALES_ASSOCIATE', 'FRANCHISE_SALES_ASSOCIATE', 'FRANCHISE_OWNER', 'HEAD_AUDITOR', 'ADMIN'], { type: 'PRICE_UPDATE', title, body, link: `/price-changes/${docId}` });
+    // each person hears only about the prices they use; supplier cost only reaches Owner, Head Auditor, External Auditor, Accounting Head
+    await this.priceUpdates.announce(doc.lines.flatMap((l) => [...(l.tier && l.newPrice != null ? [{ productId: l.productId, productName: l.product.name, tier: l.tier, oldValue: l.oldPrice, newValue: l.newPrice }] : []), ...(l.costNew != null ? [{ productId: l.productId, productName: l.product.name, tier: null, oldValue: l.costOld, newValue: l.costNew }] : [])]), { effectiveFrom: doc.effectiveFrom, source: 'PRICE_CHANGE', sourceRef: doc.controlNo, link: `/price-changes/${docId}` });
     await this.prisma.db.priceChangeDoc.update({ where: { id: docId }, data: { notifiedAt: new Date() } });
   }
   async notifyPending() { const docs = await this.prisma.db.priceChangeDoc.findMany({ where: { status: 'APPROVED', notifiedAt: null } }); for (const d of docs) await this.notifyPriceUpdate(d.id); }

@@ -13,6 +13,7 @@ export class ApprovalsController {
   constructor(private approvals: ApprovalsService) {}
   @Get('inbox') inbox(@CurrentUser() u: SessionUser, @Query('type') type?: string) { return this.approvals.inbox(u, type); }
   @Get('mine') mine(@CurrentUser() u: SessionUser) { return this.approvals.mine(u.id); }
+  @Get('timeline/:type/:id') timeline(@Param('type') type: string, @Param('id') id: string) { return this.approvals.timeline(type, id); }
   @Get('document/:type/:id') forDoc(@Param('type') type: string, @Param('id') id: string) { return this.approvals.forDocument(type, id); }
   @Get(':id') get(@Param('id') id: string) { return this.approvals.get(id); }
   @Post('bulk') @Audited('ApprovalRequest', 'BULK_DECIDE') bulk(@CurrentUser() u: SessionUser, @Body(Z(Bulk)) dto: z.infer<typeof Bulk>) { return this.approvals.decideBulk(dto.ids, u, dto.decision, dto.note); }

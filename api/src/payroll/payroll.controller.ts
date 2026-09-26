@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Param, Patch, Post, Put, Query } from '@nestjs/common';
 import { z } from 'zod';
 import { PayrollService } from './payroll.service';
+import { MasterDataApprovals } from '../approvals/master-data.service';
 import { CurrentUser, RequirePermission, RequireAnyPermission, Audited } from '../common/decorators';
 import { Z } from '../common/zod.pipe';
 import type { SessionUser } from '../common/request-context';
@@ -14,11 +15,11 @@ const Asset = z.object({ name: z.string(), assetAccountId: z.string().uuid(), ac
 
 @Controller('api/payroll')
 export class PayrollController {
-  constructor(private svc: PayrollService) {}
+  constructor(private svc: PayrollService, private md: MasterDataApprovals) {}
   @Get('employees') @RequireAnyPermission('employee.manage', 'payroll.view.detail') employees() { return this.svc.employees(); }
   /** Accounts HR can link an employee record to (names and IDs only), so charges and payslips reach that person. */
   @Get('linkable-users') @RequirePermission('employee.manage') linkable() { return this.svc.linkableUsers(); }
-  @Post('employees') @RequirePermission('employee.manage') @Audited('Employee', 'CREATE') createEmployee(@Body(Z(Emp)) dto: z.infer<typeof Emp>, @CurrentUser() u: SessionUser) { return this.svc.createEmployee({ ...dto, basicRate: dto.basicRate.toFixed(2) }, u); }
+  @Post('employees') @RequirePermission('employee.manage') @Audited('Employee', 'CREATE') async createEmployee(@Body(Z(Emp)) dto: z.infer<typeof Emp>, @CurrentUser() u: SessionUser) { const data = { ...dto, basicRate: dto.basicRate.toFixed(2) }; await this.svc.assertCompanyLocation(dto.locationId); return this.md.submit('Employee', data, u, { name: dto.fullName, employeeNo: dto.employeeNo, position: dto.position, basicRate: dto.basicRate, payFrequency: dto.payFrequency }, () => this.svc.createEmployee(data, u)); }
   @Patch('employees/:id') @RequirePermission('employee.manage') @Audited('Employee') updateEmployee(@Param('id') id: string, @Body(Z(Emp.partial())) dto: Partial<z.infer<typeof Emp>>) { return this.svc.updateEmployee(id, { ...dto, basicRate: dto.basicRate?.toFixed(2) }); }
   @Post('loans') @RequirePermission('employee.manage') @Audited('EmployeeLoan', 'CREATE') loan(@Body(Z(Loan)) dto: z.infer<typeof Loan>) { return this.svc.addLoan(dto); }
   @Get('tables') @RequireAnyPermission('payroll.edit', 'payroll.view.summary') tables() { return this.svc.tables(); }

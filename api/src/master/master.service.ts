@@ -5,6 +5,8 @@ import { AuditService } from '../common/audit.service';
 import type { SessionUser } from '../common/request-context';
 import { D } from '../common/money';
 import { dateStr, todayManila, toDateOnly } from '../common/manila';
+import { MasterDataApprovals } from '../approvals/master-data.service';
+import { PriceUpdatesService } from '../notifications/price-updates.service';
 
 /** Supplier DTO: `name` is emitted as `supplierName` so the redaction interceptor can strip it (§16). */
 export function supplierDto<T extends { name: string }>(s: T) {
@@ -14,7 +16,16 @@ export function supplierDto<T extends { name: string }>(s: T) {
 
 @Injectable()
 export class MasterService {
-  constructor(private prisma: PrismaService, private audit: AuditService) {}
+  constructor(private prisma: PrismaService, private audit: AuditService, md: MasterDataApprovals, private priceUpdates: PriceUpdatesService) {
+    // what the Owner's approval creates (owner request 2026-09-26: new master data needs the Owner)
+    md.registerKind('Location', { label: 'Branch / location', apply: (p, by) => this.createLocation(p as never, by) });
+    md.registerKind('Supplier', { label: 'Supplier', apply: (p, by) => this.createSupplier(p as never, by) });
+    md.registerKind('Category', { label: 'Product category', apply: (p) => this.createCategory(p as never) });
+    md.registerKind('Product', { label: 'Product', apply: (p, by) => this.createProduct(p as never, by), link: (id) => `/products/${id}` });
+    md.registerKind('Customer', { label: 'Customer', apply: (p, by) => this.createCustomer(p as never, by) });
+    md.registerKind('Agent', { label: 'Agent', apply: (p) => this.createAgent(p as never) });
+    md.registerKind('Rider', { label: 'Rider', apply: (p) => this.createRider(p as never) });
+  }
 
   // ── Locations ──
   async listLocations(user: SessionUser, includeInactive = false) {
@@ -42,8 +53,7 @@ export class MasterService {
   // ── Suppliers (code visible to all; name redacted) ──
   async listSuppliers() { return (await this.prisma.db.supplier.findMany({ orderBy: { code: 'asc' } })).map(supplierDto); }
   async createSupplier(data: { name: string; contact?: string; termsDays?: number; isConsignor?: boolean }, actorId: string) {
-    const count = await this.prisma.db.supplier.count();
-    const s = await this.prisma.db.supplier.create({ data: { ...data, code: `SUP-${String(count + 1).padStart(3, '0')}`, createdBy: actorId } });
+    const s = await this.prisma.db.supplier.create({ data: { ...data, code: await this.nextCode('supplier', 'SUP-', 3), createdBy: actorId } });
     await this.audit.log({ action: 'CREATE', entityType: 'Supplier', entityId: s.id, after: s });
     return supplierDto(s);
   }
@@ -90,6 +100,7 @@ export class MasterService {
       return prod;
     });
     await this.audit.log({ action: 'CREATE', entityType: 'Product', entityId: p.id, after: p });
+    await this.priceUpdates.announce([...Object.entries(prices ?? {}).map(([tier, v]) => ({ productId: p.id, productName: p.name, tier, newValue: v })), ...(cost != null ? [{ productId: p.id, productName: p.name, tier: null, newValue: cost }] : [])], { source: 'NEW_PRODUCT', link: `/products/${p.id}` });
     return p;
   }
   async updateProduct(id: string, data: Prisma.ProductUncheckedUpdateInput, actorId: string) {
@@ -155,13 +166,48 @@ export class MasterService {
   // ── Customers / agents / riders ──
   listCustomers(type?: string) { return this.prisma.db.customer.findMany({ where: type ? { type: type as never, active: true } : { active: true }, orderBy: { name: 'asc' } }); }
   async createCustomer(data: { name: string; type: 'DEALER' | 'FRANCHISE' | 'AGENT' | 'CONSIGNEE' | 'CUSTOMER'; locationId?: string; agentId?: string; contact?: string }, actorId: string) {
-    const n = await this.prisma.db.customer.count();
-    return this.prisma.db.customer.create({ data: { ...data, code: `CUS-${String(n + 1).padStart(4, '0')}`, createdBy: actorId } });
+    return this.prisma.db.customer.create({ data: { ...data, code: await this.nextCode('customer', 'CUS-', 4), createdBy: actorId } });
   }
   listAgents(user: SessionUser) { return this.prisma.db.agent.findMany({ where: user.locationScoped ? { locationId: { in: user.locationIds }, active: true } : { active: true }, include: { location: { select: { code: true, name: true } } }, orderBy: { name: 'asc' } }); }
   createAgent(data: { name: string; locationId: string; onPayroll?: boolean; defaultTier?: string }) { return this.prisma.db.agent.create({ data }); }
   listRiders(user: SessionUser, locationId?: string) { return this.prisma.db.rider.findMany({ where: { active: true, locationId: locationId ?? (user.locationScoped ? { in: user.locationIds } : undefined) }, orderBy: { name: 'asc' } }); }
   createRider(data: { name: string; locationId: string }) { return this.prisma.db.rider.create({ data }); }
 
+  /**
+   * Delete master data (owner request 2026-09-26, Owner only). An item never used in any transaction is removed; one that was
+   * used is archived (inactive) so past documents and reports stay correct.
+   */
+  async remove(kind: 'product' | 'supplier' | 'customer' | 'agent' | 'rider' | 'category' | 'location', id: string, actorId: string) {
+    const db = this.prisma.db;
+    const before = await (db[kind] as unknown as { findUnique: (a: object) => Promise<Record<string, unknown> | null> }).findUnique({ where: { id } });
+    if (!before) throw new NotFoundException();
+    try {
+      await db.$transaction(async (tx) => {
+        if (kind === 'product') {
+          // a product's own setup rows go with it; anything transactional blocks the delete
+          await tx.priceList.deleteMany({ where: { productId: id } });
+          await tx.productCost.deleteMany({ where: { productId: id } });
+          await tx.minStockLevel.deleteMany({ where: { productId: id } });
+          await tx.bundleComponent.deleteMany({ where: { bundleProductId: id } });
+        }
+        await (tx[kind] as unknown as { delete: (a: object) => Promise<unknown> }).delete({ where: { id } });
+      });
+      await this.audit.log({ action: 'DELETE', entityType: kind, entityId: id, before, userId: actorId });
+      return { deleted: true, archived: false, message: 'Deleted.' };
+    } catch (e) {
+      if (!(e instanceof Prisma.PrismaClientKnownRequestError) || !['P2003', 'P2014'].includes(e.code)) throw e;
+      if (kind === 'category') throw new BadRequestException('This category still has products; move them to another category first');
+      await (db[kind] as unknown as { update: (a: object) => Promise<unknown> }).update({ where: { id }, data: { active: false } });
+      await this.audit.log({ action: 'ARCHIVE', entityType: kind, entityId: id, before, after: { active: false }, userId: actorId });
+      return { deleted: false, archived: true, message: 'It is used in past transactions, so it was archived (hidden from new entries) instead of deleted.' };
+    }
+  }
+
+  /** Next free code after the highest number used (a count breaks once codes are imported or skipped). */
+  private async nextCode(model: 'supplier' | 'customer', prefix: string, width: number) {
+    const rows = await (this.prisma.db[model] as unknown as { findMany: (a: object) => Promise<{ code: string }[]> }).findMany({ where: { code: { startsWith: prefix } }, select: { code: true } });
+    const max = rows.reduce((m, r) => Math.max(m, Number(r.code.slice(prefix.length)) || 0), 0);
+    return `${prefix}${String(max + 1).padStart(width, '0')}`;
+  }
   parseDate(s?: string) { return s ? toDateOnly(s) : todayManila(); }
 }

@@ -17,12 +17,30 @@ export function findBrowser(configured = process.env.PUPPETEER_EXECUTABLE_PATH, 
   return list.find((p) => exists(p)) ?? null;
 }
 import { DailySalesReport, asNum } from './daily-sales-report';
+import { SettingsService } from '../common/settings.service';
+
+/** Company letterhead printed at the top of every form (Settings → Company letterhead). */
+export interface Letterhead { name?: string; address?: string; contact?: string; tin?: string; logoDataUrl?: string | null }
+export const LETTERHEAD_KEY = 'company.letterhead';
 
 /** HTML → PDF via puppeteer-core using PUPPETEER_EXECUTABLE_PATH, else an installed Chrome/Edge/Chromium. Falls back to returning HTML when no browser is available. */
 @Injectable()
 export class PdfService {
   private log = new Logger('Pdf');
+  constructor(private settings: SettingsService) {}
+
+  /** The letterhead block: logo + company name, address, TIN and contact, in the brand colours. */
+  async letterheadHtml(): Promise<string> {
+    const lh = ((await this.settings.get<Letterhead | null>(LETTERHEAD_KEY)) ?? {}) as Letterhead;
+    const name = lh.name || 'Get Wheysted Supplements';
+    const logo = lh.logoDataUrl && /^data:image\/(png|jpe?g|webp|svg\+xml);base64,/.test(lh.logoDataUrl) ? `<img src="${lh.logoDataUrl}" alt="" style="height:64px;width:auto;object-fit:contain">` : '';
+    const lines = [lh.address, [lh.tin ? `TIN ${lh.tin}` : '', lh.contact].filter(Boolean).join(' · ')].filter(Boolean).map((l) => `<div style="font-size:10px;color:#475569">${this.esc(l)}</div>`).join('');
+    return `<div style="display:flex;align-items:center;gap:14px;border-bottom:3px solid #C8102E;padding-bottom:8px;margin-bottom:10px">${logo}<div><div style="font-size:18px;font-weight:800;letter-spacing:.5px;color:#0B1F3A;text-transform:uppercase">${this.esc(name)}</div>${lines}</div></div>`;
+  }
+
   async render(html: string): Promise<{ buffer: Buffer; contentType: string; ext: 'pdf' | 'html' }> {
+    // every printed form carries the company letterhead
+    html = html.replace('<body>', `<body>${await this.letterheadHtml().catch(() => '')}`);
     // tests read the form text, so they can ask for the HTML version
     if (process.env.PDF_FORCE_HTML === 'true') return { buffer: Buffer.from(html), contentType: 'text/html', ext: 'html' };
     const exe = findBrowser();

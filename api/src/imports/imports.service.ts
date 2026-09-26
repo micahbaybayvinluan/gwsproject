@@ -4,6 +4,7 @@ import { XlsxService } from '../reports/xlsx.service';
 import { MasterService } from '../master/master.service';
 import { StockService, VIRTUAL_CODES } from '../stock/stock.service';
 import { AccountsService } from '../gl/accounts.service';
+import { MasterDataApprovals } from '../approvals/master-data.service';
 import { AuditService } from '../common/audit.service';
 import { parseProductGrid } from './product-import';
 import { classFromSection, entryScopeFor, matchTemplate, normalizeTitle, parseBranchTag, parseCaCodes, parseChannelTag, parseCoaGrid } from '../gl/coa-import';
@@ -15,7 +16,13 @@ import { AccountClass } from '@prisma/client';
 /** §13 / §15 bulk uploads: products (seed workbook + template), price lists, min stock, opening stock, actual count, chart of accounts, beginning balances, employees. */
 @Injectable()
 export class ImportsService {
-  constructor(private prisma: PrismaService, private xlsx: XlsxService, private master: MasterService, private stock: StockService, private accounts: AccountsService, private audit: AuditService) {}
+  constructor(private prisma: PrismaService, private xlsx: XlsxService, private master: MasterService, private stock: StockService, private accounts: AccountsService, private audit: AuditService, md: MasterDataApprovals) {
+    // bulk loads of new products / employees wait for the Owner like single entries; the file is kept with the request
+    const run = (fn: (buf: Buffer, u: SessionUser, p: Record<string, unknown>) => Promise<object>) => async (p: Record<string, unknown>, by: string) => ({ id: 'import', ...(await fn(Buffer.from(String(p.file), 'base64'), await md.sessionUserOf(by), p)) });
+    md.registerKind('ProductImport', { label: 'Product import', apply: run((b, u) => this.products(b, u)), link: () => '/products' });
+    md.registerKind('ProductWorkbookImport', { label: 'Product import', apply: run((b, u, p) => this.productsFromSeedWorkbook(b, u, (p.sheet as string | undefined) ?? undefined)), link: () => '/products' });
+    md.registerKind('EmployeeImport', { label: 'Employee import', apply: run((b, u) => this.employees(b, u)), link: () => '/payroll' });
+  }
 
   templates: Record<string, string[]> = {
     products: ['SKU', 'Barcode', 'Name', 'Category', 'Brand', 'Unit', 'SupplierCode', 'TrackExpiry', 'FranchiseVisible', 'RETAIL', 'DEALER', 'FRANCHISE', 'AGENT', 'Cost'],

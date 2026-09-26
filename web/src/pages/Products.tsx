@@ -1,3 +1,4 @@
+import { PendingMaster, pendingMessage } from '@/components/PendingMaster';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -15,7 +16,8 @@ export function ProductsPage() {
   const cats = useQuery({ queryKey: ['categories'], queryFn: () => api.get<{ id: string; name: string }[]>('/api/categories') });
   const tiers = useQuery({ queryKey: ['tiers'], queryFn: () => api.get<{ key: string; name: string }[]>('/api/products/tiers') });
   const [f, setF] = useState({ name: '', categoryId: '', brand: '', unit: 'pc', trackExpiry: true, franchiseVisible: true, prices: {} as Record<string, string>, cost: '' });
-  const m = useMutation({ mutationFn: () => api.post('/api/products', { ...f, prices: Object.fromEntries(Object.entries(f.prices).filter(([, v]) => v !== '').map(([k, v]) => [k, Number(v)])), cost: f.cost ? Number(f.cost) : undefined }), onSuccess: () => { setF({ ...f, name: '', prices: {}, cost: '' }); void qc.invalidateQueries({ queryKey: ['products-list'] }); } });
+  const [sent, setSent] = useState('');
+  const m = useMutation({ mutationFn: () => api.post('/api/products', { ...f, prices: Object.fromEntries(Object.entries(f.prices).filter(([, v]) => v !== '').map(([k, v]) => [k, Number(v)])), cost: f.cost ? Number(f.cost) : undefined }), onSuccess: (r) => { setSent(pendingMessage(r)); setF({ ...f, name: '', prices: {}, cost: '' }); void qc.invalidateQueries({ queryKey: ['products-list'] }); void qc.invalidateQueries({ queryKey: ['master-pending'] }); } });
   const visibleTiers = (tiers.data ?? []).filter((t) => can(`price.view.${t.key}`));
   return <div className="space-y-4">
     <div className="flex flex-wrap items-end gap-2"><h1 className="mr-auto text-xl font-semibold">Products</h1><Field label="Search"><Input value={search} onChange={(e) => setSearch(e.target.value)} /></Field><label className="flex items-center gap-1 pb-2 text-sm"><input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} /> include inactive</label></div>
@@ -24,7 +26,8 @@ export function ProductsPage() {
         {visibleTiers.map((t) => <Field key={t.key} label={`${t.name} price`}><Input type="number" step="0.01" value={f.prices[t.key] ?? ''} onChange={(e) => setF({ ...f, prices: { ...f.prices, [t.key]: e.target.value } })} /></Field>)}
         {can('cost.edit') && <Field label="Standard cost"><Input type="number" step="0.01" value={f.cost} onChange={(e) => setF({ ...f, cost: e.target.value })} /></Field>}
         <label className="flex items-end gap-2 pb-2 text-sm"><input type="checkbox" checked={f.trackExpiry} onChange={(e) => setF({ ...f, trackExpiry: e.target.checked })} /> Track expiry</label><label className="flex items-end gap-2 pb-2 text-sm"><input type="checkbox" checked={f.franchiseVisible} onChange={(e) => setF({ ...f, franchiseVisible: e.target.checked })} /> Visible to franchises</label></div>
-      <Button className="mt-3" disabled={!f.name || !f.categoryId} onClick={() => m.mutate()}>Create</Button><ErrorBox error={m.error} /></Card>}
+      <Button className="mt-3" disabled={!f.name || !f.categoryId} onClick={() => m.mutate()}>Create</Button>{sent && <p className="mt-2 text-sm text-amber-700">{sent}</p>}<ErrorBox error={m.error} /></Card>}
+    <PendingMaster kind="Product" label="New products" />
     <DataTable exportName="Products" data={q.data ?? []} onRowClick={(r) => nav(`/products/${r.id}`)} columns={[{ header: 'SKU', accessorKey: 'sku' }, { header: 'Name', accessorKey: 'name', cell: (c) => <>{String(c.getValue())}{c.row.original.needsReview && <Badge tone="amber">review</Badge>}{!c.row.original.active && <Badge tone="red">inactive</Badge>}</> }, { header: 'Category', accessorFn: (r) => r.category.name }, ...visibleTiers.map((t) => ({ header: t.name, accessorFn: (r: Product) => r.tierPrices[t.key], cell: (c: { getValue: () => unknown }) => <span className="num block">{c.getValue() != null ? peso(c.getValue()) : '—'}</span> })), ...(can('cost.view') ? [{ header: 'Cost', accessorKey: 'cost', cell: (c: { getValue: () => unknown }) => <span className="num block">{c.getValue() != null ? peso(c.getValue()) : '—'}</span> }] : []), { header: 'Supplier', accessorFn: (r) => (r.supplier ? r.supplier.name ? `${r.supplier.code} — ${r.supplier.name}` : r.supplier.code : '') }]} />
   </div>;
 }
@@ -80,9 +83,11 @@ export function SuppliersPage() {
   const { can } = useAuth(); const qc = useQueryClient();
   const q = useQuery({ queryKey: ['suppliers'], queryFn: () => api.get<{ id: string; code: string; supplierName?: string; contact: string | null; termsDays: number; isConsignor: boolean; active: boolean }[]>('/api/suppliers') });
   const [f, setF] = useState({ name: '', contact: '', termsDays: '30', isConsignor: false });
-  const m = useMutation({ mutationFn: () => api.post('/api/suppliers', { ...f, termsDays: Number(f.termsDays) }), onSuccess: () => { setF({ name: '', contact: '', termsDays: '30', isConsignor: false }); void qc.invalidateQueries({ queryKey: ['suppliers'] }); } });
+  const [sent, setSent] = useState('');
+  const m = useMutation({ mutationFn: () => api.post('/api/suppliers', { ...f, termsDays: Number(f.termsDays) }), onSuccess: (r) => { setSent(pendingMessage(r)); setF({ name: '', contact: '', termsDays: '30', isConsignor: false }); void qc.invalidateQueries({ queryKey: ['suppliers'] }); void qc.invalidateQueries({ queryKey: ['master-pending'] }); } });
   return <div className="space-y-4"><h1 className="text-xl font-semibold">Suppliers</h1>
     {can('supplier.edit') && <Card title="New supplier"><div className="grid gap-3 md:grid-cols-4"><Field label="Name (Admin/Head Auditor only)"><Input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></Field><Field label="Contact"><Input value={f.contact} onChange={(e) => setF({ ...f, contact: e.target.value })} /></Field><Field label="Terms (days)"><Input type="number" value={f.termsDays} onChange={(e) => setF({ ...f, termsDays: e.target.value })} /></Field><label className="flex items-end gap-2 pb-2 text-sm"><input type="checkbox" checked={f.isConsignor} onChange={(e) => setF({ ...f, isConsignor: e.target.checked })} /> Consignor (consignment-in)</label></div><Button className="mt-3" disabled={!f.name} onClick={() => m.mutate()}>Create</Button><ErrorBox error={m.error} /></Card>}
+    {sent && <p className="text-sm text-amber-700">{sent}</p>}<PendingMaster kind="Supplier" label="New suppliers" />
     <DataTable data={q.data ?? []} columns={[{ header: 'Code', accessorKey: 'code' }, ...(can('supplier.view.name') ? [{ header: 'Name', accessorKey: 'supplierName' }] : []), { header: 'Contact', accessorKey: 'contact' }, { header: 'Terms', accessorKey: 'termsDays' }, { header: '', cell: (c) => c.row.original.isConsignor ? <Badge tone="purple">consignor</Badge> : null }]} />
     {!can('supplier.view.name') && <p className="text-xs text-slate-500">Supplier names are visible to Admin, Head Auditor and External Auditor only (§16).</p>}
   </div>;

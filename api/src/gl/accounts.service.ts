@@ -1,3 +1,4 @@
+import { MasterDataApprovals } from '../approvals/master-data.service';
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { AccountClass, Prisma } from '@prisma/client';
 import { PrismaService, Tx } from '../common/prisma.service';
@@ -11,7 +12,9 @@ const tkey = (t: string) => normalizeTitle(t).toLowerCase();
 /** Chart of accounts, branch templating (§10.2) and the AccountResolver used by posting rules. */
 @Injectable()
 export class AccountsService {
-  constructor(private prisma: PrismaService, private audit: AuditService) {}
+  constructor(private prisma: PrismaService, private audit: AuditService, md: MasterDataApprovals) {
+    md.registerKind('Account', { label: 'Account (chart of accounts)', apply: (p, by) => this.create(p as never, by), link: () => '/accounting/accounts' });
+  }
 
   list(q: { class?: string; branchTagId?: string; entryScope?: string; paymentOnly?: boolean; active?: boolean } = {}) {
     return this.prisma.db.account.findMany({

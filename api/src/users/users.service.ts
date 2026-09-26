@@ -1,20 +1,32 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { MasterDataApprovals } from '../approvals/master-data.service';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import type { SessionUser } from '../common/request-context';
 import * as argon2 from 'argon2';
 import { PrismaService } from '../common/prisma.service';
 import { AuditService } from '../common/audit.service';
 import { SessionStore } from '../auth/session.store';
 import { PERMISSION_KEYS, ROLE_BY_KEY, SINGLE_LOCATION_ROLES } from '../common/permissions';
 
-export interface CreateUserInput { username: string; email: string; fullName: string; idNumber: string; roleKey: string; password: string; locationIds?: string[] }
+export interface CreateUserInput { username: string; email: string; fullName: string; idNumber: string; roleKey: string; password?: string; passwordHash?: string; locationIds?: string[]; employeeId?: string }
 
 @Injectable()
 export class UsersService {
-  constructor(private prisma: PrismaService, private audit: AuditService, private sessions: SessionStore) {}
+  constructor(private prisma: PrismaService, private audit: AuditService, private sessions: SessionStore, private md: MasterDataApprovals) {
+    md.registerKind('UserAccount', { label: 'User account', apply: (p, by) => this.create(p as unknown as CreateUserInput, by), link: () => '/users' });
+  }
 
   private select = { id: true, username: true, email: true, fullName: true, idNumber: true, accountabilityAcceptedAt: true, active: true, mustChangePassword: true, totpEnabled: true, lastLoginAt: true, createdAt: true, role: { select: { key: true, name: true } }, assignments: { select: { location: { select: { id: true, code: true, name: true, type: true } } } }, permissionOverrides: { select: { permissionKey: true, granted: true } } } as const;
 
   list() { return this.prisma.db.user.findMany({ select: this.select, orderBy: { username: 'asc' } }); }
   async get(id: string) { const u = await this.prisma.db.user.findUnique({ where: { id }, select: this.select }); if (!u) throw new NotFoundException(); return u; }
+
+  /** The Owner's new users are created at once; anyone else with user.manage waits for the Owner. */
+  async createGated(input: CreateUserInput, user: SessionUser) {
+    const { password, ...rest } = input;
+    // the temporary password never sits in the request in plain text
+    const payload = user.roleKey === 'ADMIN' ? rest : { ...rest, passwordHash: await argon2.hash(password ?? '') };
+    return this.md.submit('UserAccount', payload, user, { name: input.fullName, username: input.username, email: input.email, role: input.roleKey, companyId: input.idNumber }, () => this.create(input, user.id));
+  }
 
   async create(input: CreateUserInput, actorId: string) {
     const role = await this.prisma.db.role.findUnique({ where: { key: input.roleKey } });
@@ -23,13 +35,32 @@ export class UsersService {
     const user = await this.prisma.db.user.create({
       data: {
         username: input.username, email: input.email.toLowerCase(), fullName: input.fullName, roleId: role.id,
-        idNumber: input.idNumber, passwordHash: await argon2.hash(input.password), mustChangePassword: true, createdBy: actorId,
+        idNumber: input.idNumber, passwordHash: input.passwordHash ?? (await argon2.hash(input.password ?? '')), mustChangePassword: true, createdBy: actorId,
         assignments: { create: (input.locationIds ?? []).map((locationId) => ({ locationId })) },
       },
       select: this.select,
     });
     await this.audit.log({ action: 'CREATE', entityType: 'User', entityId: user.id, after: user });
+    if (input.employeeId) await this.prisma.db.employee.update({ where: { id: input.employeeId }, data: { userId: user.id } });
     return user;
+  }
+
+  /**
+   * HR opens a user account for an employee (owner request 2026-09-26). The Owner approves before the account exists; the
+   * temporary password is stored only as a hash in the request, and the person must change it at first sign-in.
+   */
+  async requestAccountForEmployee(employeeId: string, input: { username: string; email: string; roleKey: string; locationIds?: string[]; password: string }, user: SessionUser) {
+    const emp = await this.prisma.db.employee.findUnique({ where: { id: employeeId } });
+    if (!emp) throw new NotFoundException('Employee not found');
+    if (emp.userId) throw new BadRequestException('This employee already has a user account');
+    if (['ADMIN', 'EXTERNAL_AUDITOR'].includes(input.roleKey)) throw new ForbiddenException('Only the Owner creates Admin and External Auditor accounts');
+    if (!(await this.prisma.db.role.findUnique({ where: { key: input.roleKey } }))) throw new BadRequestException('Unknown role');
+    this.validateAssignments(input.roleKey, input.locationIds ?? []);
+    const taken = await this.prisma.db.user.findFirst({ where: { OR: [{ username: input.username }, { email: input.email.toLowerCase() }] } });
+    if (taken) throw new BadRequestException('That username or email is already used');
+    const locations = await this.prisma.db.location.findMany({ where: { id: { in: input.locationIds ?? [] } }, select: { name: true } });
+    const payload = { username: input.username, email: input.email, fullName: emp.fullName, idNumber: emp.employeeNo, roleKey: input.roleKey, locationIds: input.locationIds ?? [], passwordHash: await argon2.hash(input.password), employeeId };
+    return this.md.submit('UserAccount', payload, user, { name: emp.fullName, username: input.username, email: input.email, role: input.roleKey, branch: locations.map((l) => l.name).join(', '), companyId: emp.employeeNo }, () => this.create(payload, user.id));
   }
 
   async update(id: string, patch: { fullName?: string; idNumber?: string; email?: string; roleKey?: string; active?: boolean; locationIds?: string[]; resetPassword?: string; resetTotp?: boolean }, actorId: string) {

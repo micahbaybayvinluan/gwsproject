@@ -28,6 +28,9 @@ export const APPROVAL_TYPES = [
   'AR_PAYMENT',
   'DISCREPANCY_EXPLANATION',
   'AUDIT_REVISION',
+  'MASTER_DATA_NEW',
+  'WAREHOUSE_IN',
+  'WAREHOUSE_OUT',
 ] as const;
 export type ApprovalType = (typeof APPROVAL_TYPES)[number];
 
@@ -60,6 +63,12 @@ const BASE_KEYS = [
   'charge.assign', 'contribution.remit',
   // corrections of reports: request (Audit Associate) and the per-staff revision log
   'revision.request', 'revision.view',
+  // Executive Assistant: main bank entries, supplier payables, main office expenses, balance-sheet accounts only (owner request 2026-09-26)
+  'bank.entry', 'bs.accounts.view',
+  // Accounting edits journal entries (involved users and the Owner are notified)
+  'gl.voucher.edit',
+  // editing / deleting master data (Owner; Head Auditor edits products and suppliers)
+  'master.delete',
 ] as const;
 
 export const PERMISSION_KEYS: readonly string[] = [
@@ -71,7 +80,7 @@ export const PERMISSION_KEYS: readonly string[] = [
 export const ROLE_KEYS = [
   'ADMIN', 'EXTERNAL_AUDITOR', 'HEAD_AUDITOR', 'ASST_AUDITOR', 'AUDIT_ASSOCIATE',
   'WAREHOUSE_IN_CHARGE', 'WAREHOUSE_ASSOCIATE', 'SALES_ASSOCIATE', 'FRANCHISE_SALES_ASSOCIATE',
-  'FRANCHISE_OWNER', 'CUSTOM', 'ACCOUNTING_HEAD', 'ACCOUNTING_ASSOCIATE', 'HR_STAFF', 'FIELD_AUDITOR',
+  'FRANCHISE_OWNER', 'CUSTOM', 'ACCOUNTING_HEAD', 'ACCOUNTING_ASSOCIATE', 'HR_STAFF', 'FIELD_AUDITOR', 'EXECUTIVE_ASSISTANT',
 ] as const;
 export type RoleKey = (typeof ROLE_KEYS)[number];
 
@@ -155,9 +164,9 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
   {
     key: 'WAREHOUSE_IN_CHARGE',
     name: 'Warehouse In-Charge',
-    description: 'Inputs warehouse receiving, transfers (to any branch or franchise), counts and write-offs through the same approvals as the associate; costs are entered and approved by the Head Auditor. Can edit an associate\'s entry, which takes effect only after that associate accepts it. No cost.',
+    description: 'Inputs warehouse receiving, transfers (to any branch or franchise), counts and write-offs; costs are entered and approved by the Head Auditor. Approves every warehouse associate\'s goods in and out before stock moves (own entries need no second approval). Can edit an associate\'s entry, which takes effect only after that associate accepts it. No cost.',
     permissions: [
-      'product.view', 'supplier.view.code', 'location.view.own', 'receiving.create', 'transfer.create', 'transfer.confirm', 'warehouse.edit_others', 'approval.act.WAREHOUSE_EDIT',
+      'product.view', 'supplier.view.code', 'location.view.own', 'receiving.create', 'transfer.create', 'transfer.confirm', 'warehouse.edit_others', 'approval.act.WAREHOUSE_EDIT', 'approval.act.WAREHOUSE_IN', 'approval.act.WAREHOUSE_OUT',
       'count.create', 'writeoff.create', 'report.inventory.own', 'dashboard.view', 'notification.view', 'price.view.RETAIL', 'cashfund.use', 'discrepancy.explain',
     ],
   },
@@ -206,14 +215,14 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
     permissions: [
       ...READ_ALL, ...COST_BUNDLE, ...ACCOUNTING_BASE, 'gl.period.lock', 'gl.beginning_balance',
       'payroll.view.summary', 'payroll.view.detail', 'payroll.close', 'expense.view', 'cashfund.view.all', 'cashfund.manage', 'contribution.remit',
-      'ar.collect', 'ar.approve', ...approvals('AR_PAYMENT'),
+      'ar.collect', 'ar.approve', ...approvals('AR_PAYMENT'), 'gl.voucher.edit', 'bank.entry', 'bs.accounts.view',
     ],
   },
   {
     key: 'ACCOUNTING_ASSOCIATE',
     name: 'Accounting Associate',
     description: 'Ledger, vouchers, main expenses. Payroll totals only.',
-    permissions: [...READ_ALL, ...COST_BUNDLE, ...ACCOUNTING_BASE, 'payroll.view.summary', 'cashfund.view.all', 'ar.collect', 'ar.approve', ...approvals('AR_PAYMENT')],
+    permissions: [...READ_ALL, ...COST_BUNDLE, ...ACCOUNTING_BASE, 'payroll.view.summary', 'cashfund.view.all', 'ar.collect', 'ar.approve', ...approvals('AR_PAYMENT'), 'gl.voucher.edit', 'bank.entry', 'bs.accounts.view'],
   },
   {
     key: 'HR_STAFF',
@@ -226,6 +235,12 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
     name: 'Field Auditor',
     description: 'View-only inventory of every branch, warehouse and franchise (stock, expiry, movements, counts); records Actual Inventory Counts, confirms the cash fund found in the store and submits the Store Inspection Report to HR. No sales, no cost, no edits.',
     permissions: ['product.view', 'location.view.all', 'price.view.RETAIL', 'count.create', 'discrepancy.view', 'report.inventory.all', 'dashboard.view', 'notification.view', 'cashfund.check', 'inspection.create'],
+  },
+  {
+    key: 'EXECUTIVE_ASSISTANT',
+    name: 'Executive Assistant',
+    description: 'Main office: records receipts and payments on the main bank accounts (chooses the bank account and the book: advances to, advances from, supplier payables, office expenses…), sees supplier payables and main office expenses, and the balance of each balance-sheet account. No branch reports, no supplier cost, no income statement.',
+    permissions: ['dashboard.view', 'notification.view', 'bank.entry', 'bs.accounts.view', 'supplier.view.code', 'supplier.view.name'],
   },
 ];
 
@@ -269,6 +284,12 @@ export const APPROVAL_ROUTING: Record<ApprovalType, { roles: RoleKey[]; anyOf?: 
   DISCREPANCY_EXPLANATION: { roles: ['HEAD_AUDITOR'] },
   /** Correction requested by the Audit Associate: Head Auditor only; the staff involved are notified; recorded in the revision log. */
   AUDIT_REVISION: { roles: ['HEAD_AUDITOR'] },
+  /** New master data (products, suppliers, customers, employees, user accounts, …) entered by anyone but the Owner waits for the Owner. */
+  MASTER_DATA_NEW: { roles: ['ADMIN'] },
+  /** Goods into the warehouse entered by a Warehouse Associate (receiving after the cost is approved, transfer-in confirmation): the In-Charge approves before stock is posted. */
+  WAREHOUSE_IN: { roles: ['WAREHOUSE_IN_CHARGE'] },
+  /** Goods out of the warehouse prepared by a Warehouse Associate (pull-outs / transfers, write-offs): the In-Charge approves first. */
+  WAREHOUSE_OUT: { roles: ['WAREHOUSE_IN_CHARGE'] },
 };
 
 /** EDIT_REQUEST approvers depend on who asks (§6.1). */

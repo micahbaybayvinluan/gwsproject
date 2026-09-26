@@ -248,7 +248,7 @@ Each section below starts with a hidden line that says which roles it is for. Th
 ## HR: new employees and their user accounts
 <!-- for: employee.manage -->
 - **Payroll & Contributions → Employees → Add employee:** the employee waits for Owner approval before payroll can use it.
-- Open an approved employee and press **Create user account…**: username, role, temporary password and branch. The account waits for the Owner (or Admin). The person signs in once it is approved.
+- Open an approved employee and press **Create user account…**: username (no spaces), role, branch and a temporary password (**Generate** makes one). Email is optional. The account waits for the Owner (or Admin). The person signs in once it is approved.
 - HR cannot create Admin or External Auditor accounts, and has no access to franchise staff or franchise payroll.
 
 ## Warehouse: In-Charge approval of stock in and out
@@ -347,7 +347,7 @@ Each section below starts with a hidden line that says which roles it is for. Th
 
 ## Users, audit log and settings (Admin)
 <!-- for: user.manage, audit_log.view, settings.thresholds -->
-- **Users & Roles → New user:** full name, company ID (required), role, temporary password and branch. The person sets their own password and accepts the statement at first sign-in.
+- **Users & Roles → New user:** type the full name and company ID, a username (no spaces), the role and the branch (only asked for roles that work at a branch). Email is optional. Press **Generate** for a temporary password, then **Create account**. If the button is grey, the text beside it says what is still needed. The confirmation shows the username and temporary password to give the person, who sets their own password and accepts the statement at first sign-in.
 - Click a user to change the role or branches, tick extra permissions for a custom role, switch the account off, or reset the password. **Activity** opens everything the person did.
 - **Audit Log** records every action with the person, time and details.
 - **Settings** holds thresholds (discrepancy days, alert levels, automatic posting and others).

@@ -7,7 +7,7 @@ import { AuditService } from '../common/audit.service';
 import { SessionStore } from '../auth/session.store';
 import { PERMISSION_KEYS, ROLE_BY_KEY, SINGLE_LOCATION_ROLES } from '../common/permissions';
 
-export interface CreateUserInput { username: string; email: string; fullName: string; idNumber: string; roleKey: string; password?: string; passwordHash?: string; locationIds?: string[]; employeeId?: string }
+export interface CreateUserInput { username: string; email?: string; fullName: string; idNumber: string; roleKey: string; password?: string; passwordHash?: string; locationIds?: string[]; employeeId?: string }
 
 @Injectable()
 export class UsersService {
@@ -22,6 +22,11 @@ export class UsersService {
 
   /** The Owner's new users are created at once; anyone else with user.manage waits for the Owner. */
   async createGated(input: CreateUserInput, user: SessionUser) {
+    input = { ...input, email: this.emailOf(input) };
+    // check here so the person entering it sees the problem now, not the Owner at approval time
+    if (!(await this.prisma.db.role.findUnique({ where: { key: input.roleKey } }))) throw new BadRequestException('Unknown role');
+    this.validateAssignments(input.roleKey, input.locationIds ?? []);
+    await this.assertFree(input.username, input.email!);
     const { password, ...rest } = input;
     // the temporary password never sits in the request in plain text
     const payload = user.roleKey === 'ADMIN' ? rest : { ...rest, passwordHash: await argon2.hash(password ?? '') };
@@ -32,9 +37,10 @@ export class UsersService {
     const role = await this.prisma.db.role.findUnique({ where: { key: input.roleKey } });
     if (!role) throw new BadRequestException('Unknown role');
     this.validateAssignments(input.roleKey, input.locationIds ?? []);
+    await this.assertFree(input.username, this.emailOf(input));
     const user = await this.prisma.db.user.create({
       data: {
-        username: input.username, email: input.email.toLowerCase(), fullName: input.fullName, roleId: role.id,
+        username: input.username, email: this.emailOf(input), fullName: input.fullName, roleId: role.id,
         idNumber: input.idNumber, passwordHash: input.passwordHash ?? (await argon2.hash(input.password ?? '')), mustChangePassword: true, createdBy: actorId,
         assignments: { create: (input.locationIds ?? []).map((locationId) => ({ locationId })) },
       },
@@ -49,18 +55,18 @@ export class UsersService {
    * HR opens a user account for an employee (owner request 2026-09-26). The Owner approves before the account exists; the
    * temporary password is stored only as a hash in the request, and the person must change it at first sign-in.
    */
-  async requestAccountForEmployee(employeeId: string, input: { username: string; email: string; roleKey: string; locationIds?: string[]; password: string }, user: SessionUser) {
+  async requestAccountForEmployee(employeeId: string, input: { username: string; email?: string; roleKey: string; locationIds?: string[]; password: string }, user: SessionUser) {
     const emp = await this.prisma.db.employee.findUnique({ where: { id: employeeId } });
     if (!emp) throw new NotFoundException('Employee not found');
     if (emp.userId) throw new BadRequestException('This employee already has a user account');
     if (['ADMIN', 'EXTERNAL_AUDITOR'].includes(input.roleKey)) throw new ForbiddenException('Only the Owner creates Admin and External Auditor accounts');
     if (!(await this.prisma.db.role.findUnique({ where: { key: input.roleKey } }))) throw new BadRequestException('Unknown role');
     this.validateAssignments(input.roleKey, input.locationIds ?? []);
-    const taken = await this.prisma.db.user.findFirst({ where: { OR: [{ username: input.username }, { email: input.email.toLowerCase() }] } });
-    if (taken) throw new BadRequestException('That username or email is already used');
+    const email = this.emailOf(input);
+    await this.assertFree(input.username, email);
     const locations = await this.prisma.db.location.findMany({ where: { id: { in: input.locationIds ?? [] } }, select: { name: true } });
-    const payload = { username: input.username, email: input.email, fullName: emp.fullName, idNumber: emp.employeeNo, roleKey: input.roleKey, locationIds: input.locationIds ?? [], passwordHash: await argon2.hash(input.password), employeeId };
-    return this.md.submit('UserAccount', payload, user, { name: emp.fullName, username: input.username, email: input.email, role: input.roleKey, branch: locations.map((l) => l.name).join(', '), companyId: emp.employeeNo }, () => this.create(payload, user.id));
+    const payload = { username: input.username, email, fullName: emp.fullName, idNumber: emp.employeeNo, roleKey: input.roleKey, locationIds: input.locationIds ?? [], passwordHash: await argon2.hash(input.password), employeeId };
+    return this.md.submit('UserAccount', payload, user, { name: emp.fullName, username: input.username, email, role: input.roleKey, branch: locations.map((l) => l.name).join(', '), companyId: emp.employeeNo }, () => this.create(payload, user.id));
   }
 
   async update(id: string, patch: { fullName?: string; idNumber?: string; email?: string; roleKey?: string; active?: boolean; locationIds?: string[]; resetPassword?: string; resetTotp?: boolean }, actorId: string) {
@@ -106,9 +112,17 @@ export class UsersService {
   /** Recent sign-ins (IP / device) so the Admin can spot an account used from unexpected places. */
   logins(id: string) { return this.prisma.db.loginSessionRecord.findMany({ where: { userId: id }, orderBy: { createdAt: 'desc' }, take: 30 }); }
 
+  /** Staff without an email get a placeholder address, since each account needs a unique one. */
+  private emailOf(input: { username: string; email?: string }) { return (input.email?.trim() || `${input.username}@gws.local`).toLowerCase(); }
+
+  private async assertFree(username: string, email: string) {
+    const taken = await this.prisma.db.user.findFirst({ where: { OR: [{ username: { equals: username, mode: 'insensitive' } }, { email }] }, select: { username: true } });
+    if (taken) throw new BadRequestException(taken.username.toLowerCase() === username.toLowerCase() ? `The username "${username}" is already used. Choose another.` : `The email ${email} is already used by ${taken.username}.`);
+  }
+
   private validateAssignments(roleKey: string, locationIds: string[]) {
     if (SINGLE_LOCATION_ROLES.includes(roleKey as never) && locationIds.length !== 1) {
-      throw new BadRequestException(`${ROLE_BY_KEY[roleKey]?.name ?? roleKey} must be assigned exactly one location`);
+      throw new BadRequestException(`${ROLE_BY_KEY[roleKey]?.name ?? roleKey} must be assigned exactly one branch. Choose the branch.`);
     }
   }
 

@@ -7,7 +7,10 @@ import type { SessionUser } from '../common/request-context';
 import { PrismaService } from '../common/prisma.service';
 
 // Accounts are personal: every new account names its person (full name + company ID) and starts with a temporary password the person must replace.
-const CreateUser = z.object({ username: z.string().min(3), email: z.string().email(), fullName: z.string().min(3), idNumber: z.string().trim().min(1, 'Company ID number of the person is required'), roleKey: z.string(), password: z.string().min(10), locationIds: z.array(z.string().uuid()).optional() });
+const Username = z.string().trim().min(3, 'Username needs at least 3 characters').regex(/^[A-Za-z0-9._-]+$/, 'Username: letters, numbers, dots or dashes only (no spaces)');
+// email is optional: many staff have none; the account then gets <username>@gws.local
+const OptionalEmail = z.union([z.literal(''), z.string().trim().email('That email address is not valid')]).optional();
+const CreateUser = z.object({ username: Username, email: OptionalEmail, fullName: z.string().min(3), idNumber: z.string().trim().min(1, 'Company ID number of the person is required'), roleKey: z.string(), password: z.string().min(10, 'The temporary password needs at least 10 characters'), locationIds: z.array(z.string().uuid()).optional() });
 const UpdateUser = z.object({ fullName: z.string().optional(), idNumber: z.string().trim().min(1).optional(), email: z.string().email().optional(), roleKey: z.string().optional(), active: z.boolean().optional(), locationIds: z.array(z.string().uuid()).optional(), resetPassword: z.string().min(10).optional(), resetTotp: z.boolean().optional() });
 const Overrides = z.object({ overrides: z.array(z.object({ permissionKey: z.string(), granted: z.boolean() })) });
 const RolePatch = z.object({ name: z.string().optional(), description: z.string().optional(), permissions: z.array(z.string()).optional() });
@@ -46,7 +49,7 @@ export class AuditLogController {
   }
 }
 
-const HrAccount = z.object({ username: z.string().trim().min(3), email: z.string().email(), roleKey: z.string(), password: z.string().min(10), locationIds: z.array(z.string().uuid()).optional() });
+const HrAccount = z.object({ username: Username, email: OptionalEmail, roleKey: z.string(), password: z.string().min(10, 'The temporary password needs at least 10 characters'), locationIds: z.array(z.string().uuid()).optional() });
 
 /** HR opens user accounts for employees; the Owner approves (owner request 2026-09-26). */
 @Controller('api/hr/employees')

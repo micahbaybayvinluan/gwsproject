@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { AccountFields, missingFor, type AccountDraft } from '@/components/NewUserFields';
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api, fmtDate, peso, today } from '@/lib/api';
@@ -106,19 +107,14 @@ function NewAccountForm({ emp, onDone }: { emp: { id: string; fullName: string; 
   const qc = useQueryClient();
   const roles = useQuery({ queryKey: ['hr-roles'], queryFn: () => api.get<{ key: string; name: string }[]>('/api/hr/employees/roles') });
   const locations = useQuery({ queryKey: ['locations'], queryFn: () => api.get<{ id: string; name: string; type: string }[]>('/api/locations') });
-  const [f, setF] = useState({ username: '', email: '', roleKey: 'SALES_ASSOCIATE', locationId: emp.locationId ?? '', password: '' });
-  const m = useMutation({ mutationFn: () => api.post('/api/hr/employees/' + emp.id + '/account', { username: f.username, email: f.email, roleKey: f.roleKey, password: f.password, locationIds: f.locationId ? [f.locationId] : [] }), onSuccess: (r) => { void qc.invalidateQueries({ queryKey: ['master-pending'] }); onDone((r as { message?: string }).message ?? 'Account created.'); } });
+  const [f, setF] = useState<AccountDraft>({ username: '', email: '', roleKey: 'SALES_ASSOCIATE', locationIds: emp.locationId ? [emp.locationId] : [], password: '' });
+  const missing = missingFor(f);
+  const m = useMutation({ mutationFn: () => api.post('/api/hr/employees/' + emp.id + '/account', { username: f.username.trim(), email: f.email.trim(), roleKey: f.roleKey, password: f.password, locationIds: f.locationIds }), onSuccess: (r) => { void qc.invalidateQueries({ queryKey: ['master-pending'] }); onDone((r as { message?: string }).message ?? 'Account created.'); } });
   return <div className="mt-3 rounded-md border border-slate-200 p-3">
     <div className="mb-2 text-sm font-medium">User account for {emp.fullName} <span className="text-xs text-slate-500">(company ID {emp.employeeNo})</span></div>
-    <div className="grid gap-2 md:grid-cols-5">
-      <Field label="Username"><Input value={f.username} onChange={(e) => setF({ ...f, username: e.target.value.trim() })} /></Field>
-      <Field label="Email"><Input type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value.trim() })} /></Field>
-      <Field label="Role"><Select value={f.roleKey} onChange={(e) => setF({ ...f, roleKey: e.target.value })}>{roles.data?.map((r) => <option key={r.key} value={r.key}>{r.name}</option>)}</Select></Field>
-      <Field label="Branch"><Select value={f.locationId} onChange={(e) => setF({ ...f, locationId: e.target.value })}><option value="">— none —</option>{locations.data?.filter((l) => l.type !== 'VIRTUAL').map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</Select></Field>
-      <Field label="Temporary password (10+)"><Input type="text" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></Field>
-    </div>
-    <p className="mt-1 text-xs text-slate-500">The Owner approves the account. Give the temporary password to the person; they set their own at first sign-in.</p>
-    <div className="mt-2 flex gap-2"><Button disabled={f.username.length < 3 || !f.email || f.password.length < 10 || m.isPending} onClick={() => m.mutate()}>Send to the Owner</Button><Button variant="outline" onClick={() => onDone('')}>Cancel</Button></div>
+    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3"><AccountFields f={f} setF={setF} roles={roles.data ?? []} locations={locations.data ?? []} /></div>
+    <p className="mt-2 text-xs text-slate-500">The Owner approves the account. Give the username and temporary password to the person; they set their own password at first sign-in.</p>
+    <div className="mt-3 flex flex-wrap items-center gap-2"><Button disabled={missing.length > 0 || m.isPending} onClick={() => m.mutate()}>Send to the Owner</Button><Button variant="outline" onClick={() => onDone('')}>Cancel</Button>{missing.length > 0 && <span className="text-sm text-slate-500">Still needed: {missing.join(', ')}</span>}</div>
     <ErrorBox error={m.error} />
   </div>;
 }

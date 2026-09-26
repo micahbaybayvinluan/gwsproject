@@ -12,9 +12,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate dev",
-    "prisma:deploy": "prisma migrate deploy",
-    "prisma:seed": "tsx prisma/seed.ts",
+    "prisma:migrate": "node ../scripts/ensure-env.mjs && prisma migrate dev",
+    "prisma:deploy": "node ../scripts/ensure-env.mjs && prisma migrate deploy",
+    "prisma:seed": "node ../scripts/ensure-env.mjs && tsx prisma/seed.ts",
     "import:products": "tsx src/imports/cli.ts products",
     "import:coa": "tsx src/imports/cli.ts coa",
     "login-check": "tsx prisma/login-check.ts"

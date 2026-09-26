@@ -33,6 +33,7 @@ docker compose up -d postgres redis            # add "minio minio-init clamav" f
 pnpm --filter @gws/api prisma:generate
 pnpm --filter @gws/api prisma:deploy           # applies prisma/migrations
 pnpm --filter @gws/api prisma:seed             # roles, locations, tiers, test users + products, opening stock and chart of accounts from /seed
+# or all four steps above at once: pnpm update-db  (creates api/.env if missing)
 pnpm dev                                       # api on :4000 (nest start --watch), web on :5173 (vite)
 ```
 

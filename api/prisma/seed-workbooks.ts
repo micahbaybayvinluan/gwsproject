@@ -5,7 +5,7 @@
  *  - ACCTG PROGRAM - FORMAT.xlsm → chart of accounts (BALANCE SHEET + INCOME STATEMENT, codes from CA), beginning balances, dealer customers
  * Idempotent: existing products/accounts are left alone; opening stock is posted once.
  */
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { gridOf, loadWorkbook } from '../src/imports/workbook-readers';
@@ -77,9 +77,16 @@ async function seedAccounts(prisma: PrismaClient, file: string) {
   const fiscalYear = Number((process.env.FISCAL_YEAR_START || '2026-01-01').slice(0, 4));
   const usedCodes = new Set((await prisma.account.findMany({ select: { code: true } })).map((a) => a.code));
   const byTitle = new Map((await prisma.account.findMany({ select: { id: true, title: true } })).map((a) => [tkey(a.title), a.id]));
-  let created = 0, balances = 0, dealers = 0;
+  let created = 0, balances = 0, dealers = 0, repaired = 0, kept = 0;
+  // workbook beginning balance per account; rows that share an account title are added together
+  const expected = new Map<string, { debit: Prisma.Decimal; credit: Prisma.Decimal }>();
+  const addBalance = (accountId: string, r: { beginningDebit?: number | null; beginningCredit?: number | null }) => {
+    if (!r.beginningDebit && !r.beginningCredit) return;
+    const e = expected.get(accountId) ?? { debit: new Prisma.Decimal(0), credit: new Prisma.Decimal(0) };
+    expected.set(accountId, { debit: e.debit.add(money(r.beginningDebit)), credit: e.credit.add(money(r.beginningCredit)) });
+  };
   for (const r of rows) {
-    if (byTitle.has(tkey(r.title))) { const id = byTitle.get(tkey(r.title))!; if (r.beginningDebit || r.beginningCredit) { await prisma.beginningBalance.upsert({ where: { fiscalYear_accountId: { fiscalYear, accountId: id } }, create: { fiscalYear, accountId: id, debit: money(r.beginningDebit), credit: money(r.beginningCredit) }, update: { debit: { increment: money(r.beginningDebit) }, credit: { increment: money(r.beginningCredit) } } }); balances++; } continue; }
+    if (byTitle.has(tkey(r.title))) { addBalance(byTitle.get(tkey(r.title))!, r); continue; }
     let code = r.code && !usedCodes.has(r.code) ? r.code : nextCodeInRange(r.class, usedCodes);
     usedCodes.add(code);
     const branch = r.branchCode ? locations.find((l) => l.code === r.branchCode) : null;
@@ -94,8 +101,19 @@ async function seedAccounts(prisma: PrismaClient, file: string) {
     const acct = await prisma.account.create({ data: { code, title: r.title, class: r.class, normalBalance: NORMAL_BALANCE[r.class], branchTagId: branch?.id ?? null, channelTag: r.channelTag, entryScope: r.entryScope, isPaymentAccount: r.isPaymentAccount, paymentAccountType: r.paymentAccountType as never, counterpartyType, counterpartyId, templateId: tpl?.id ?? null } });
     byTitle.set(tkey(r.title), acct.id); created++;
     if (dealer && counterpartyId) await prisma.customer.update({ where: { id: counterpartyId }, data: { arAccountId: acct.id } });
-    if (r.beginningDebit || r.beginningCredit) { await prisma.beginningBalance.upsert({ where: { fiscalYear_accountId: { fiscalYear, accountId: acct.id } }, create: { fiscalYear, accountId: acct.id, debit: money(r.beginningDebit), credit: money(r.beginningCredit) }, update: {} }); balances++; }
+    addBalance(acct.id, r);
   }
+  // Beginning balances are set to the workbook figures, so re-running the seed never adds them twice (earlier runs did; this also
+  // repairs those). Balances entered or imported in the app (createdBy set) or already posted are left alone.
+  for (const [accountId, b] of expected) {
+    const cur = await prisma.beginningBalance.findUnique({ where: { fiscalYear_accountId: { fiscalYear, accountId } } });
+    if (!cur) await prisma.beginningBalance.create({ data: { fiscalYear, accountId, debit: b.debit.toFixed(2), credit: b.credit.toFixed(2) } });
+    else if (cur.createdBy || cur.postedVoucherId) { if (!cur.debit.eq(b.debit) || !cur.credit.eq(b.credit)) kept++; continue; }
+    else if (!cur.debit.eq(b.debit) || !cur.credit.eq(b.credit)) { await prisma.beginningBalance.update({ where: { id: cur.id }, data: { debit: b.debit.toFixed(2), credit: b.credit.toFixed(2) } }); repaired++; }
+    balances++;
+  }
+  if (repaired) console.log(`  ${repaired} beginning balances reset to the workbook figures (earlier seed runs had added them more than once)`);
+  if (kept) console.log(`  ${kept} beginning balances differ from the workbook but were entered or posted in the app; left as they are`);
   // company-wide accounts the posting rules need (created only when the workbook lacks them)
   let globals = 0;
   for (const g of GLOBAL_ACCOUNTS) {

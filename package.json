@@ -12,6 +12,7 @@
     "typecheck": "pnpm -r run typecheck",
     "db:migrate": "pnpm --filter @gws/api prisma:migrate",
     "db:seed": "pnpm --filter @gws/api prisma:seed",
+    "update-db": "node scripts/ensure-env.mjs && pnpm --filter @gws/api prisma:generate && pnpm --filter @gws/api prisma:deploy && pnpm --filter @gws/api prisma:seed",
     "login-check": "node scripts/ensure-env.mjs && pnpm --filter @gws/api login-check"
   },
   "engines": { "node": ">=22" }

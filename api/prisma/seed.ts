@@ -150,4 +150,13 @@ async function main() {
   console.log(`Seed complete. All test users use password: ${DEV_PASSWORD}`);
 }
 
-main().catch((e) => { console.error(e); process.exit(1); }).finally(() => prisma.$disconnect());
+main().catch((e) => {
+  console.error(e);
+  // the top of a long error scrolls out of view in Terminal; repeat the useful part last
+  const msg = String((e as Error)?.message ?? e);
+  console.error('\nSeed failed: ' + msg.split('\n').filter((l) => l.trim()).slice(-6).join('\n'));
+  if (/DATABASE_URL|P1012|Validation Error Count/.test(msg)) console.error('Fix: the settings file api/.env is missing or has no DATABASE_URL. Run "node scripts/ensure-env.mjs" in the gws-erp folder, then run this again.');
+  else if (/denied access|P1000|Authentication failed/.test(msg)) console.error('Fix: the database refused the user name or password in api/.env (DATABASE_URL). With Docker it should be postgresql://gws:gws@localhost:5432/gws?schema=public');
+  else if (/P1001|Can't reach database/.test(msg)) console.error('Fix: the database is not running. Open Docker Desktop, run "docker compose up -d postgres redis", then run this again.');
+  process.exit(1);
+}).finally(() => prisma.$disconnect());

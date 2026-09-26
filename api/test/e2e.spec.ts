@@ -666,3 +666,17 @@ describe('personal accounts: one person per account, every action tagged', () =>
     expect(await prisma.auditLog.count({ where: { userId: whAssoc.id, action: 'SESSION_REPLACED' } })).toBeGreaterThan(0);
   });
 });
+
+describe('Help & Guide (owner request 2026-09-26)', () => {
+  it('each role gets only its own guide sections; without an AI key the Ask box answers from the guide', async () => {
+    const sales = ok(await as('sales.westave').get('/api/help')).body as { aiEnabled: boolean; role: string; sections: { title: string }[] };
+    expect(sales.role).toBe('Sales Associate'); expect(sales.aiEnabled).toBe(false);
+    expect(sales.sections.map((s) => s.title)).toContain('Recording a sale'); expect(sales.sections.map((s) => s.title)).not.toContain('HR: charge forms');
+    const hr = ok(await as('hr.staff').get('/api/help')).body as { sections: { title: string }[] };
+    expect(hr.sections.map((s) => s.title)).toContain('HR: charge forms'); expect(hr.sections.map((s) => s.title)).not.toContain('Recording a sale');
+    const r = ok(await as('field.auditor').post('/api/help/ask').send({ question: 'How do I confirm the cash fund in the store?' })).body;
+    expect(r.mode).toBe('guide'); expect(r.sections[0].title).toBe('Cash fund');
+    await as('field.auditor').post('/api/help/ask').send({ question: 'x' }).expect(400);
+    await http.get('/api/help').expect(401);
+  });
+});

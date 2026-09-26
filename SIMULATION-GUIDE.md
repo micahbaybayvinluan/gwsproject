@@ -134,6 +134,9 @@ As `audit.assoc`: open a sale → "Request a correction" → choose the field, t
 **29. Stock request and fixed "From"** — `sales.westave`, then `wh.assoc`
 Transfers → "Request stock from the warehouse" → add items → Send. The pull-out form's "From" is fixed to West Ave. As `wh.assoc`: the notification opens Transfers with the branch already chosen as "To". Receiving → "+ another expiry" records one item with two expiry dates.
 
+**30. Help & Guide** — any account, e.g. `sales.westave`, then `hr.staff`
+Menu → Help & Guide. The guide shows only your role's sections: compare `sales.westave` with `hr.staff`. Type a question in Ask (e.g. "How do I request stock from the warehouse?"). Without an AI key you get the matching sections; with a key in `api/.env` (see README → Help & Guide and the AI assistant) you get a written answer with "Read more" links.
+
 ## Where the files come out
 
 All exports download through the browser: Daily Sales Report (xlsx/PDF), Daily Inventory Report (xlsx, one sheet per day plus Summary and Per-day sheets), every paper form (Pull-Out, Transfer-In, DR-Sales, Supplier's Form, Count sheet, Discrepancy Report, Charge Form, Credit Note, Journal Voucher), every list (Export xlsx / CSV buttons), Trial Balance and the financial statements.

@@ -61,6 +61,23 @@ pnpm login-check
 
 It checks the settings file, Docker (database and Redis), the app server and the web page, then tries to sign in as admin. Each problem it finds comes with the fix. `pnpm login-check --reset` also resets every demo account to the password `ChangeMe!2026`, switches it back on and removes any authenticator.
 
+## Help & Guide and the AI assistant
+
+Everyone has **Help & Guide** in the menu. It shows the user guide (`docs/USER-GUIDE.md`) filtered to the person's role, with a filter box and a Print button, and an **Ask** box.
+
+- **Without an AI key** the Ask box shows the guide sections that match the question. Nothing leaves the office computer.
+- **With an AI key** the Ask box answers in plain words (English, Filipino or Taglish) using Claude. Only the question, the guide and the person's role are sent; no sales, stock, cost or pay data. Answers follow the person's role, and the assistant cannot see or change any records.
+
+To switch the assistant on:
+
+1. Create an account at console.anthropic.com, add billing, and create an API key.
+2. Open `api/.env` in the gws-erp folder and set `ANTHROPIC_API_KEY=` followed by the key.
+3. Stop the app (Control+C) and run `pnpm dev` again. The Ask box now shows "AI assistant on".
+
+Optional settings in `api/.env`: `HELP_AI_MODEL` (default `claude-opus-5`) and `HELP_AI_PER_HOUR` (questions per person per hour, default 30). If the key is wrong or the internet is down, the Ask box falls back to the guide and says why.
+
+To change the guide, edit `docs/USER-GUIDE.md`. Each `## ` heading is a section, and the `<!-- for: … -->` line under it lists the permissions that see it (`all` for everyone). The Help page and the assistant pick up the change on the next restart.
+
 ## Test accounts (created by the seed)
 
 See **SIMULATION-GUIDE.md** for the full account list (one per branch and franchise) and a 16-step walk-through across every role.

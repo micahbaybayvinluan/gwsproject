@@ -57,6 +57,9 @@ const NAV: { group: string; items: NavItem[] }[] = [
     { to: '/hr/weekly-counts', label: 'Weekly Count Compliance', any: ['employee.manage', 'discrepancy.resolve', 'discrepancy.view'], hideFor: ['FIELD_AUDITOR'] },
     { to: '/revisions', label: 'Revision Log (errors per staff)', any: ['revision.view'] },
   ] },
+  { group: 'Help', items: [
+    { to: '/help', label: 'Help & Guide' },
+  ] },
   { group: 'Admin', items: [
     { to: '/users', label: 'Users & Roles', any: ['user.manage'] },
     { to: '/audit-log', label: 'Audit Log', any: ['audit_log.view'] },

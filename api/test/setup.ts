@@ -11,3 +11,4 @@ if (fs.existsSync(envPath)) {
 }
 process.env.NODE_ENV = 'test';
 process.env.PDF_FORCE_HTML ??= 'true'; // e2e reads the form text; real PDF output is checked by hand
+process.env.ANTHROPIC_API_KEY = ''; // tests never call the paid AI service; help.spec mocks it

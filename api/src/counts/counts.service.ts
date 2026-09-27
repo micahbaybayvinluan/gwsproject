@@ -13,10 +13,17 @@ import { ChargesService, KIND_LABEL } from '../charges/charges.service';
 import { RevisionsService } from '../revisions/revisions.service';
 import { toDateOnly, todayManila, addDays, dateStr } from '../common/manila';
 import { D, ZERO } from '../common/money';
+import type { RoleKey } from '../common/permissions';
 import type { SessionUser } from '../common/request-context';
 import { requestContext } from '../common/request-context';
 
 interface RevisionSummary { controlNo: string; locationId: string; locationName: string; reason: string; requestedByName: string; lines: { productId: string; product: string; before: number; after: number; remarks?: string }[] }
+
+/** Items with a system quantity (at the start of the day or now) first, then items with none in the system; by name within each group. */
+export const inSystem = (l: { beginQty: number; systemQty: number }) => l.beginQty !== 0 || l.systemQty !== 0;
+export function sortCountLines<T extends { beginQty: number; systemQty: number; product: { name: string } }>(lines: T[]): T[] {
+  return [...lines].sort((a, b) => Number(inSystem(b)) - Number(inSystem(a)) || a.product.name.localeCompare(b.product.name));
+}
 
 /** §7.7 Actual inventory count → DiscrepancyCase (7-day window) → Final report + ChargeForm → HR allocation. */
 @Injectable()
@@ -67,14 +74,14 @@ export class CountsService implements OnModuleInit {
     });
   }
 
-  private include = { location: { select: { id: true, code: true, name: true } }, lines: { include: { product: { select: { id: true, sku: true, name: true } } }, orderBy: { product: { name: 'asc' as const } } }, discrepancyCase: true } as const;
+  private include = { location: { select: { id: true, code: true, name: true, type: true } }, lines: { include: { product: { select: { id: true, sku: true, name: true } } }, orderBy: { product: { name: 'asc' as const } } }, discrepancyCase: true } as const;
 
   list(user: SessionUser, locationId?: string) { if (locationId && user.locationScoped && !user.locationIds.includes(locationId)) throw new ForbiddenException(); return this.prisma.db.countDoc.findMany({ where: { locationId: locationId ?? (user.locationScoped ? { in: user.locationIds } : { not: '' }) }, include: this.include, orderBy: { createdAt: 'desc' }, take: 200 }); }
   async get(id: string, user: SessionUser) {
     const d = await this.prisma.db.countDoc.findUnique({ where: { id }, include: this.include }); if (!d) throw new NotFoundException(); if (user.locationScoped && !user.locationIds.includes(d.locationId)) throw new ForbiddenException();
     // expiries on hand per item (same item, different expiry dates) shown on the sheet for reference
     const exp = await this.stock.expiriesAt(d.locationId, d.lines.map((l) => l.productId));
-    return { ...d, lines: d.lines.map((l) => ({ ...l, expiries: exp.get(l.productId) ?? [] })) };
+    return { ...d, lines: sortCountLines(d.lines).map((l) => ({ ...l, expiries: exp.get(l.productId) ?? [] })) };
   }
 
   /**
@@ -92,7 +99,8 @@ export class CountsService implements OnModuleInit {
     const loc = await this.prisma.db.location.findUniqueOrThrow({ where: { id: locationId } });
     const countDate = input.countDate ? toDateOnly(input.countDate) : todayManila();
     const { begin, now, moved } = await this.expected(locationId, countDate);
-    const ids = input.allProducts
+    // every active item is listed (owner request 2026-09-27) so stock that never reached the system can still be counted; `allProducts: false` lists only items with stock or movement
+    const ids = input.allProducts ?? true
       ? (await this.prisma.db.product.findMany({ where: { active: true, isBundle: false }, select: { id: true } })).map((p) => p.id)
       : [...new Set([...[...begin].filter(([, q]) => q !== 0).map(([id]) => id), ...[...now].filter(([, q]) => q !== 0).map(([id]) => id), ...moved])];
     const doc = await this.prisma.db.$transaction(async (tx) => {
@@ -100,7 +108,7 @@ export class CountsService implements OnModuleInit {
       return tx.countDoc.create({ data: { controlNo, countType, locationId, countDate, countedBy: user.id, notes: input.notes, createdBy: user.id, lines: { create: ids.map((productId) => ({ productId, beginQty: begin.get(productId) ?? 0, systemQty: now.get(productId) ?? 0 })) } }, include: this.include });
     });
     await this.audit.log({ action: 'CREATE', entityType: 'CountDoc', entityId: doc.id, after: { controlNo: doc.controlNo, lines: doc.lines.length } });
-    return doc;
+    return this.get(doc.id, user);
   }
 
   /** Beginning count (ledger before the date), current on-hand, and products with movements on the date. */
@@ -124,8 +132,12 @@ export class CountsService implements OnModuleInit {
   async submit(id: string, user: SessionUser) {
     const doc = await this.get(id, user);
     if (doc.status !== 'DRAFT') throw new BadRequestException('Already submitted');
+    // items not in the system left blank were not found (0); items the system has must be counted
+    const blankNotInSystem = doc.lines.filter((l) => l.actualQty == null && !inSystem(l));
+    if (blankNotInSystem.length) await this.prisma.db.countLine.updateMany({ where: { id: { in: blankNotInSystem.map((l) => l.id) } }, data: { actualQty: 0, variance: 0 } });
+    for (const l of blankNotInSystem) l.actualQty = 0;
     const missing = doc.lines.filter((l) => l.actualQty == null);
-    if (missing.length) throw new BadRequestException(`${missing.length} line(s) have no actual qty`);
+    if (missing.length) throw new BadRequestException(`${missing.length} item(s) in the system have no actual count yet`);
     const windowDays = await this.settings.get<number>('discrepancy.window_days');
     // expected = on-hand at submission, so sales / transfers made while counting are not reported as shortages
     const { now } = await this.expected(doc.locationId, doc.countDate);
@@ -133,17 +145,21 @@ export class CountsService implements OnModuleInit {
       let anyVar = false;
       for (const l of doc.lines) { const expected = now.get(l.productId) ?? 0; const v = (l.actualQty ?? 0) - expected; if (v !== 0) anyVar = true; await tx.countLine.update({ where: { id: l.id }, data: { systemQty: expected, variance: v } }); }
       await tx.countDoc.update({ where: { id }, data: { status: 'SUBMITTED', submittedAt: new Date() } });
-      // weekly self-counts are recorded for compliance and review; only audit counts open a discrepancy case
-      if (!anyVar || doc.countType === 'WEEKLY') return { anyVar, caseId: null as string | null };
+      // any count with a difference — weekly count by the associate, Field Auditor or auditor count — opens a case with the explanation window (owner request 2026-09-27)
+      if (!anyVar) return { anyVar, caseId: null as string | null };
       const c = await tx.discrepancyCase.create({ data: { countDocId: id, caseNo: await this.seq.form(tx, 'DC', doc.locationId), deadline: addDays(todayManila(), windowDays) } });
       return { anyVar, caseId: c.id };
     });
     if (result.caseId) {
       const fresh = await this.prisma.db.countLine.findMany({ where: { docId: id, variance: { not: 0 } }, include: { product: { select: { name: true } } } });
       const summary = fresh.slice(0, 5).map((l) => `${l.product.name} ${l.variance > 0 ? '+' : ''}${l.variance}`).join(', ') + (fresh.length > 5 ? ` and ${fresh.length - 5} more` : '');
-      await this.notify.toLocation(doc.locationId, { type: 'DISCREPANCY_OPENED', title: `Inventory discrepancy at ${doc.location.name} (${doc.controlNo}): ${fresh.length} item(s) — ${windowDays}-day window`, body: `Counted by ${user.fullName}. ${summary}`, link: `/discrepancies/${result.caseId}` }, ['HEAD_AUDITOR', 'ADMIN', 'HR_STAFF']);
+      // the branch staff (and franchise owner), the person who counted, the auditors, the Owner and HR (company branches only: franchise staff are the franchise owner's)
+      const roles: RoleKey[] = ['HEAD_AUDITOR', 'ASST_AUDITOR', 'AUDIT_ASSOCIATE', 'ADMIN', ...(doc.location.type === 'FRANCHISE' ? [] : ['HR_STAFF' as RoleKey])];
+      const n = { type: 'DISCREPANCY_OPENED', title: `Inventory discrepancy at ${doc.location.name} (${doc.controlNo}): ${fresh.length} item(s) — explain within ${windowDays} days`, body: `${doc.countType === 'WEEKLY' ? 'Weekly count' : 'Count'} by ${user.fullName}. ${summary}. Without an accepted explanation by the deadline, shortages are charged at franchise price.`, link: `/discrepancies/${result.caseId}` };
+      await this.notify.toLocation(doc.locationId, n, roles);
+      await this.notify.toUsers([user.id], n);
     }
-    if (doc.countType === 'WEEKLY') {
+    if (doc.countType === 'WEEKLY' && !result.caseId) {
       const vars = await this.prisma.db.countLine.findMany({ where: { docId: id, variance: { not: 0 } }, include: { product: { select: { name: true } } } });
       await this.notify.toRoles(['HEAD_AUDITOR', 'ASST_AUDITOR', 'AUDIT_ASSOCIATE'], { type: 'WEEKLY_COUNT_SUBMITTED', title: `Weekly count ${doc.controlNo} submitted by ${user.fullName} (${doc.location.name})`, body: vars.length ? `${vars.length} item(s) differ: ${vars.slice(0, 5).map((l) => `${l.product.name} ${l.variance > 0 ? '+' : ''}${l.variance}`).join(', ')}${vars.length > 5 ? '…' : ''}` : 'All items match the system', link: `/counts/${id}` });
     }
@@ -256,8 +272,10 @@ export class CountsService implements OnModuleInit {
   /** Deadline job: still OPEN → Final Discrepancy Report + ChargeForm at franchise cost; case FINALIZED; HR notified. */
   async finalizeDue(now: Date = new Date()) {
     const due = await this.prisma.db.discrepancyCase.findMany({ where: { status: 'OPEN', deadline: { lte: now } }, include: { countDoc: { include: { lines: { include: { product: { include: { category: true } } } }, location: true } } } });
+    // an explanation sent before the deadline waits for the Head Auditor's decision; it is charged only if rejected
+    const waiting = new Set((await this.prisma.db.approvalRequest.findMany({ where: { type: 'DISCREPANCY_EXPLANATION', status: 'PENDING', documentId: { in: due.map((c) => c.id) } }, select: { documentId: true } })).map((r) => r.documentId));
     let n = 0;
-    for (const c of due) {
+    for (const c of due.filter((x) => !waiting.has(x.id))) {
       await requestContext.runSystem(async () => {
         const shorts = c.countDoc.lines.filter((l) => l.variance < 0);
         const chargeForm = await this.prisma.db.$transaction(async (tx) => {

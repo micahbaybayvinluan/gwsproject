@@ -7,6 +7,8 @@ import { useAuth } from '@/lib/auth';
 import { api } from '@/lib/api';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { cn } from '@/lib/utils';
+import { PAGES, pageInfo } from '@/lib/pages';
+import { Info } from 'lucide-react';
 
 interface NavItem { to: string; label: string; any?: string[]; hideFor?: string[] }
 const NAV: { group: string; items: NavItem[] }[] = [
@@ -18,6 +20,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
     { to: '/ar', label: 'AR / Credit', any: ['ar.view'] },
     { to: '/expenses', label: 'Expenses', any: ['expense.create.branch', 'expense.create.main', 'expense.view'] },
     { to: '/closing', label: 'Daily Close', any: ['sale.create', 'report.sales.own', 'report.sales.all'] },
+    { to: '/cash-on-hand', label: 'Cash on Hand', any: ['cashdeposit.view.all', 'sale.create'], hideFor: ['FRANCHISE_OWNER', 'FRANCHISE_SALES_ASSOCIATE'] },
     { to: '/cash-fund', label: 'Cash Fund', any: ['cashfund.view.all', 'cashfund.use', 'cashfund.manage', 'cashfund.check'] },
     { to: '/inspections', label: 'Store Inspections', any: ['inspection.create', 'inspection.view', 'inspection.review'] },
     { to: '/bank', label: 'Bank & Office', any: ['bank.entry'] },
@@ -31,12 +34,13 @@ const NAV: { group: string; items: NavItem[] }[] = [
     { to: '/discrepancies', label: 'Discrepancies', any: ['discrepancy.view', 'discrepancy.resolve', 'count.create'] },
     { to: '/expiry', label: 'Expiry & Alerts', any: ['report.inventory.own', 'report.inventory.all'] },
     { to: '/writeoffs', label: 'Write-offs', any: ['writeoff.create', 'writeoff.approve'] },
-    { to: '/consignment', label: 'Consignment', any: ['consignment.manage'] },
+    { to: '/consignment', label: 'Consignment', any: ['consignment.manage', 'consignment.request'] },
   ] },
   { group: 'Catalogue', items: [
     { to: '/products', label: 'Products', any: ['product.view'], hideFor: ['HR_STAFF'] },
     { to: '/price-changes', label: 'Price Changes', any: ['price.edit'] },
     { to: '/suppliers', label: 'Suppliers', any: ['supplier.view.code'] },
+    { to: '/consignees', label: 'Consignees', any: ['consignment.manage'] },
     { to: '/imports', label: 'Imports', any: ['product.create', 'gl.account.edit', 'settings.thresholds'] },
   ] },
   { group: 'Reports', items: [
@@ -58,6 +62,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
     { to: '/payroll', label: 'Payroll & Contributions', any: ['payroll.view.summary', 'payroll.view.detail', 'payroll.edit'] },
     { to: '/hr/weekly-counts', label: 'Weekly Count Compliance', any: ['employee.manage', 'discrepancy.resolve', 'discrepancy.view'], hideFor: ['FIELD_AUDITOR'] },
     { to: '/revisions', label: 'Revision Log (errors per staff)', any: ['revision.view'] },
+    { to: '/hr-notices', label: 'HR Notices (NTE)', any: ['hr.notice'] },
   ] },
   { group: 'Help', items: [
     { to: '/help', label: 'Help & Guide' },
@@ -76,7 +81,7 @@ export function Layout() {
   const { me, logout, canAny } = useAuth(); const nav = useNavigate(); const { pathname } = useLocation(); const [open, setOpen] = useState(false);
   const unread = useQuery({ queryKey: ['unread'], queryFn: () => api.get<{ count: number }>('/api/notifications/unread-count'), refetchInterval: 30000 });
   const approvals = useQuery({ queryKey: ['approvals-count'], queryFn: () => api.get<{ count: number }>('/api/approvals/inbox').then((r) => ({ count: r.count })), refetchInterval: 30000, enabled: !!me });
-  const groups = NAV.map((g) => ({ ...g, items: g.items.filter((i) => (!i.any || canAny(...i.any)) && !(i.hideFor?.includes(me?.roleKey ?? ''))) })).filter((g) => g.items.length);
+  const groups = NAV.map((g) => ({ ...g, items: g.items.map((i) => ({ ...i, label: PAGES[i.to]?.label ?? i.label })).filter((i) => (!i.any || canAny(...i.any)) && !(i.hideFor?.includes(me?.roleKey ?? ''))) })).filter((g) => g.items.length);
   return <div className="flex min-h-full">
     <aside className={cn('fixed inset-y-0 left-0 z-30 flex w-72 transform flex-col border-r border-slate-200/80 bg-white transition-transform duration-200 lg:sticky lg:top-0 lg:h-screen lg:translate-x-0', open ? 'translate-x-0 shadow-2xl' : '-translate-x-full')}>
       <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4"><BrandMark size="sm" /><button className="rounded-lg p-1 text-slate-500 hover:bg-slate-100 lg:hidden" onClick={() => setOpen(false)} aria-label="Close menu"><X size={18} /></button></div>
@@ -97,7 +102,7 @@ export function Layout() {
         <div className="hidden size-9 place-items-center rounded-full bg-navy text-xs font-bold text-white sm:grid" title={me?.fullName}>{initials(me?.fullName)}</div>
         <button className="rounded-full p-2 text-slate-500 transition hover:bg-slate-100 hover:text-brand" onClick={logout} aria-label="Sign out" title="Sign out"><LogOut size={19} /></button>
       </header>
-      <main className="mx-auto w-full max-w-[1400px] flex-1 p-4 lg:p-8"><ErrorBoundary resetKey={pathname}><Outlet /></ErrorBoundary></main>
+      <main className="mx-auto w-full max-w-[1400px] flex-1 p-4 lg:p-8">{pageInfo(pathname) && pathname !== '/' && <div className="mb-4 flex items-start gap-2.5 rounded-xl border border-navy/10 bg-white/70 px-4 py-2.5 text-sm text-slate-600 shadow-sm" data-testid="page-summary"><Info className="mt-0.5 h-4 w-4 shrink-0 text-brand" aria-hidden /><span><b className="text-navy">What this page is for:</b> {pageInfo(pathname)!.summary}</span></div>}<ErrorBoundary resetKey={pathname}><Outlet /></ErrorBoundary></main>
     </div>
   </div>;
 }

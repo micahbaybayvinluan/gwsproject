@@ -1,3 +1,4 @@
+import { ProductCostService } from './product-cost.service';
 import { Body, Controller, Delete, ForbiddenException, Get, Param, Patch, Post, Put, Query } from '@nestjs/common';
 import { z } from 'zod';
 import { MasterService } from './master.service';
@@ -6,11 +7,12 @@ import { CurrentUser, RequireAnyPermission, RequirePermission, Audited } from '.
 import { Z } from '../common/zod.pipe';
 import type { SessionUser } from '../common/request-context';
 
+const CostEditDto = z.object({ cost: z.number().nonnegative(), effectiveFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), reason: z.string().trim().min(3, 'Give the reason for the new cost') });
 const LocationDto = z.object({ code: z.string().min(1), name: z.string().min(1), type: z.enum(['WAREHOUSE', 'BRANCH', 'FRANCHISE', 'OFFICE', 'CONSIGNEE', 'VIRTUAL']), isSelling: z.boolean().optional(), franchiseOwnerUserId: z.string().uuid().nullable().optional(), address: z.string().optional(), active: z.boolean().optional() });
 const SupplierDto = z.object({ name: z.string().min(1), contact: z.string().optional(), termsDays: z.number().int().min(0).optional(), isConsignor: z.boolean().optional(), active: z.boolean().optional() });
 const CategoryDto = z.object({ name: z.string().min(1), accountingClass: z.enum(['SUPPLEMENT', 'FREEBIE', 'PLASTIC', 'APPAREL', 'EQUIPMENT', 'OTHER', 'REPACKED', 'BUNDLE']) });
-const ProductDto = z.object({ sku: z.string().optional(), barcode: z.string().optional(), name: z.string().min(1), categoryId: z.string().uuid(), brand: z.string().optional(), unit: z.string().optional(), supplierId: z.string().uuid().optional(), trackExpiry: z.boolean().optional(), isBundle: z.boolean().optional(), franchiseVisible: z.boolean().optional(), components: z.array(z.object({ componentProductId: z.string().uuid(), qty: z.number().int().positive() })).optional(), prices: z.record(z.number().nonnegative()).optional(), cost: z.number().nonnegative().optional() });
-const ProductPatch = z.object({ barcode: z.string().nullable().optional(), name: z.string().optional(), categoryId: z.string().uuid().optional(), brand: z.string().optional(), unit: z.string().optional(), supplierId: z.string().uuid().nullable().optional(), trackExpiry: z.boolean().optional(), active: z.boolean().optional(), franchiseVisible: z.boolean().optional(), needsReview: z.boolean().optional() });
+const ProductDto = z.object({ consumptionDays: z.number().int().min(1).max(3650).nullable().optional(), sku: z.string().optional(), barcode: z.string().optional(), name: z.string().min(1), categoryId: z.string().uuid(), brand: z.string().optional(), unit: z.string().optional(), supplierId: z.string().uuid().optional(), trackExpiry: z.boolean().optional(), isBundle: z.boolean().optional(), franchiseVisible: z.boolean().optional(), components: z.array(z.object({ componentProductId: z.string().uuid(), qty: z.number().int().positive() })).optional(), prices: z.record(z.number().nonnegative()).optional(), cost: z.number().nonnegative().optional() });
+const ProductPatch = z.object({ consumptionDays: z.number().int().min(1).max(3650).nullable().optional(), barcode: z.string().nullable().optional(), name: z.string().optional(), categoryId: z.string().uuid().optional(), brand: z.string().optional(), unit: z.string().optional(), supplierId: z.string().uuid().nullable().optional(), trackExpiry: z.boolean().optional(), active: z.boolean().optional(), franchiseVisible: z.boolean().optional(), needsReview: z.boolean().optional() });
 const MinStockDto = z.object({ rows: z.array(z.object({ productId: z.string().uuid(), locationId: z.string().uuid(), minQty: z.number().int().min(0) })) });
 const CustomerDto = z.object({ name: z.string(), type: z.enum(['DEALER', 'FRANCHISE', 'AGENT', 'CONSIGNEE', 'CUSTOMER']), locationId: z.string().uuid().optional(), agentId: z.string().uuid().optional(), contact: z.string().optional() });
 const AgentDto = z.object({ name: z.string(), locationId: z.string().uuid(), onPayroll: z.boolean().optional(), defaultTier: z.string().optional() });
@@ -22,7 +24,7 @@ function onlyRoles(u: SessionUser, roles: string[], what: string) { if (!roles.i
 
 @Controller('api')
 export class MasterController {
-  constructor(private m: MasterService, private md: MasterDataApprovals) {}
+  constructor(private m: MasterService, private md: MasterDataApprovals, private productCost: ProductCostService) {}
 
   @Get('locations') @RequireAnyPermission('location.view.all', 'location.view.own') locations(@CurrentUser() u: SessionUser, @Query('all') all?: string) { return this.m.listLocations(u, all === '1'); }
   @Post('locations') @RequirePermission('location.edit') @Audited('Location', 'CREATE') createLocation(@Body(Z(LocationDto)) dto: z.infer<typeof LocationDto>, @CurrentUser() u: SessionUser) { return this.md.submit('Location', dto, u, { name: dto.name, code: dto.code, type: dto.type, address: dto.address }, () => this.m.createLocation(dto, u.id)); }
@@ -41,6 +43,7 @@ export class MasterController {
   @Post('products/tiers') @RequirePermission('price.edit', 'settings.thresholds') @Audited('PriceTier', 'CREATE') addTier(@Body(Z(TierDto)) dto: z.infer<typeof TierDto>) { return this.m.addTier(dto.key, dto.name); }
   @Get('products/:id') @RequirePermission('product.view') product(@Param('id') id: string, @CurrentUser() u: SessionUser) { return this.m.getProduct(id, u); }
   @Post('products') @RequirePermission('product.create') @Audited('Product', 'CREATE') createProduct(@Body(Z(ProductDto)) dto: z.infer<typeof ProductDto>, @CurrentUser() u: SessionUser) { return this.md.submit('Product', dto, u, { name: dto.name, sku: dto.sku, brand: dto.brand, unit: dto.unit, ...Object.fromEntries(Object.entries(dto.prices ?? {}).map(([k, v]) => [`price${k}`, v])), cost: dto.cost }, () => this.m.createProduct(dto, u.id)); }
+  @Post('products/:id/cost') @RequirePermission('cost.edit') @Audited('Product', 'COST_EDIT_REQUEST') editCost(@Param('id') id: string, @Body(Z(CostEditDto)) dto: z.infer<typeof CostEditDto>, @CurrentUser() u: SessionUser) { return this.productCost.request(id, dto, u); }
   @Patch('products/:id') @RequirePermission('product.edit') @Audited('Product') updateProduct(@Param('id') id: string, @Body(Z(ProductPatch)) dto: z.infer<typeof ProductPatch>, @CurrentUser() u: SessionUser) { onlyRoles(u, ['ADMIN', 'HEAD_AUDITOR'], 'edit products'); return this.m.updateProduct(id, dto, u.id); }
 
   @Get('min-stock') @RequireAnyPermission('settings.thresholds', 'report.inventory.all', 'report.inventory.own') minStock(@Query('locationId') locationId?: string) { return this.m.listMinStock(locationId); }

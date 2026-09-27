@@ -1,16 +1,25 @@
 import { Body, Controller, Get, Param, Post, Query, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import { ReportsService, Out } from './reports.service';
-import { CurrentUser, RequireAnyPermission, RequirePermission } from '../common/decorators';
+import { Audited, CurrentUser, RequireAnyPermission, RequirePermission } from '../common/decorators';
+import { z } from 'zod';
+import { Z } from '../common/zod.pipe';
+import { ReportSubmissionService } from './report-submission.service';
 import type { SessionUser } from '../common/request-context';
 import { ScopeService } from '../common/scope.service';
 import { manilaDateStr } from '../common/manila';
+
+const SubmitReport = z.object({ locationId: z.string().uuid().optional(), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), acknowledged: z.boolean() });
 
 function send(res: Response, out: Out) { res.setHeader('Content-Type', out.contentType); res.setHeader('Content-Disposition', `attachment; filename="${out.fileName}"`); res.send(out.buffer); }
 
 @Controller('api/reports')
 export class ReportsController {
-  constructor(private r: ReportsService, private scope: ScopeService) {}
+  constructor(private r: ReportsService, private scope: ScopeService, private sub: ReportSubmissionService) {}
+  @Get('daily-sales/submission') @RequireAnyPermission('report.sales.own', 'report.sales.all') submission(@CurrentUser() u: SessionUser, @Query('locationId') locationId?: string, @Query('date') date?: string) { return this.sub.status(locationId || u.locationIds[0], date || manilaDateStr(), u); }
+  @Post('daily-sales/submit') @RequirePermission('sale.create') @Audited('SalesReportSubmission', 'SUBMIT') submit(@CurrentUser() u: SessionUser, @Body(Z(SubmitReport)) dto: z.infer<typeof SubmitReport>) { return this.sub.submit({ locationId: dto.locationId ?? u.locationIds[0], date: dto.date, acknowledged: dto.acknowledged }, u); }
+  @Post('daily-sales/remind') @RequirePermission('settings.thresholds') remind() { return this.sub.remind(); }
+  @Post('daily-sales/auto-submit') @RequirePermission('settings.thresholds') autoSubmit() { return this.sub.autoSubmit(); }
   @Get('daily-sales') @RequireAnyPermission('report.sales.own', 'report.sales.all') daily(@CurrentUser() u: SessionUser, @Query('locationId') locationId?: string, @Query('date') date?: string, @Query('audit') audit?: string) { return this.r.dailySalesData(this.scope.resolveLocation(u, locationId), date ?? manilaDateStr(), u, audit === '1'); }
   @Get('daily-sales.xlsx') @RequireAnyPermission('report.sales.own', 'report.sales.all') async dailyXlsx(@CurrentUser() u: SessionUser, @Res() res: Response, @Query('locationId') locationId?: string, @Query('date') date?: string) { send(res, await this.r.dailySalesXlsx(this.scope.resolveLocation(u, locationId), date ?? manilaDateStr(), u)); }
   @Get('daily-sales.pdf') @RequireAnyPermission('report.sales.own', 'report.sales.all') async dailyPdf(@CurrentUser() u: SessionUser, @Res() res: Response, @Query('locationId') locationId?: string, @Query('date') date?: string) { send(res, await this.r.dailySalesPdf(this.scope.resolveLocation(u, locationId), date ?? manilaDateStr(), u)); }

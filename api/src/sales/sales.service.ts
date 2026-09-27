@@ -17,12 +17,14 @@ import type { SessionUser } from '../common/request-context';
 import { requestContext } from '../common/request-context';
 import { ClosingService } from '../closing/closing.service';
 import { ScopeService } from '../common/scope.service';
+import { ExpensesService } from '../expenses/expenses.service';
+import { CustomerFollowUpsService } from './customer-followups.service';
 
 export interface SalesLineInput { productId: string; qty: number; unitPrice?: number | null; batchId?: string | null; isFreebie?: boolean; lineRemarks?: string; priceTier?: string }
 export interface SalesInput {
   locationId?: string; docDate?: string; channel: SalesChannel; channelSub?: string | null; customerId?: string | null; agentId?: string | null; riderId?: string | null; customerName?: string | null; customerPhone?: string | null; customerEmail?: string | null; drSiNo: string;
   paymentMode: PaymentMode; paymentAccountId?: string | null; proofOfPaymentAttachmentId?: string | null; cardMid?: string; cardSlipNo?: string; cardApprovalCode?: string; cardBatchNo?: string;
-  deliveryFee?: number; riderIncentive?: number; shippingFee?: number; shippingExpense?: number; marketplaceCharges?: number; dueDate?: string | null; pdcBank?: string; pdcChequeNo?: string; pdcDate?: string | null; notes?: string;
+  deliveryFee?: number; riderIncentive?: number; incentive?: { amount: number; payee: string; kind?: 'SALES' | 'RIDER' } | null; shippingFee?: number; shippingExpense?: number; marketplaceCharges?: number; dueDate?: string | null; pdcBank?: string; pdcChequeNo?: string; pdcDate?: string | null; notes?: string;
   lines: SalesLineInput[];
 }
 
@@ -31,7 +33,7 @@ export const TIER_BY_CHANNEL: Record<SalesChannel, string> = { WALK_IN: 'RETAIL'
 /** §8 Sales module: entry (all channels/modes), agents, AR/PDC, payments, credit notes. Stock is deducted on save (FEFO). */
 @Injectable()
 export class SalesService implements OnModuleInit {
-  constructor(private prisma: PrismaService, private seq: SequenceService, private stock: StockService, private approvals: ApprovalsService, private master: MasterService, private notify: NotificationsService, private audit: AuditService, private settings: SettingsService, private attachments: AttachmentsService, private posting: PostingService, private closing: ClosingService, private scope: ScopeService) {}
+  constructor(private prisma: PrismaService, private seq: SequenceService, private stock: StockService, private approvals: ApprovalsService, private master: MasterService, private notify: NotificationsService, private audit: AuditService, private settings: SettingsService, private attachments: AttachmentsService, private posting: PostingService, private closing: ClosingService, private scope: ScopeService, private expenses: ExpensesService, private followUps: CustomerFollowUpsService) {}
 
   onModuleInit() {
     this.approvals.register('SPECIAL_PRICE', (req, outcome) => this.onSpecialPriceDecision(req.documentId, outcome));
@@ -58,6 +60,19 @@ export class SalesService implements OnModuleInit {
     const loc = await this.prisma.db.location.findUniqueOrThrow({ where: { id: locationId } });
     if (!loc.isSelling) throw new BadRequestException('This location does not sell');
     const docDate = input.docDate ? toDateOnly(input.docDate) : todayManila();
+    let incentive = input.incentive && input.incentive.amount > 0 ? { amount: round2(D(input.incentive.amount)).toNumber(), payee: input.incentive.payee?.trim() ?? '', kind: input.incentive.kind ?? 'SALES' } : null;
+    // the older "Rider incentive" box on delivery sales becomes the same cash-paid rider incentive expense, so every report counts it once
+    if (!incentive && (input.riderIncentive ?? 0) > 0 && loc.type !== 'FRANCHISE' && user.permissions.has('sale.incentive')) {
+      const rider = input.riderId ? await this.prisma.db.rider.findUnique({ where: { id: input.riderId }, select: { name: true } }) : null;
+      incentive = { amount: round2(D(input.riderIncentive!)).toNumber(), payee: rider?.name ?? 'Rider', kind: 'RIDER' };
+      input = { ...input, riderIncentive: 0 };
+    }
+    if (incentive) {
+      if (!user.permissions.has('sale.incentive')) throw new ForbiddenException('You are not allowed to add an incentive to a sale');
+      if (!incentive.payee) throw new BadRequestException('Who receives the incentive?');
+      if (loc.type === 'FRANCHISE') throw new BadRequestException('Franchise incentives are franchise expenses (Franchise Portal)');
+      await this.expenses.incentiveAccount(locationId, incentive.kind); // clear error before anything is saved
+    }
     if (docDate > todayManila()) throw new BadRequestException('Sale date cannot be in the future');
     if (await this.closing.isClosed(locationId, docDate)) throw new BadRequestException({ message: 'This business day is closed; submit a post-close edit request instead', code: 'DAY_CLOSED' });
     if (!input.lines.length) throw new BadRequestException('At least one line');
@@ -122,6 +137,11 @@ export class SalesService implements OnModuleInit {
           lines: { create: lineRows },
         }, include: this.include,
       });
+      if (incentive) {
+        if (D(incentive.amount).gt(grandTotal)) throw new BadRequestException('The incentive cannot be more than the sale');
+        const ex = await this.expenses.saleIncentive(tx, { locationId, docDate, kind: incentive.kind, payee: incentive.payee, amount: incentive.amount, drSiNo: created.drSiNo, userId: user.id });
+        await tx.salesDoc.update({ where: { id: created.id }, data: { incentiveAmount: D(incentive.amount).toFixed(2), incentivePayee: incentive.payee, incentiveExpenseId: ex.id } });
+      }
       // ledger rows were keyed by controlNo before the doc existed; point them at the doc id
       await tx.stockLedger.updateMany({ where: { documentType: 'SalesDoc', documentId: controlNo }, data: { documentId: created.id } });
       // journal R3/R4 + R5
@@ -141,6 +161,8 @@ export class SalesService implements OnModuleInit {
     }
     if (doc.lines.some((l) => l.nearExpiryWarn)) await this.audit.log({ action: 'NEAR_EXPIRY_SALE', entityType: 'SalesDoc', entityId: doc.id, after: doc.lines.filter((l) => l.nearExpiryWarn).map((l) => ({ product: l.product.name, batch: l.batch.batchNo, expiry: l.batch.expiryDate })) });
     await this.audit.log({ action: 'CREATE', entityType: 'SalesDoc', entityId: doc.id, after: doc });
+    // re-order reminder for items with a known consumption period (best effort: never blocks the sale)
+    await this.followUps.createForSale(doc.id).catch(() => 0);
     return this.get(doc.id, user);
   }
 
@@ -170,11 +192,14 @@ export class SalesService implements OnModuleInit {
     await this.prisma.db.$transaction(async (tx) => {
       await this.stock.post(tx, doc.lines.map((l) => ({ locationId: doc.locationId, productId: l.productId, batchId: l.batchId, qtyDelta: l.qty, movementType: 'SALE_RETURN' as const, documentType: 'SalesDoc', documentId: doc.id, unitCost: l.unitCost, createdBy: user.id })));
       await tx.salesDoc.update({ where: { id }, data: { status: 'VOIDED', voidedAt: new Date(), voidedBy: user.id, voidReason: reason } });
+      // the incentive paid from this sale is voided with it
+      if (doc.incentiveExpenseId) { const ex = await tx.expenseDoc.findUnique({ where: { id: doc.incentiveExpenseId } }); if (ex && !ex.voidedAt) await this.expenses.voidInTx(tx, ex, `Sale ${doc.drSiNo} voided: ${reason}`, user.id); }
       // reverse journal
       const vouchers = await tx.journalVoucher.findMany({ where: { sourceDocumentType: 'SalesDoc', sourceDocumentId: id, voidedAt: null }, include: { lines: true } });
       for (const v of vouchers) await this.posting.persist(tx, { rule: v.rule ?? 'REV', book: v.book, remarks: `Reversal of ${v.voucherNo}: ${reason}`, lines: v.lines.map((l) => ({ accountId: l.accountId, debit: D(l.credit), credit: D(l.debit) })) }, { type: 'SalesDoc', id, date: todayManila(), createdBy: user.id });
     });
     await this.approvals.cancelForDocument('SalesDoc', id);
+    await this.followUps.dismissForSale(id);
     await this.audit.log({ action: 'VOID', entityType: 'SalesDoc', entityId: id, before: doc, after: { reason } });
     return this.get(id, user);
   }
@@ -342,7 +367,8 @@ export class SalesService implements OnModuleInit {
       const bal = await this.prisma.db.stockBalance.findMany({ where: { locationId: c.id, qty: { gt: 0 } }, include: { batch: true, product: { select: { id: true, sku: true, name: true } } } });
       const prices = await this.master.currentPrices(bal.map((b) => b.productId));
       const sold = await this.prisma.db.stockLedger.groupBy({ by: ['productId'], where: { locationId: c.id, movementType: 'CONSIGN_SALE' }, _sum: { qtyDelta: true } });
-      const ar = await this.prisma.db.salesDoc.aggregate({ where: { customer: { locationId: c.id }, voidedAt: null }, _sum: { grandTotal: true, amountPaid: true } });
+      // consignee AR is company-wide (not a branch's sales), so it is read outside the branch scope
+      const ar = await requestContext.runSystem(async () => await this.prisma.db.salesDoc.aggregate({ where: { customer: { locationId: c.id }, voidedAt: null }, _sum: { grandTotal: true, amountPaid: true } }));
       out.push({ consignee: c, unpaidAr: D(ar._sum.grandTotal).minus(D(ar._sum.amountPaid)), products: bal.map((b) => ({ product: b.product, qty: b.qty, valueAtCost: b.batch.unitCost.mul(b.qty), valueAtSrp: D(prices.get(b.productId)?.RETAIL ?? 0).mul(b.qty), soldToDate: -(sold.find((s) => s.productId === b.productId)?._sum.qtyDelta ?? 0) })) });
     }
     return out;

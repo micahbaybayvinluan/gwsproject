@@ -23,22 +23,24 @@ enum LocationType {
 }
 
 model Location {
-  id                   String       @id @default(uuid())
-  code                 String       @unique
+  id                         String       @id @default(uuid())
+  code                       String       @unique
   /// 2-letter code printed first on every form number of this location, e.g. WA-PO-000012 (West Ave pull-out no. 12)
-  shortCode            String?      @unique @map("short_code")
-  name                 String
-  type                 LocationType
-  isSelling            Boolean      @default(false) @map("is_selling")
-  franchiseOwnerUserId String?      @map("franchise_owner_user_id")
+  shortCode                  String?      @unique @map("short_code")
+  name                       String
+  type                       LocationType
+  isSelling                  Boolean      @default(false) @map("is_selling")
+  franchiseOwnerUserId       String?      @map("franchise_owner_user_id")
   /// Franchise owner's choice: may the franchise associate confirm incoming transfers (the owner is then only notified)?
-  franchiseAssociateReceives Boolean @default(false) @map("franchise_associate_receives")
-  address              String?
-  active               Boolean      @default(true)
-  createdAt            DateTime     @default(now()) @map("created_at")
-  createdBy            String?      @map("created_by")
-  updatedAt            DateTime     @updatedAt @map("updated_at")
-  updatedBy            String?      @map("updated_by")
+  franchiseAssociateReceives Boolean      @default(false) @map("franchise_associate_receives")
+  // days allowed to deposit a day's cash sales (set by the Head Auditor or Admin)
+  cashDepositMaxDays         Int          @default(1) @map("cash_deposit_max_days")
+  address                    String?
+  active                     Boolean      @default(true)
+  createdAt                  DateTime     @default(now()) @map("created_at")
+  createdBy                  String?      @map("created_by")
+  updatedAt                  DateTime     @updatedAt @map("updated_at")
+  updatedBy                  String?      @map("updated_by")
 
   franchiseOwner    User?                    @relation("FranchiseOwner", fields: [franchiseOwnerUserId], references: [id])
   assignments       UserLocationAssignment[]
@@ -196,6 +198,8 @@ model Product {
   sku              String   @unique
   barcode          String?  @unique
   name             String
+  /// days a customer takes to finish one unit (e.g. 30 servings = 30); drives the re-order reminder to the store
+  consumptionDays  Int?     @map("consumption_days")
   categoryId       String   @map("category_id")
   brand            String?
   unit             String   @default("pc")
@@ -507,8 +511,8 @@ enum TransferStatus {
 model TransferDoc {
   id                String         @id @default(uuid())
   /// Goods into the warehouse confirmed by a Warehouse Associate wait for the In-Charge (lines as confirmed).
-  pendingReceipt   Json?          @map("pending_receipt")
-  pendingReceiptBy String?        @map("pending_receipt_by")
+  pendingReceipt    Json?          @map("pending_receipt")
+  pendingReceiptBy  String?        @map("pending_receipt_by")
   /// the receiving location's own number for the same document (Transfer-In), e.g. MY-TI-000003
   transferInNo      String?        @unique @map("transfer_in_no")
   controlNo         String         @map("control_no")
@@ -597,6 +601,7 @@ model Customer {
   arAccountId String?      @map("ar_account_id")
   contact     String?
   phone       String?
+  address     String?
   email       String?
   active      Boolean      @default(true)
   createdAt   DateTime     @default(now()) @map("created_at")
@@ -667,6 +672,10 @@ model SalesDoc {
   cardBatchNo                String?      @map("card_batch_no")
   deliveryFee                Decimal      @default(0) @map("delivery_fee") @db.Decimal(14, 2)
   riderIncentive             Decimal      @default(0) @map("rider_incentive") @db.Decimal(14, 2)
+  // incentive paid out of this sale's cash (owner request 2026-09-27): a branch expense deducted from the cash to remit
+  incentiveAmount            Decimal      @default(0) @map("incentive_amount") @db.Decimal(14, 2)
+  incentivePayee             String?      @map("incentive_payee")
+  incentiveExpenseId         String?      @map("incentive_expense_id")
   shippingFee                Decimal      @default(0) @map("shipping_fee") @db.Decimal(14, 2)
   shippingExpense            Decimal      @default(0) @map("shipping_expense") @db.Decimal(14, 2)
   marketplaceCharges         Decimal      @default(0) @map("marketplace_charges") @db.Decimal(14, 2)
@@ -1817,4 +1826,101 @@ model FranchiseCharge {
 
   @@index([locationId, userId])
   @@map("franchise_charges")
+}
+
+/// A branch asks for more days to deposit one day's cash; the Head Auditor and Admin both approve (owner request 2026-09-27).
+model CashDepositExtension {
+  id                String    @id @default(uuid())
+  locationId        String    @map("location_id")
+  businessDate      DateTime  @map("business_date") @db.Date
+  requestedUntil    DateTime  @map("requested_until") @db.Date
+  reason            String
+  status            String    @default("PENDING") // PENDING | APPROVED | REJECTED
+  approvalRequestId String?   @map("approval_request_id")
+  requestedBy       String    @map("requested_by")
+  decidedAt         DateTime? @map("decided_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+
+  @@index([locationId, businessDate])
+  @@map("cash_deposit_extensions")
+}
+
+/// Something HR must act on, e.g. a Notice to Explain for cash not deposited on time (owner request 2026-09-27).
+model HrNotice {
+  id         String    @id @default(uuid())
+  kind       String // CASH_DEPOSIT_OVERDUE
+  dedupeKey  String    @unique @map("dedupe_key")
+  locationId String?   @map("location_id")
+  title      String
+  details    Json?
+  staffIds   Json?     @map("staff_ids") // users on duty at the branch
+  status     String    @default("OPEN") // OPEN | NTE_ISSUED | CLOSED
+  note       String?
+  createdAt  DateTime  @default(now()) @map("created_at")
+  resolvedAt DateTime? @map("resolved_at")
+  resolvedBy String?   @map("resolved_by")
+
+  @@index([status])
+  @@map("hr_notices")
+}
+
+/// The day's Daily Branch Sales Report as submitted by the branch ("true and correct"), or submitted automatically at the cut-off
+/// with whatever was entered by then (owner request 2026-09-27). Later changes go through post-close revision requests.
+model SalesReportSubmission {
+  id              String   @id @default(uuid())
+  locationId      String   @map("location_id")
+  businessDate    DateTime @map("business_date") @db.Date
+  status          String // SUBMITTED | AUTO_SUBMITTED
+  submittedBy     String?  @map("submitted_by")
+  submittedAt     DateTime @default(now()) @map("submitted_at")
+  acknowledgement String?
+  overallSales    Decimal  @default(0) @map("overall_sales") @db.Decimal(14, 2)
+  cashDeposit     Decimal  @default(0) @map("cash_deposit") @db.Decimal(14, 2)
+  snapshot        Json
+
+  @@unique([locationId, businessDate])
+  @@map("sales_report_submissions")
+}
+
+/// A customer who bought an item with a known consumption period: when it is probably used up, the store is reminded to call,
+/// and an SMS / email can be sent (owner request 2026-09-27).
+model CustomerFollowUp {
+  id           String    @id @default(uuid())
+  salesDocId   String    @map("sales_doc_id")
+  salesLineId  String    @unique @map("sales_line_id")
+  productId    String    @map("product_id")
+  locationId   String    @map("location_id")
+  customerName String?   @map("customer_name")
+  phone        String?
+  email        String?
+  qty          Int
+  dueDate      DateTime  @map("due_date") @db.Date
+  status       String    @default("PENDING") // PENDING | NOTIFIED | CONTACTED | DISMISSED
+  notifiedAt   DateTime? @map("notified_at")
+  smsSentAt    DateTime? @map("sms_sent_at")
+  emailSentAt  DateTime? @map("email_sent_at")
+  note         String?
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  @@index([status, dueDate])
+  @@index([locationId, status])
+  @@map("customer_follow_ups")
+}
+
+/// Every SMS / email sent to a customer, with its result.
+model CustomerMessage {
+  id         String   @id @default(uuid())
+  channel    String // SMS | EMAIL
+  to         String
+  subject    String?
+  body       String
+  status     String // SENT | FAILED | NOT_CONFIGURED
+  error      String?
+  followUpId String?  @map("follow_up_id")
+  sentBy     String?  @map("sent_by") // null = automatic
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([followUpId])
+  @@map("customer_messages")
 }

@@ -18,3 +18,6 @@ input, select, textarea { font-size: 16px; } /* prevents iOS zoom */
 /* thin, quiet scrollbars */
 * { scrollbar-width: thin; scrollbar-color: #cbd5e1 transparent; }
 @media print { aside, header { display: none !important; } main { padding: 0 !important; } }
+
+/* receiving lines: room between Qty, Free and Expiry so the numbers never touch the dates */
+.rcv-lines th, .rcv-lines td { padding: 0.5rem 0.75rem; vertical-align: middle; }

@@ -9,6 +9,8 @@ import { directCostTemplateFor } from '../gl/account-templates';
 import { PdfService } from './pdf.service';
 import { AuditService } from '../common/audit.service';
 import { StockService } from '../stock/stock.service';
+import { hasMovement } from '../stock/daily-inventory';
+import { inSystem, sortCountLines } from '../counts/counts.service';
 import { FinReportsService, MONTHS } from '../gl/fin-reports.service';
 import { buildDailySalesReport, RSale } from './daily-sales-report';
 import { toDateOnly, dateStr } from '../common/manila';
@@ -31,12 +33,16 @@ export class ReportsService {
     const loc = await this.prisma.db.location.findUnique({ where: { id: locationId } }); if (!loc) throw new NotFoundException();
     const d = toDateOnly(date);
     const sales = await this.prisma.db.salesDoc.findMany({ where: { locationId, docDate: d, voidedAt: null }, include: { lines: { include: { product: { include: { category: true } } } }, agent: true, rider: true, customer: true }, orderBy: { drSiNo: 'asc' } });
-    const expenses = await this.prisma.db.expenseDoc.findMany({ where: { locationId, docDate: d, voidedAt: null }, include: { account: true } });
+    const expenses = await this.prisma.db.expenseDoc.findMany({ where: { locationId, docDate: d, voidedAt: null }, include: { account: { include: { template: { select: { key: true } } } } } });
+    // rider incentives paid from a sale's cash belong to that rider's line in the rider summary (not again in the expense boxes)
+    const riderIncentiveOf = new Map(expenses.filter((e) => e.account.template?.key === 'RIDER_INCENTIVE').map((e) => [e.id, e.amount]));
+    const saleIncentiveIds = new Set(sales.map((s) => s.incentiveExpenseId).filter(Boolean) as string[]);
     const close = await this.prisma.db.dailyClose.findUnique({ where: { locationId_businessDate: { locationId, businessDate: d } } });
-    const rs: RSale[] = sales.map((s) => ({ id: s.id, drSiNo: s.drSiNo, channel: s.channel, channelSub: s.channelSub, paymentMode: s.paymentMode, customerName: s.customer?.name ?? s.customerName, agentName: s.agent?.name ?? null, riderName: s.rider?.name ?? null, deliveryFee: s.deliveryFee, riderIncentive: s.riderIncentive, shippingFee: s.shippingFee, shippingExpense: s.shippingExpense, marketplaceCharges: s.marketplaceCharges, productTotal: s.productTotal, grandTotal: s.grandTotal, cardMid: s.cardMid, cardSlipNo: s.cardSlipNo, cardApprovalCode: s.cardApprovalCode, cardBatchNo: s.cardBatchNo, notes: s.notes, lines: s.lines.map((l) => ({ productName: l.product.name, qty: l.qty, unitPrice: l.unitPrice, amount: l.amount, isFreebie: l.isFreebie, accountingClass: l.product.category.accountingClass })) }));
+    const acctTitles = new Map((await this.prisma.db.account.findMany({ where: { id: { in: sales.map((s) => s.paymentAccountId).filter(Boolean) as string[] } }, select: { id: true, title: true } })).map((a) => [a.id, a.title]));
+    const rs: RSale[] = sales.map((s) => ({ id: s.id, paymentAccount: s.paymentAccountId ? acctTitles.get(s.paymentAccountId) ?? null : null, drSiNo: s.drSiNo, channel: s.channel, channelSub: s.channelSub, paymentMode: s.paymentMode, customerName: s.customer?.name ?? s.customerName, agentName: s.agent?.name ?? null, riderName: s.rider?.name ?? null, deliveryFee: s.deliveryFee, riderIncentive: s.riderIncentive.plus((s.incentiveExpenseId && riderIncentiveOf.get(s.incentiveExpenseId)) || 0), shippingFee: s.shippingFee, shippingExpense: s.shippingExpense, marketplaceCharges: s.marketplaceCharges, productTotal: s.productTotal, grandTotal: s.grandTotal, cardMid: s.cardMid, cardSlipNo: s.cardSlipNo, cardApprovalCode: s.cardApprovalCode, cardBatchNo: s.cardBatchNo, notes: s.notes, lines: s.lines.map((l) => ({ productName: l.product.name, qty: l.qty, unitPrice: l.unitPrice, amount: l.amount, isFreebie: l.isFreebie, accountingClass: l.product.category.accountingClass })) }));
     // cash-fund expenses are listed on the fund's replenishment voucher; the replenishment itself comes out of today's cash (owner request 2026-09-26)
     const fundRep = await this.prisma.db.cashFundTxn.findMany({ where: { locationId, businessDate: toDateOnly(date), kind: 'REPLENISH' } });
-    const rep = buildDailySalesReport({ branch: loc.name, date, sales: rs, expenses: [...expenses.filter((e) => e.paidFrom !== 'PETTY_CASH').map((e) => ({ accountTitle: e.account.title, payee: e.payee, amount: e.amount, paidFrom: e.paidFrom })), ...fundRep.map((t) => ({ accountTitle: 'Cash Fund Replenishment', payee: t.controlNo, amount: t.amount, paidFrom: 'CASH_DRAWER' }))], close: close ? { moneyBreakdown: close.moneyBreakdown as Record<string, number> | null, countedCash: close.countedCash, expectedCash: close.expectedCash, cashVariance: close.cashVariance } : null, preparedBy: user.fullName });
+    const rep = buildDailySalesReport({ branch: loc.name, date, sales: rs, expenses: [...expenses.filter((e) => e.paidFrom !== 'PETTY_CASH').map((e) => ({ accountTitle: e.account.title, payee: e.payee, amount: e.amount, paidFrom: e.paidFrom, inRiderSummary: saleIncentiveIds.has(e.id) && riderIncentiveOf.has(e.id) })), ...fundRep.map((t) => ({ accountTitle: 'Cash Fund Replenishment', payee: t.controlNo, amount: t.amount, paidFrom: 'CASH_DRAWER' }))], close: close ? { moneyBreakdown: close.moneyBreakdown as Record<string, number> | null, countedCash: close.countedCash, expectedCash: close.expectedCash, cashVariance: close.cashVariance } : null, preparedBy: user.fullName });
     if (!withMargin) return rep;
     if (!user.permissions.has('cost.view')) throw new ForbiddenException('Audit summary requires cost.view');
     const cost = sales.flatMap((s) => s.lines).reduce((t, l) => t.plus(l.unitCost.mul(l.qty)), ZERO);
@@ -74,14 +80,15 @@ export class ReportsService {
     const totals = [...qtyCols.map((c) => c.key), ...costCols.map((c) => c.key)];
     const head = `Daily Inventory Report — ${rep.location.name} — ${from} to ${to}${canCost ? ' (with costing)' : ''}`;
     const subtitle = [`Prepared by: ${user.fullName}`, `Generated: ${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC`];
-    const prodCols: Col[] = [{ header: 'SKU', key: 'sku', width: 12 }, { header: 'Brand', key: 'brand', width: 16 }, { header: 'Item', key: 'name', width: 44 }];
-    const flat = (p: (typeof rep.products)[number]) => ({ sku: p.product.sku, brand: p.product.brand ?? '', name: p.product.name });
-    const summary = rep.products.map((p) => ({ ...flat(p), ...p, ...(canCost ? { unitCost: p.unitCost } : {}) }));
-    const perDay = rep.products.flatMap((p) => p.days.filter((d) => d.receive || d.transferIn || d.returns || d.pullOut || d.sales || d.other || d.adjust).map((d) => ({ ...flat(p), ...d })));
+    const prodCols: Col[] = [{ header: 'SKU', key: 'sku', width: 12 }, { header: 'Brand', key: 'brand', width: 16 }, { header: 'Item', key: 'name', width: 44 }, { header: 'Movement', key: 'movement', width: 12 }];
+    const flat = (p: (typeof rep.products)[number], moved = p.moved) => ({ sku: p.product.sku, brand: p.product.brand ?? '', name: p.product.name, movement: moved ? 'With movement' : 'No movement' });
+    // rep.products already lists items with movement first, then items without
+    const summary = rep.products.map((p) => ({ ...p, ...flat(p), ...(canCost ? { unitCost: p.unitCost } : {}) }));
+    const perDay = rep.products.flatMap((p) => p.days.filter((d) => hasMovement(d)).map((d) => ({ ...d, ...flat(p, true) })));
     const sheets = [
       { name: 'Summary', title: head, subtitle, columns: [...prodCols, ...qtyCols, ...costCols, ...(canCost ? [{ header: 'Unit Cost (avg)', key: 'unitCost', numFmt: money }] : [])], rows: summary as Record<string, unknown>[], totals },
       { name: 'Per day', title: `${head} — movements per day`, columns: [{ header: 'Date', key: 'date', width: 12 }, ...prodCols, ...qtyCols, ...costCols], rows: perDay as Record<string, unknown>[], totals },
-      ...rep.days.map((day) => ({ name: day, title: `${rep.location.name} — ${day}`, columns: [...prodCols, ...qtyCols, ...costCols], rows: rep.products.map((p) => ({ ...flat(p), ...p.days.find((d) => d.date === day)! })).filter((r) => r.beg || r.end || r.receive || r.transferIn || r.returns || r.pullOut || r.sales || r.other || r.adjust) as Record<string, unknown>[], totals })),
+      ...rep.days.map((day) => ({ name: day, title: `${rep.location.name} — ${day}`, columns: [...prodCols, ...qtyCols, ...costCols], rows: rep.products.map((p) => { const d = p.days.find((x) => x.date === day)!; return { ...d, ...flat(p, hasMovement(d)), moved: hasMovement(d) }; }).filter((r) => r.moved || r.beg || r.end).sort((x, y) => Number(y.moved) - Number(x.moved)) as Record<string, unknown>[], totals })),
     ];
     await this.logExport(user, 'DailyInventoryReport.xlsx', { locationId, from, to, withCost: canCost });
     return { buffer: await this.xlsx.workbook(sheets), contentType: XLSX, fileName: `DailyInventory_${rep.location.name.replace(/\W+/g, '')}_${from}_${to}.xlsx` };
@@ -95,27 +102,28 @@ export class ReportsService {
     if (q.locationId && user.locationScoped && !user.locationIds.includes(q.locationId)) throw new ForbiddenException();
     const sales = await this.prisma.db.salesDoc.findMany({
       where: { voidedAt: null, locationId: q.locationId ? q.locationId : user.locationScoped ? { in: user.locationIds } : undefined, docDate: q.from || q.to ? { gte: q.from ? toDateOnly(q.from) : undefined, lte: q.to ? toDateOnly(q.to) : undefined } : undefined, OR: [{ customerId: { not: null } }, { customerName: { not: null } }, { customerPhone: { not: null } }, { customerEmail: { not: null } }] },
-      select: { docDate: true, grandTotal: true, channel: true, customerName: true, customerPhone: true, customerEmail: true, customer: { select: { id: true, code: true, name: true, type: true, contact: true, phone: true, email: true } }, location: { select: { name: true } } },
+      select: { docDate: true, grandTotal: true, channel: true, customerName: true, customerPhone: true, customerEmail: true, customer: { select: { id: true, code: true, name: true, type: true, contact: true, phone: true, email: true } }, location: { select: { name: true } }, lines: { select: { qty: true, isFreebie: true, product: { select: { name: true } } } } },
       orderBy: { docDate: 'asc' },
     });
-    const map = new Map<string, { name: string; type: string; phone: string; email: string; branches: Set<string>; purchases: number; total: number; first: string; last: string; channels: Set<string> }>();
+    const map = new Map<string, { name: string; type: string; phone: string; email: string; branches: Set<string>; purchases: number; total: number; first: string; last: string; channels: Set<string>; items: Map<string, number> }>();
     for (const s of sales) {
       const name = s.customer?.name ?? s.customerName ?? '';
       const phone = s.customerPhone ?? s.customer?.phone ?? s.customer?.contact ?? '';
       const email = (s.customerEmail ?? s.customer?.email ?? '').toLowerCase();
       const key = s.customer?.id ?? (email || phone.replace(/\D/g, '') || name.trim().toLowerCase());
       if (!key) continue;
-      const cur = map.get(key) ?? { name, type: s.customer?.type ?? 'WALK-IN / ONLINE', phone, email, branches: new Set<string>(), purchases: 0, total: 0, first: dateStr(s.docDate), last: dateStr(s.docDate), channels: new Set<string>() };
+      const cur = map.get(key) ?? { name, type: s.customer?.type ?? 'WALK-IN / ONLINE', phone, email, branches: new Set<string>(), purchases: 0, total: 0, first: dateStr(s.docDate), last: dateStr(s.docDate), channels: new Set<string>(), items: new Map<string, number>() };
       cur.name = cur.name || name; cur.phone = phone || cur.phone; cur.email = email || cur.email;
       cur.branches.add(s.location.name); cur.channels.add(s.channel.replace(/_/g, ' ').toLowerCase()); cur.purchases++; cur.total += Number(s.grandTotal); cur.last = dateStr(s.docDate);
+      for (const l of s.lines) if (!l.isFreebie) cur.items.set(l.product.name, (cur.items.get(l.product.name) ?? 0) + l.qty);
       map.set(key, cur);
     }
-    return [...map.values()].map((c) => ({ name: c.name, type: c.type, contactNumber: c.phone, email: c.email, branches: [...c.branches].join(', '), channels: [...c.channels].join(', '), purchases: c.purchases, totalPurchases: Math.round(c.total * 100) / 100, firstPurchase: c.first, lastPurchase: c.last })).sort((a, b) => b.totalPurchases - a.totalPurchases);
+    return [...map.values()].map((c) => ({ name: c.name, type: c.type, contactNumber: c.phone, email: c.email, branches: [...c.branches].join(', '), channels: [...c.channels].join(', '), itemsOrdered: [...c.items.entries()].sort((a, b) => b[1] - a[1]).map(([n, q]) => `${q}× ${n}`).join(', '), purchases: c.purchases, totalPurchases: Math.round(c.total * 100) / 100, firstPurchase: c.first, lastPurchase: c.last })).sort((a, b) => b.totalPurchases - a.totalPurchases);
   }
   async customerContactsXlsx(user: SessionUser, q: { locationId?: string; from?: string; to?: string }): Promise<Out> {
     const rows = await this.customerContacts(user, q);
     await this.logExport(user, 'CustomerContacts.xlsx', q);
-    return { buffer: await this.xlsx.table('Customers', [{ header: 'Customer', key: 'name', width: 30 }, { header: 'Type', key: 'type', width: 16 }, { header: 'Contact number', key: 'contactNumber', width: 18 }, { header: 'Email', key: 'email', width: 28 }, { header: 'Branch(es)', key: 'branches', width: 24 }, { header: 'Channels', key: 'channels', width: 22 }, { header: 'Purchases', key: 'purchases', width: 10 }, { header: 'Total purchases', key: 'totalPurchases', numFmt: '#,##0.00' }, { header: 'First purchase', key: 'firstPurchase', width: 13 }, { header: 'Last purchase', key: 'lastPurchase', width: 13 }], rows, { title: `Customer contact list${q.from || q.to ? ` ${q.from ?? ''} to ${q.to ?? ''}` : ''}`, totals: ['purchases', 'totalPurchases'] }), contentType: XLSX, fileName: 'CustomerContacts.xlsx' };
+    return { buffer: await this.xlsx.table('Customers', [{ header: 'Customer', key: 'name', width: 30 }, { header: 'Type', key: 'type', width: 16 }, { header: 'Contact number', key: 'contactNumber', width: 18 }, { header: 'Email', key: 'email', width: 28 }, { header: 'Items ordered', key: 'itemsOrdered', width: 50 }, { header: 'Branch(es)', key: 'branches', width: 24 }, { header: 'Channels', key: 'channels', width: 22 }, { header: 'Purchases', key: 'purchases', width: 10 }, { header: 'Total purchases', key: 'totalPurchases', numFmt: '#,##0.00' }, { header: 'First purchase', key: 'firstPurchase', width: 13 }, { header: 'Last purchase', key: 'lastPurchase', width: 13 }], rows, { title: `Customer contact list${q.from || q.to ? ` ${q.from ?? ''} to ${q.to ?? ''}` : ''}`, totals: ['purchases', 'totalPurchases'] }), contentType: XLSX, fileName: 'CustomerContacts.xlsx' };
   }
   /**
    * Direct cost generated from sales (owner request 2026-09-26): per branch and product category, the batch cost of everything sold in
@@ -239,7 +247,7 @@ export class ReportsService {
       case 'count': {
         const c = await db.countDoc.findUnique({ where: { id }, include: { location: true, lines: { include: { product: true }, orderBy: { product: { name: 'asc' } } } } }); if (!c) throw new NotFoundException(); scope(c.locationId);
         const exp = await this.stock.expiriesAt(c.locationId, c.lines.map((l) => l.productId));
-        return { status: c.status, docType: 'CountDoc', preparedBy: c.createdBy, title: c.countType === 'WEEKLY' ? 'Weekly Inventory Count Sheet' : 'Actual Inventory Count', header: [['Control #', c.controlNo], ['Location', c.location.name], ['Count date', dateStr(c.countDate)], ['Type', c.countType === 'WEEKLY' ? 'Weekly count (branch staff)' : 'Audit count']], columns: ['SKU', 'Item', 'Expiries on hand (qty)', 'Beginning (start of day)', 'Expected', 'Actual count', 'Variance', 'Remarks'], rows: c.lines.map((l) => [l.product.sku, l.product.name, (exp.get(l.productId) ?? []).map((e) => `${e.expiry} ×${e.qty}`).join(', '), l.beginQty, l.systemQty, l.actualQty ?? '', c.status === 'DRAFT' ? '' : l.variance, l.remarks ?? '']), signatures: ['Counted by', 'Witnessed by', 'Reviewed by'] };
+        return { status: c.status, docType: 'CountDoc', preparedBy: c.createdBy, title: c.countType === 'WEEKLY' ? 'Weekly Inventory Count Sheet' : 'Actual Inventory Count', header: [['Control #', c.controlNo], ['Location', c.location.name], ['Count date', dateStr(c.countDate)], ['Type', c.countType === 'WEEKLY' ? 'Weekly count (branch staff)' : 'Audit count'], ['Order', 'Items with a system quantity first, then items not in the system']], columns: ['SKU', 'Item', 'System', 'Expiries on hand (qty)', 'Beginning (start of day)', 'Expected', 'Actual count', 'Variance', 'Remarks'], rows: sortCountLines(c.lines).map((l) => [l.product.sku, l.product.name, inSystem(l) ? 'In system' : 'Not in system', (exp.get(l.productId) ?? []).map((e) => `${e.expiry} ×${e.qty}`).join(', '), l.beginQty, l.systemQty, l.actualQty ?? '', c.status === 'DRAFT' ? '' : l.variance, l.remarks ?? '']), signatures: ['Counted by', 'Witnessed by', 'Reviewed by'] };
       }
       case 'discrepancy': {
         const c = await db.discrepancyCase.findUnique({ where: { id }, include: { countDoc: { include: { location: true, lines: { include: { product: true } } } } } }); if (!c) throw new NotFoundException(); scope(c.countDoc.locationId);

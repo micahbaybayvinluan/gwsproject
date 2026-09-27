@@ -1,3 +1,5 @@
+import { ReportSubmissionService } from '../reports/report-submission.service';
+import { CashOnHandService } from '../closing/cash-on-hand.service';
 import { requestContext } from '../common/request-context';
 import { PriceUpdatesService } from '../notifications/price-updates.service';
 import { BadRequestException, ForbiddenException, Body, Controller, Get, Put, Query } from '@nestjs/common';
@@ -18,7 +20,7 @@ import { D, ZERO } from '../common/money';
 /** Role dashboards (§20.14), franchise portal (§8.7), Admin settings (§6.1 thresholds etc.). */
 @Controller('api')
 export class DashboardController {
-  constructor(private prisma: PrismaService, private approvals: ApprovalsService, private alerts: AlertsService, private notify: NotificationsService, private settings: SettingsService, private master: MasterService, private fin: FinReportsService, private cashFund: CashFundService, private counts: CountsService, private priceUpdates: PriceUpdatesService) {}
+  constructor(private prisma: PrismaService, private approvals: ApprovalsService, private alerts: AlertsService, private notify: NotificationsService, private settings: SettingsService, private master: MasterService, private fin: FinReportsService, private cashFund: CashFundService, private counts: CountsService, private priceUpdates: PriceUpdatesService, private cashOnHand: CashOnHandService, private reportSubmission: ReportSubmissionService) {}
 
   @Get('dashboard') @RequirePermission('dashboard.view')
   async dashboard(@CurrentUser() u: SessionUser) {
@@ -66,6 +68,14 @@ export class DashboardController {
     out.priceUpdates = await this.priceUpdates.recentFor(u);
     // the person's own requests and how far each got in its approval
     out.myRequests = (await this.approvals.mine(u.id)).slice(0, 8);
+    // today's Daily Sales Report: submitted yet? (branch) / which branches have not (auditors, HR, Owner)
+    const rs = await this.reportSubmission.todayFor(u); if (rs?.mine) out.salesReport = rs.mine; if (rs?.missing) out.salesReportsMissing = rs.missing;
+    // cash sales not yet deposited: own branch for branch staff; every branch for the auditors and the Owner
+    if (u.permissions.has('cashdeposit.view.all')) out.cashOnHandBranches = (await this.cashOnHand.allBranches()).filter((b) => Number(b.cashOnHand) > 0);
+    else if (u.permissions.has('sale.create') && u.locationScoped && u.locationIds[0]) {
+      const loc = await this.prisma.db.location.findUnique({ where: { id: u.locationIds[0] }, select: { type: true } });
+      if (loc && loc.type !== 'FRANCHISE') { const b = await this.cashOnHand.forBranch(u.locationIds[0]); out.cashOnHand = { ...b, days: b.days.filter((d) => d.status !== 'DEPOSITED') }; }
+    }
     return out;
   }
 

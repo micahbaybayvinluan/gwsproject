@@ -36,7 +36,7 @@ function CompanyMyPay() {
   const d = q.data; if (!d) return <p className="text-sm text-slate-500">Loading…</p>;
   if (!d.employee) return <Card title="My Pay & Charges"><p className="text-sm">Your account is not linked to an employee record yet. HR links it under Payroll → Employees.</p></Card>;
   return <div className="mx-auto max-w-4xl space-y-4">
-    <div className="flex flex-wrap items-center gap-2"><h1 className="text-xl font-semibold">My Pay & Charges</h1><span className="text-sm text-slate-500">{d.employee.fullName} · {d.employee.employeeNo} · {d.employee.location?.name ?? 'Office'}</span>
+    <div className="flex flex-wrap items-center gap-2"><h1 className="text-2xl font-bold tracking-tight text-navy">My Pay & Charges</h1><span className="text-sm text-slate-500">{d.employee.fullName} · {d.employee.employeeNo} · {d.employee.location?.name ?? 'Office'}</span>
       <Button size="sm" variant="outline" className="ml-auto" onClick={() => api.download(`/api/reports/forms/employee-ledger/${d.employee!.id}.pdf`, 'MyLedger.pdf')}>My ledger (PDF)</Button></div>
     <Card title="Charges to me">
       {!d.charges.length ? <Empty>No charges.</Empty> : <ul className="divide-y">{d.charges.map((c) => <li key={c.id} className="py-3 text-sm">
@@ -125,7 +125,7 @@ export function WeeklyCompliancePage() {
   const q = useQuery({ queryKey: ['weekly-compliance', weeks], queryFn: () => api.get<{ weeks: string[]; rows: { userId: string; name: string; username: string; idNumber: string | null; role: string; branch: string; missed: number; compliancePct: number; weeks: { weekStart: string; submitted: boolean; controlNo: string | null; countId: string | null; current: boolean }[] }[] }>(`/api/hr/weekly-counts?weeks=${weeks}`) });
   const d = q.data;
   return <div className="space-y-4">
-    <div className="flex flex-wrap items-end gap-2"><h1 className="mr-auto text-xl font-semibold">Weekly inventory count sheets — compliance</h1><Field label="Weeks"><Select value={weeks} onChange={(e) => setWeeks(e.target.value)}>{['4', '8', '12', '26'].map((w) => <option key={w}>{w}</option>)}</Select></Field></div>
+    <div className="flex flex-wrap items-end gap-2"><h1 className="mr-auto text-2xl font-bold tracking-tight text-navy">Weekly Count Compliance</h1><Field label="Weeks"><Select value={weeks} onChange={(e) => setWeeks(e.target.value)}>{['4', '8', '12', '26'].map((w) => <option key={w}>{w}</option>)}</Select></Field></div>
     <p className="text-sm text-slate-500">Each branch associate submits their own count sheet every week (Monday–Sunday). Red = not submitted.</p>
     {d && <div className="overflow-auto rounded border bg-white"><table className="w-full text-xs"><thead className="bg-slate-50 text-left text-slate-500"><tr><th className="px-2 py-1">Associate</th><th className="px-2">Branch</th><th className="px-2 num">Missed</th><th className="px-2 num">Compliance</th>{d.weeks.map((w) => <th key={w} className="px-1 text-center">{w.slice(5)}</th>)}</tr></thead>
       <tbody>{d.rows.map((r) => <tr key={r.userId} className="border-t"><td className="px-2 py-1">{r.name}<div className="text-[10px] text-slate-400">{r.username}{r.idNumber ? ` · ${r.idNumber}` : ''}</div></td><td className="px-2">{r.branch}</td><td className={`px-2 num font-semibold ${r.missed ? 'text-red-700' : ''}`}>{r.missed}</td><td className="px-2 num">{r.compliancePct}%</td>

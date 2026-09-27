@@ -20,11 +20,14 @@ export const ADJUST: MovementType[] = ['ADJUST_COUNT', 'EXPIRED_WRITEOFF'];
 
 export interface Buckets { receive: number; transferIn: number; returns: number; pullOut: number; sales: number; other: number; adjust: number; receiveCost: number; transferInCost: number; returnsCost: number; pullOutCost: number; salesCost: number; otherCost: number; adjustCost: number }
 export interface DayRow extends Buckets { date: string; beg: number; begCost: number; end: number; endCost: number }
-export interface ProductRow extends Buckets { product: ProductRef; beg: number; begCost: number; end: number; endCost: number; unitCost: number; days: DayRow[] }
+export interface ProductRow extends Buckets { product: ProductRef; beg: number; begCost: number; end: number; endCost: number; unitCost: number; moved: boolean; days: DayRow[] }
 export interface DailyInventoryReport { from: string; to: string; days: string[]; products: ProductRow[]; totals: Buckets & { beg: number; begCost: number; end: number; endCost: number } }
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 const emptyBuckets = (): Buckets => ({ receive: 0, transferIn: 0, returns: 0, pullOut: 0, sales: 0, other: 0, adjust: 0, receiveCost: 0, transferInCost: 0, returnsCost: 0, pullOutCost: 0, salesCost: 0, otherCost: 0, adjustCost: 0 });
+
+/** True when any stock moved (receive, transfer, return, pull-out, sale, other out or adjustment). */
+export const hasMovement = (b: Pick<Buckets, 'receive' | 'transferIn' | 'returns' | 'pullOut' | 'sales' | 'other' | 'adjust'>) => !!(b.receive || b.transferIn || b.returns || b.pullOut || b.sales || b.other || b.adjust);
 
 /** Inclusive list of YYYY-MM-DD strings from..to. */
 export function dateRange(from: string, to: string): string[] {
@@ -35,6 +38,8 @@ export function dateRange(from: string, to: string): string[] {
 
 export function buildDailyInventory(from: string, to: string, products: ProductRef[], opening: Opening[], moves: LedgerRow[]): DailyInventoryReport {
   const days = dateRange(from, to);
+  // a consignment out lands at the consignee as a positive CONSIGN_OUT row: count it as stock coming in there
+  moves = moves.map((m) => (m.movementType === 'CONSIGN_OUT' && m.qtyDelta > 0 ? { ...m, movementType: 'TRANSFER_IN' as MovementType } : m));
   const byProduct = new Map<string, LedgerRow[]>(); for (const m of moves) { const a = byProduct.get(m.productId) ?? []; a.push(m); byProduct.set(m.productId, a); }
   const openMap = new Map(opening.map((o) => [o.productId, o]));
   const rows: ProductRow[] = [];
@@ -58,8 +63,10 @@ export function buildDailyInventory(from: string, to: string, products: ProductR
     }
     for (const d of dayRows) for (const k of Object.keys(d) as (keyof DayRow)[]) if (k.endsWith('Cost')) (d[k] as number) = r2(d[k] as number);
     for (const k of Object.keys(tot) as (keyof Buckets)[]) if (k.endsWith('Cost')) (tot[k] as number) = r2(tot[k]);
-    rows.push({ product: p, beg: begQty, begCost: r2(begCost), ...tot, end: qty, endCost: r2(cost), unitCost: qty ? r2(cost / qty) : 0, days: dayRows });
+    rows.push({ product: p, beg: begQty, begCost: r2(begCost), ...tot, end: qty, endCost: r2(cost), unitCost: qty ? r2(cost / qty) : 0, moved: hasMovement(tot), days: dayRows });
   }
+  // items that moved in the period first, then items only carried in stock (owner request 2026-09-27); by name within each group
+  rows.sort((a, b) => Number(b.moved) - Number(a.moved) || a.product.name.localeCompare(b.product.name));
   const totals = { ...emptyBuckets(), beg: 0, begCost: 0, end: 0, endCost: 0 };
   for (const p of rows) for (const k of Object.keys(totals) as (keyof typeof totals)[]) totals[k] = r2(totals[k] + (p[k] as number));
   return { from, to, days, products: rows, totals };

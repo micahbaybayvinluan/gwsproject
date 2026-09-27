@@ -29,7 +29,7 @@ export function CashFundPage() {
   const d = detail.data;
   const variance = check.countedAmount !== '' && d ? Number(check.countedAmount) - Number(d.balance) : 0;
   return <div className="space-y-4">
-    <h1 className="text-xl font-semibold">Cash fund</h1>
+    <h1 className="text-2xl font-bold tracking-tight text-navy">Branch Cash Fund (Petty Cash)</h1>
     {(list.data?.length ?? 0) > 1 && <Card title="All branch funds"><table className="w-full text-sm"><thead className="text-left text-xs text-slate-500"><tr><th>Branch</th><th className="num">Fund</th><th className="num">Balance</th><th className="num">Spent</th><th>Last replenished</th><th>Last store check</th></tr></thead>
       <tbody>{list.data!.map((f) => <tr key={f.id} className={`cursor-pointer border-t hover:bg-slate-50 ${locationId === f.locationId ? 'bg-slate-50' : ''}`} onClick={() => setSel(f.locationId)}><td className="py-1">{f.location.name}</td><td className="num">{peso(f.imprestAmount)}</td><td className={`num font-medium ${Number(f.balance) < Number(f.imprestAmount) * 0.3 ? 'text-red-700' : ''}`}>{peso(f.balance)}</td><td className="num">{peso(f.spent)}</td><td className="text-xs">{f.lastReplenishedAt ? new Date(f.lastReplenishedAt).toLocaleDateString() : '—'}</td><td className="text-xs">{f.lastCheck ? <>{new Date(f.lastCheck.checkedAt).toLocaleDateString()} {Number(f.lastCheck.variance) ? <span className="font-semibold text-red-700">{peso(f.lastCheck.variance)}</span> : <span className="text-emerald-700">matched</span>}</> : '—'}</td></tr>)}</tbody></table></Card>}
     {!list.data?.length && <Empty>No cash fund set up{me?.locationScoped ? ' for your branch yet — ask Admin or the Accounting Head' : ''}.</Empty>}

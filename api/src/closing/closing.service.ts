@@ -29,7 +29,8 @@ export class ClosingService implements OnModuleInit {
       const row = await db.dailyClose.findUnique({ where: { locationId_businessDate: { locationId, businessDate } } });
       return !!row || true;
     }
-    return false;
+    // today is closed for the branch once its Daily Sales Report is submitted; later changes are revision requests
+    return !!(await db.salesReportSubmission.findUnique({ where: { locationId_businessDate: { locationId, businessDate } }, select: { id: true } }));
   }
 
   /** Expected cash = cash sales − cash-paid expenses (§8.4). */

@@ -28,6 +28,8 @@ export class ApprovalsService {
     const route = APPROVAL_ROUTING[input.type];
     let roles: RoleKey[] = [...route.roles];
     if (input.type === 'EDIT_REQUEST' && input.requesterRole) roles = editRequestApprovers(input.requesterRole);
+    // cost typed by the Head Auditor goes to the Owner, and the other way round; anyone else needs both
+    if (input.type === 'COST_EDIT' && input.requesterRole && roles.length > 1) roles = roles.filter((r) => r !== input.requesterRole);
     if (input.extraRoles?.length) roles = [...new Set([...roles, ...input.extraRoles])];
     const userIds = [...new Set(input.approverUserIds ?? [])];
     if (userIds.length) roles = [];

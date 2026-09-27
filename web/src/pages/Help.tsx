@@ -5,7 +5,7 @@ import { useAuth } from '@/lib/auth';
 import { Badge, Button, Card, Empty, ErrorBox, Input } from '@/components/ui/primitives';
 
 interface Section { id: string; title: string; body: string }
-interface HelpData { intro: string; aiEnabled: boolean; role: string; sections: Section[] }
+interface HelpData { intro: string; aiEnabled: boolean; role: string; sections: Section[]; roleGuide?: Section[]; everyone?: Section[]; topics?: Section[]; allRoleGuides?: Section[] }
 interface AskResult { mode: 'ai' | 'guide'; answer: string | null; note?: string; sections: Section[] }
 interface Turn { question: string; result: AskResult }
 
@@ -51,14 +51,18 @@ export function HelpPage() {
     mutationFn: (text: string) => api.post<AskResult>('/api/help/ask', { question: text, history: turns.slice(-3).flatMap((t) => (t.result.answer ? [{ role: 'user', content: t.question }, { role: 'assistant', content: t.result.answer }] : [])) }),
     onSuccess: (result, text) => { setTurns((t) => [...t, { question: text, result }]); setQuestion(''); },
   });
+  // My guide = the step-by-step guide for the person's role; Guide for everyone = processes everyone uses; More topics = other screens they can open
+  const [tab, setTab] = useState<'mine' | 'everyone' | 'topics' | 'roles'>('mine');
+  const tabSections = (t: typeof tab) => (t === 'mine' ? q.data?.roleGuide : t === 'everyone' ? q.data?.everyone : t === 'topics' ? q.data?.topics : q.data?.allRoleGuides) ?? [];
   const shown = useMemo(() => {
     const f = filter.trim().toLowerCase();
-    return (q.data?.sections ?? []).filter((s) => !f || s.title.toLowerCase().includes(f) || s.body.toLowerCase().includes(f));
-  }, [q.data, filter]);
+    return tabSections(tab).filter((s) => !f || s.title.toLowerCase().includes(f) || s.body.toLowerCase().includes(f));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q.data, filter, tab]);
   const openSection = (id: string) => { setOpen((o) => new Set(o).add(id)); setTimeout(() => document.getElementById(`help-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50); };
   const d = q.data;
   return <div className="mx-auto max-w-4xl space-y-4">
-    <div className="flex flex-wrap items-end gap-2"><h1 className="mr-auto text-xl font-semibold">Help & Guide</h1>{d && <span className="text-sm text-slate-500">Showing the guide for: <b>{d.role}</b></span>}</div>
+    <div className="flex flex-wrap items-end gap-2"><h1 className="mr-auto text-2xl font-bold tracking-tight text-navy">Help & User Guide</h1>{d && <span className="text-sm text-slate-500">Showing the guide for: <b>{d.role}</b></span>}</div>
     <Card title={<>Ask a question {d && (d.aiEnabled ? <Badge tone="green">AI assistant on</Badge> : <Badge>answers from the guide</Badge>)}</>}>
       <form className="flex flex-wrap gap-2" onSubmit={(e) => { e.preventDefault(); if (question.trim().length >= 3) ask.mutate(question.trim()); }}>
         <Input className="min-w-0 flex-1" placeholder="e.g. How do I record a delivery sale? / Paano mag-request ng stock?" value={question} onChange={(e) => setQuestion(e.target.value)} maxLength={1000} />
@@ -76,10 +80,12 @@ export function HelpPage() {
       {turns.length > 0 && <button className="mt-2 text-xs text-slate-500 underline" onClick={() => setTurns([])}>Clear conversation</button>}
     </Card>
     <Card title="User guide" actions={<div className="flex gap-2"><Input className="w-56" placeholder="Filter sections…" value={filter} onChange={(e) => setFilter(e.target.value)} /><Button size="sm" variant="outline" onClick={() => setOpen(new Set(shown.map((s) => s.id)))}>Open all</Button><Button size="sm" variant="outline" onClick={() => { setOpen(new Set(shown.map((s) => s.id))); setTimeout(() => window.print(), 100); }}>Print</Button></div>}>
-      {d && <div className="mb-2 text-sm text-slate-600"><Markdown text={d.intro.split('\n\n')[0]} /></div>}
+      {d && <div className="mb-3 inline-flex flex-wrap rounded-xl bg-slate-50 p-1 ring-1 ring-slate-200">{([['mine', `My guide (${d.role})`], ['everyone', 'Guide for everyone'], ['topics', 'More topics for my role'], ...(d.allRoleGuides ? [['roles', 'Every role (for training)']] : [])] as [typeof tab, string][]).map(([k, l]) => <button key={k} onClick={() => { setTab(k); setOpen(new Set()); }} className={`rounded-lg px-3 py-1.5 text-sm font-semibold ${tab === k ? 'bg-navy text-white shadow' : 'text-slate-600 hover:text-navy'}`}>{l}</button>)}</div>}
+      {d && tab === 'everyone' && <div className="mb-2 text-sm text-slate-600"><Markdown text={d.intro.split('\n\n')[0]} /></div>}
+      {d && tab === 'mine' && shown.map((s) => <div key={s.id} className="rounded-xl border border-slate-200 p-4"><h3 className="mb-1 text-base font-semibold text-navy">{s.title}</h3><Markdown text={s.body} /></div>)}
       {q.isLoading && <p className="text-sm text-slate-500">Loading…</p>}<ErrorBox error={q.error} />
       {d && !shown.length && <Empty>No section matches “{filter}”.</Empty>}
-      <div className="divide-y">{shown.map((s) => <div key={s.id} id={`help-${s.id}`} className="scroll-mt-4 py-1">
+      <div className="divide-y">{(tab === 'mine' ? [] : shown).map((s) => <div key={s.id} id={`help-${s.id}`} className="scroll-mt-4 py-1">
         <button className="flex w-full items-center justify-between py-2 text-left text-sm font-semibold hover:text-brand" aria-expanded={open.has(s.id)} onClick={() => setOpen((o) => { const n = new Set(o); if (n.has(s.id)) n.delete(s.id); else n.add(s.id); return n; })}>{s.title}<span className="text-slate-400">{open.has(s.id) ? '−' : '+'}</span></button>
         {open.has(s.id) && <div className="pb-3"><Markdown text={s.body} /></div>}
       </div>)}</div>

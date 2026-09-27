@@ -134,9 +134,11 @@ export async function fillDailySalesTemplate(rep: DailySalesReport, file: string
   clear(f, [...range('J', 12, 20), ...range('K', 12, 20)]);
   [1000, 500, 200, 100, 50, 20, 10, 5, 1].forEach((d, i) => { const row = 12 + i; const q = rep.moneyBreakdown?.[String(d)] ?? 0; f.getCell(`J${row}`).value = q || null; f.getCell(`K${row}`).value = { formula: `H${row}*J${row}` }; });
   // expenses: rider/driver → H31:J40, shipping → H46:K55, others major → L13:N23, other → L29:N36
-  const riderExp = rep.expenses.filter((e) => /rider|driver/i.test(e.accountTitle));
-  const shipExp = rep.expenses.filter((e) => /shipping expense/i.test(e.accountTitle));
-  const rest = rep.expenses.filter((e) => !riderExp.includes(e) && !shipExp.includes(e));
+  // rider incentives paid from a sale are already in the rider summary (L3:L8 → D44); they are not repeated in the expense boxes
+  const boxExp = rep.expenses.filter((e) => !e.inRiderSummary);
+  const riderExp = boxExp.filter((e) => /rider|driver/i.test(e.accountTitle));
+  const shipExp = boxExp.filter((e) => /shipping expense/i.test(e.accountTitle));
+  const rest = boxExp.filter((e) => !riderExp.includes(e) && !shipExp.includes(e));
   const major = rest.filter((e) => e.group === 'MAJOR'); const other = rest.filter((e) => e.group === 'OTHER');
   clear(f, [...range('L', 13, 23), ...range('M', 13, 23), ...range('N', 13, 23), ...range('L', 29, 36), ...range('M', 29, 36), ...range('N', 29, 36), ...range('H', 31, 40), ...range('I', 31, 40), ...range('J', 31, 40), ...range('H', 46, 55), ...range('I', 46, 55), ...range('J', 46, 55), ...range('K', 46, 55)]);
   const putExp = (rows: typeof rep.expenses, first: number, last: number, nameCol: string, partCol: string | null, amtCol: string) => compactExp(rows, last - first + 1).forEach((e, i) => { f.getCell(`${nameCol}${first + i}`).value = e.accountTitle; if (partCol) f.getCell(`${partCol}${first + i}`).value = e.payee ?? null; f.getCell(`${amtCol}${first + i}`).value = asNum(e.amount); });
@@ -148,10 +150,58 @@ export async function fillDailySalesTemplate(rep: DailySalesReport, file: string
   rep.freebies.slice(0, 7).forEach((fb, i) => { f.getCell(`F${44 + i}`).value = fb.item; f.getCell(`G${44 + i}`).value = fb.qty; });
   f.getCell('F10').value = rep.productCounts.apparel; f.getCell('F11').value = rep.productCounts.equipment;
   f.getCell('E63').value = rep.header.preparedBy; f.getCell('F63').value = date;
+  fixFrontFormulas(f, rep);
+  // where the online and card money went, per bank / GCash / card / platform account
+  const pa = wb.addWorksheet('PAYMENT ACCOUNTS');
+  pa.columns = [{ header: 'Account', key: 'account', width: 36 }, { header: 'Type', key: 'mode', width: 14 }, { header: 'Sales', key: 'count', width: 8 }, { header: 'Amount', key: 'amount', width: 14, style: { numFmt: '#,##0.00' } }];
+  pa.getRow(1).font = { bold: true };
+  for (const a of rep.byPaymentAccount) pa.addRow({ account: a.account, mode: a.mode, count: a.count, amount: asNum(a.amount) });
+  if (rep.byPaymentAccount.length) { const last = pa.rowCount; pa.addRow({ account: 'TOTAL', count: { formula: `SUM(C2:C${last})` }, amount: { formula: `SUM(D2:D${last})` } }).font = { bold: true }; }
   return Buffer.from(await wb.xlsx.writeBuffer());
 }
 function compactExp<T extends { accountTitle: string; payee: string | null; amount: unknown }>(rows: T[], cap: number): T[] {
   if (rows.length <= cap) return rows;
   const head = rows.slice(0, cap - 1); const rest = rows.slice(cap - 1);
   return [...head, { ...rest[0], accountTitle: `+${rest.length} more expenses`, payee: null, amount: rest.reduce((n, r) => n + asNum(r.amount as never), 0) } as T];
+}
+
+/**
+ * The sample FRONT sheet left some sales out of its totals (owner request 2026-09-27: every item reflected and balanced).
+ * These formulas make every sale count exactly once, so CASH SUBTOTAL + TOTAL ONLINE, CC & SHIPPING = all sales of the day
+ * except AR/PDC, and the product counts include card sales:
+ *  - agent cash (C9) is part of the cash subtotal; cash delivery fees of franchise/dealer deliveries are counted;
+ *  - rider 2's online deliveries and every delivery / shipping fee paid online or by card are counted with their sale;
+ *  - Shopee/Lazada sales are counted at their amount plus fee; card products and card transactions are shown.
+ */
+export function fixFrontFormulas(f: ExcelJS.Worksheet, rep: DailySalesReport) {
+  const set = (addr: string, formula: string) => { f.getCell(addr).value = { formula } as ExcelJS.CellFormulaValue; };
+  const CC = "'CREDIT CARD'", WI = "'WALK IN'";
+  set('C10', 'DELIVERY!E29+DELIVERY!E59+DELIVERY!E93+DELIVERY!E126+DELIVERY!E159');
+  set('C11', 'C5+C6+C7+C8+C9+C10');
+  set('C13', `${CC}!E21+${CC}!F21`);
+  set('C14', `${CC}!E74+${CC}!F74+${CC}!E99+${CC}!F99+${CC}!E124+${CC}!F124`);
+  set('C15', `${CC}!E49+${CC}!F49`);
+  set('C20', 'DELIVERY!L29+DELIVERY!M29+DELIVERY!L59+DELIVERY!M59');
+  set('C21', 'DELIVERY!L93+DELIVERY!M93');
+  set('C22', 'DELIVERY!L126+DELIVERY!M126');
+  set('C23', 'DELIVERY!L159+DELIVERY!M159');
+  set('C24', 'SHIPPING!D19+SHIPPING!E19');
+  set('C25', 'SHIPPING!D46+SHIPPING!E46');
+  set('C26', 'SHIPPING!L46+SHIPPING!M46');
+  set('C27', 'SHIPPING!D74+SHIPPING!E74');
+  set('C28', 'SHIPPING!L19+SHIPPING!M19');
+  // number of products, card sales included
+  set('F5', `${WI}!C30+${WI}!I30+${CC}!D21`);
+  set('F6', `DELIVERY!C29+DELIVERY!K29+DELIVERY!C59+DELIVERY!K59+${CC}!D74+${CC}!D99+${CC}!D124`);
+  set('F12', `${WI}!C111+${WI}!I111+DELIVERY!C159+DELIVERY!K159+SHIPPING!C74+${CC}!D49`);
+  // fees box: each fee once
+  set('F16', 'DELIVERY!M29+DELIVERY!M59'); f.getCell('E16').value = 'Delivery Fee (Online)';
+  set('F17', `${CC}!F21+${CC}!F49+${CC}!F74+${CC}!F99+${CC}!F124`); f.getCell('E17').value = 'Delivery Fee (Credit Card)';
+  set('F18', 'DELIVERY!M93'); f.getCell('E18').value = 'Franchise delivery fee (Online)';
+  set('F19', 'DELIVERY!M126'); f.getCell('E19').value = 'Prothin Dealer delivery fee (Online)';
+  set('F20', 'SHIPPING!E19+SHIPPING!M19+SHIPPING!E46+SHIPPING!M46+SHIPPING!E74'); f.getCell('E20').value = 'Shipping Fee';
+  set('F21', 'DELIVERY!M159'); f.getCell('E21').value = 'Agent delivery fee (Online)';
+  // card transactions and products
+  f.getCell('E13').value = 'Card transactions:'; f.getCell('F13').value = rep.creditCard.transactions;
+  f.getCell('E14').value = 'Card products:'; set('F14', `${CC}!D21+${CC}!D49+${CC}!D74+${CC}!D99+${CC}!D124`);
 }

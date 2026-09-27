@@ -31,7 +31,7 @@ describe('Daily Sales Report rendered into the sample workbook (§8.5, §19)', (
     const front = wb.worksheets.find((w) => w.name.trim() === 'FRONT')!; const walk = wb.getWorksheet('WALK IN')!; const del = wb.getWorksheet('DELIVERY')!; const cc = wb.getWorksheet('CREDIT CARD')!; const ship = wb.getWorksheet('SHIPPING')!; const rt = wb.getWorksheet('RECEIPT TRACKER')!;
     expect(front.getCell('B1').value).toBe('Dasma Branch');
     expect((front.getCell('C5').value as { formula: string }).formula).toBe("'WALK IN'!D30"); // totals stay the workbook's formulas
-    expect((front.getCell('C11').value as { formula: string }).formula).toBe('C5+C6++C7+C8+C10');
+    expect((front.getCell('C11').value as { formula: string }).formula).toBe('C5+C6+C7+C8+C9+C10'); // agent cash is part of the cash subtotal
     expect(walk.getCell('A6').value).toBe('15246'); expect(walk.getCell('D6').value).toBe(3000); expect(walk.getCell('B7').value).toBe('Plastic L'); expect(walk.getCell('D7').value).toBe(0);
     expect(walk.getCell('A38').value).toBe('15250'); expect(walk.getCell('D38').value).toBe(1100);
     expect(del.getCell('J3').value).toBe('JAIME'); expect(del.getCell('I6').value).toBe('15245'); expect(del.getCell('L6').value).toBe(3000); expect(del.getCell('M6').value).toBe(137); expect(del.getCell('L7').value).toBe(1650);
@@ -44,4 +44,76 @@ describe('Daily Sales Report rendered into the sample workbook (§8.5, §19)', (
     // sample data from the template is cleared
     expect(walk.getCell('A9').value).toBeNull(); expect(del.getCell('J8').value).toBeNull();
   });
+
+  it('every sale is counted once: cash subtotal + online/card/shipping = all sales except AR; products include card sales; deposit = cash − expenses', async () => {
+    const all: RSale[] = [
+      sale({ drSiNo: 'W1', productTotal: d(1000), grandTotal: d(1000), lines: [line('A', 2, 500)] }),
+      sale({ drSiNo: 'W2', paymentMode: 'ONLINE', productTotal: d(300), grandTotal: d(300), lines: [line('B', 1, 300)] }),
+      sale({ drSiNo: 'F1', channel: 'FRANCHISE', productTotal: d(700), grandTotal: d(700), lines: [line('C', 1, 700)] }),
+      sale({ drSiNo: 'D1', channel: 'DEALER', paymentMode: 'ONLINE', productTotal: d(900), grandTotal: d(900), lines: [line('D', 3, 300)] }),
+      sale({ drSiNo: 'A1', channel: 'AGENT', productTotal: d(400), grandTotal: d(400), lines: [line('E', 1, 400)] }),
+      sale({ drSiNo: 'R1', channel: 'DELIVERY', riderName: 'JAIME', productTotal: d(500), deliveryFee: d(50), riderIncentive: d(30), grandTotal: d(550), lines: [line('F', 1, 500)] }),
+      sale({ drSiNo: 'R2', channel: 'DELIVERY', riderName: 'CARLO', paymentMode: 'ONLINE', productTotal: d(600), deliveryFee: d(60), grandTotal: d(660), lines: [line('G', 2, 300)] }),
+      sale({ drSiNo: 'DF', channel: 'FRANCHISE', riderName: 'JAIME', productTotal: d(800), deliveryFee: d(40), grandTotal: d(840), lines: [line('H', 1, 800)] }),
+      sale({ drSiNo: 'DD', channel: 'DEALER', riderName: 'JAIME', paymentMode: 'ONLINE', productTotal: d(1200), deliveryFee: d(45), grandTotal: d(1245), lines: [line('I', 4, 300)] }),
+      sale({ drSiNo: 'DA', channel: 'AGENT', riderName: 'CARLO', productTotal: d(350), deliveryFee: d(35), grandTotal: d(385), lines: [line('J', 1, 350)] }),
+      sale({ drSiNo: 'C1', paymentMode: 'CREDIT_CARD', productTotal: d(2000), grandTotal: d(2000), lines: [line('K', 2, 1000)] }),
+      sale({ drSiNo: 'C2', channel: 'DELIVERY', riderName: 'JAIME', paymentMode: 'CREDIT_CARD', productTotal: d(1500), deliveryFee: d(70), grandTotal: d(1570), lines: [line('L', 3, 500)] }),
+      sale({ drSiNo: 'C3', channel: 'AGENT', paymentMode: 'CREDIT_CARD', productTotal: d(650), grandTotal: d(650), lines: [line('M', 1, 650)] }),
+      sale({ drSiNo: 'S1', channel: 'SHIPPING_COURIER', productTotal: d(1100), shippingFee: d(120), grandTotal: d(1220), lines: [line('N', 1, 1100)] }),
+      sale({ drSiNo: 'S2', channel: 'SHIPPING_MARKETPLACE', channelSub: 'SHOPEE', paymentMode: 'ONLINE', productTotal: d(990), shippingFee: d(80), grandTotal: d(1070), lines: [line('O', 1, 990)] }),
+      sale({ drSiNo: 'S3', channel: 'SHIPPING_COURIER', channelSub: 'FRANCHISE', paymentMode: 'ONLINE', productTotal: d(2500), shippingFee: d(150), grandTotal: d(2650), lines: [line('P', 5, 500)] }),
+      sale({ drSiNo: 'S4', channel: 'SHIPPING_COURIER', channelSub: 'DEALER', paymentMode: 'ONLINE', productTotal: d(1800), shippingFee: d(90), grandTotal: d(1890), lines: [line('Q', 2, 900)] }),
+      sale({ drSiNo: 'S5', channel: 'SHIPPING_COURIER', channelSub: 'AGENT', paymentMode: 'ONLINE', productTotal: d(750), shippingFee: d(75), grandTotal: d(825), lines: [line('R', 1, 750)] }),
+      sale({ drSiNo: 'AR', channel: 'DEALER', paymentMode: 'AR_PDC', productTotal: d(5000), grandTotal: d(5000), lines: [line('S', 2, 2500)] }),
+    ];
+    const expenses = [
+      { accountTitle: 'Meralco - West Ave', payee: null, amount: d(300), paidFrom: 'CASH_DRAWER' },
+      { accountTitle: 'Incentives - West Ave', payee: 'Juan', amount: d(25), paidFrom: 'CASH_DRAWER' },
+      { accountTitle: 'Rider/Driver Incentive - West Ave', payee: 'JAIME', amount: d(30), paidFrom: 'CASH_DRAWER', inRiderSummary: true },
+    ];
+    const r = buildDailySalesReport({ branch: 'West Ave', date: '2026-09-27', preparedBy: 'x', close: null, sales: all, expenses });
+    const wb = new ExcelJS.Workbook(); await wb.xlsx.load((await fillDailySalesTemplate(r, templatePath()!)) as unknown as ArrayBuffer);
+    const v = evaluator(wb);
+    const nonAr = all.filter((x) => x.paymentMode !== 'AR_PDC');
+    const salesTotal = nonAr.reduce((t, x) => t + x.grandTotal.toNumber(), 0);
+    console.log(JSON.stringify(Object.fromEntries(['C5','C6','C7','C8','C9','C10','C11','C13','C14','C15','C16','C17','C18','C19','C20','C21','C22','C23','C24','C25','C26','C27','C28','C29'].map((a) => [a, v(a)]))));
+    expect(v('C11') + v('C29')).toBeCloseTo(salesTotal, 2);
+    expect(v('C11')).toBeCloseTo(r.cash.subtotal.toNumber(), 2); expect(v('C29')).toBeCloseTo(r.onlineCcShippingTotal.toNumber(), 2);
+    const qty = nonAr.flatMap((x) => x.lines).reduce((n, l) => n + l.qty, 0);
+    expect(v('F5') + v('F6') + v('F7') + v('F8') + v('F9') + v('F12')).toBe(qty);
+    expect(v('F14')).toBe(6); expect(v('F13')).toBe(3); expect(r.creditCard.transactions).toBe(3); expect(r.creditCard.products).toBe(6);
+    expect(v('D49')).toBeCloseTo(355, 2); // 300 + 25 + the rider's 30 counted once (rider summary)
+    expect(v('C56')).toBeCloseTo(r.totalCashDeposit.toNumber(), 2);
+  });
 });
+
+/** Tiny evaluator for the FRONT formulas (cell references across sheets, +, −, SUM of ranges) so totals can be checked without Excel. */
+function evaluator(wb: ExcelJS.Workbook) {
+  const sheet = (n: string) => wb.worksheets.find((w) => w.name.trim() === n.trim())!;
+  const colNum = (c: string) => c.split('').reduce((n, ch) => n * 26 + ch.charCodeAt(0) - 64, 0);
+  const colStr = (n: number) => { let s = ''; for (; n > 0; n = Math.floor((n - 1) / 26)) s = String.fromCharCode(65 + ((n - 1) % 26)) + s; return s; };
+  const cell = (sh: string, addr: string): number => {
+    const v = sheet(sh).getCell(addr.replace(/\$/g, '')).value as unknown;
+    if (v && typeof v === 'object' && 'formula' in (v as object)) return formula(sh, (v as { formula: string }).formula);
+    if (v && typeof v === 'object' && 'sharedFormula' in (v as object)) {
+      // a copy of the master cell's formula, with relative references moved by the same offset
+      const master = (v as { sharedFormula: string }).sharedFormula; const m = /([A-Z]+)(\d+)/.exec(master)!; const here = /([A-Z]+)(\d+)/.exec(addr.replace(/\$/g, ''))!;
+      const dc = colNum(here[1]) - colNum(m[1]), dr = Number(here[2]) - Number(m[2]);
+      const mf = (sheet(sh).getCell(master).value as { formula: string }).formula;
+      return formula(sh, mf.replace(/(\$?)([A-Z]+)(\$?)(\d+)/g, (_x, ca, c, ra, r) => `${ca}${ca ? c : colStr(colNum(c) + dc)}${ra}${ra ? r : Number(r) + dr}`));
+    }
+    return typeof v === 'number' ? v : 0;
+  };
+  const ref = /(?:'([^']+)'|([A-Z]+))!\$?([A-Z]+)\$?(\d+)(?::\$?([A-Z]+)\$?(\d+))?|\$?([A-Z]+)\$?(\d+)(?::\$?([A-Z]+)\$?(\d+))?/g;
+  function formula(sh: string, f: string): number {
+    const expr = f.replace(/SUM\(/g, '(').replace(ref, (_m, qs, us, c1, r1, c2, r2, lc1, lr1, lc2, lr2) => {
+      const s2 = qs ?? us ?? sh; const a = c1 ?? lc1, ra = Number(r1 ?? lr1), b = c2 ?? lc2, rb = Number(r2 ?? lr2);
+      if (!b) return `(${cell(s2, `${a}${ra}`)})`;
+      let t = 0; for (let c = colNum(a); c <= colNum(b); c++) for (let r = ra; r <= rb; r++) t += cell(s2, `${colStr(c)}${r}`);
+      return `(${t})`;
+    }).replace(/\+\+/g, '+');
+    return Number(new Function(`return (${expr});`)());
+  }
+  return (addr: string) => cell('FRONT', addr);
+}

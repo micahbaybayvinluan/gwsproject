@@ -1,6 +1,6 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PaidFrom, Prisma } from '@prisma/client';
-import { PrismaService } from '../common/prisma.service';
+import { PrismaService, Tx } from '../common/prisma.service';
 import { SequenceService } from '../common/sequence.service';
 import { AuditService } from '../common/audit.service';
 import { AccountsService } from '../gl/accounts.service';
@@ -47,28 +47,53 @@ export class ExpensesService {
     if (!isMain && (await this.closing.isClosed(locationId, docDate)) && !user.permissions.has('sale.edit.postclose')) throw new BadRequestException({ message: 'Day is closed; request a post-close edit', code: 'DAY_CLOSED' });
     await this.posting.assertPeriodOpen(null, docDate);
     const loc = await this.prisma.db.location.findUniqueOrThrow({ where: { id: locationId } });
-    const doc = await this.prisma.db.$transaction(async (tx) => {
-      const controlNo = await this.seq.form(tx, 'EX', locationId);
-      const d = await tx.expenseDoc.create({ data: { controlNo, docDate, locationId, accountId: account.id, payee: input.payee, amount: D(input.amount).toFixed(2), paidFrom: input.paidFrom, paidFromAccountId: input.paidFromAccountId ?? null, notes: input.notes, preparedBy: user.id, createdBy: user.id, isMain } });
-      // paid from the branch cash fund: the fund balance goes down (it is topped back up from cash sales)
-      if (input.paidFrom === 'PETTY_CASH' && !isMain) await this.cashFund.spend(tx, { locationId, amount: input.amount, expenseDocId: d.id, businessDate: docDate, createdBy: user.id, notes: `${account.title}${input.payee ? ` – ${input.payee}` : ''}` });
-      await this.posting.post(tx, { type: 'ExpenseDoc', id: d.id, date: docDate, name: input.payee, createdBy: user.id }, (r) => r10Expense(r, { locationId, expenseAccountId: account.id, amount: input.amount, paidFrom: input.paidFrom, paidFromAccountId: input.paidFromAccountId, controlNo, payee: input.payee }));
-      return d;
-    });
+    const doc = await this.prisma.db.$transaction((tx) => this.insert(tx, { locationId, docDate, account, isMain, payee: input.payee, amount: input.amount, paidFrom: input.paidFrom, paidFromAccountId: input.paidFromAccountId, notes: input.notes, userId: user.id }));
     await this.audit.log({ action: 'CREATE', entityType: 'ExpenseDoc', entityId: doc.id, after: doc });
     return doc;
+  }
+
+  /** Writes the expense, the cash fund spend (when paid from the fund) and its journal entry inside the caller's transaction. */
+  async insert(tx: Tx, e: { locationId: string; docDate: Date; account: { id: string; title: string }; isMain: boolean; payee?: string; amount: number; paidFrom: PaidFrom; paidFromAccountId?: string | null; notes?: string; userId: string }) {
+    const controlNo = await this.seq.form(tx, 'EX', e.locationId);
+    const d = await tx.expenseDoc.create({ data: { controlNo, docDate: e.docDate, locationId: e.locationId, accountId: e.account.id, payee: e.payee, amount: D(e.amount).toFixed(2), paidFrom: e.paidFrom, paidFromAccountId: e.paidFromAccountId ?? null, notes: e.notes, preparedBy: e.userId, createdBy: e.userId, isMain: e.isMain } });
+    // paid from the branch cash fund: the fund balance goes down (it is topped back up from cash sales)
+    if (e.paidFrom === 'PETTY_CASH' && !e.isMain) await this.cashFund.spend(tx, { locationId: e.locationId, amount: e.amount, expenseDocId: d.id, businessDate: e.docDate, createdBy: e.userId, notes: `${e.account.title}${e.payee ? ` – ${e.payee}` : ''}` });
+    await this.posting.post(tx, { type: 'ExpenseDoc', id: d.id, date: e.docDate, name: e.payee, createdBy: e.userId }, (r) => r10Expense(r, { locationId: e.locationId, expenseAccountId: e.account.id, amount: e.amount, paidFrom: e.paidFrom, paidFromAccountId: e.paidFromAccountId, controlNo, payee: e.payee }));
+    return d;
+  }
+
+  /**
+   * Incentive paid out of a sale's cash (owner request 2026-09-27): a branch expense on the branch's Incentives account
+   * (or Rider/Driver Incentive), paid from the cash drawer, so it lowers the cash to deposit and shows as the branch's expense.
+   */
+  async saleIncentive(tx: Tx, e: { locationId: string; docDate: Date; kind: 'SALES' | 'RIDER'; payee: string; amount: number; drSiNo: string; userId: string }) {
+    const account = await this.incentiveAccount(e.locationId, e.kind, tx);
+    return this.insert(tx, { locationId: e.locationId, docDate: e.docDate, account, isMain: false, payee: e.payee, amount: e.amount, paidFrom: 'CASH_DRAWER', notes: `Incentive on sale ${e.drSiNo}`, userId: e.userId });
+  }
+
+  /** The branch's Incentives (sales) or Rider/Driver Incentive account; a clear message when the branch has none. */
+  async incentiveAccount(locationId: string, kind: 'SALES' | 'RIDER', tx: Tx | null = null) {
+    const key = kind === 'RIDER' ? 'RIDER_INCENTIVE' : 'INCENTIVES';
+    const db = tx ?? this.prisma.db;
+    const a = await db.account.findFirst({ where: { branchTagId: locationId, active: true, template: { key } }, select: { id: true, title: true } });
+    if (!a) throw new BadRequestException(`This branch has no ${kind === 'RIDER' ? 'Rider/Driver Incentive' : 'Incentives'} account yet. Ask Accounting to add it to the chart of accounts.`);
+    return a;
+  }
+
+  /** Voids an expense inside the caller's transaction: returns fund money and reverses its journal entry. */
+  async voidInTx(tx: Tx, doc: { id: string; locationId: string; amount: Prisma.Decimal; paidFrom: PaidFrom; isMain: boolean }, reason: string, userId: string) {
+    await tx.expenseDoc.update({ where: { id: doc.id }, data: { status: 'VOIDED', voidedAt: new Date(), voidedBy: userId, voidReason: reason } });
+    if (doc.paidFrom === 'PETTY_CASH' && !doc.isMain) await this.cashFund.unspend(tx, { locationId: doc.locationId, amount: doc.amount, expenseDocId: doc.id, createdBy: userId });
+    const vouchers = await tx.journalVoucher.findMany({ where: { sourceDocumentType: 'ExpenseDoc', sourceDocumentId: doc.id, voidedAt: null }, include: { lines: true } });
+    for (const v of vouchers) await this.posting.persist(tx, { rule: 'R10', book: v.book, remarks: `Reversal of ${v.voucherNo}: ${reason}`, lines: v.lines.map((l) => ({ accountId: l.accountId, debit: D(l.credit), credit: D(l.debit) })) }, { type: 'ExpenseDoc', id: doc.id, date: todayManila(), createdBy: userId });
   }
   async void(id: string, reason: string, user: SessionUser) {
     const doc = await this.get(id, user);
     if (doc.voidedAt) throw new BadRequestException('Already voided');
     if (await this.closing.isClosed(doc.locationId, doc.docDate) && !user.permissions.has('sale.edit.postclose')) throw new BadRequestException({ message: 'Day is closed', code: 'DAY_CLOSED' });
     await this.posting.assertPeriodOpen(null, doc.docDate);
-    await this.prisma.db.$transaction(async (tx) => {
-      await tx.expenseDoc.update({ where: { id }, data: { status: 'VOIDED', voidedAt: new Date(), voidedBy: user.id, voidReason: reason } });
-      if (doc.paidFrom === 'PETTY_CASH' && !doc.isMain) await this.cashFund.unspend(tx, { locationId: doc.locationId, amount: doc.amount, expenseDocId: id, createdBy: user.id });
-      const vouchers = await tx.journalVoucher.findMany({ where: { sourceDocumentType: 'ExpenseDoc', sourceDocumentId: id, voidedAt: null }, include: { lines: true } });
-      for (const v of vouchers) await this.posting.persist(tx, { rule: 'R10', book: v.book, remarks: `Reversal of ${v.voucherNo}: ${reason}`, lines: v.lines.map((l) => ({ accountId: l.accountId, debit: D(l.credit), credit: D(l.debit) })) }, { type: 'ExpenseDoc', id, date: todayManila(), createdBy: user.id });
-    });
+    if (await this.prisma.db.salesDoc.findFirst({ where: { incentiveExpenseId: id, voidedAt: null }, select: { id: true } })) throw new BadRequestException('This is the incentive of a sale; void the sale instead');
+    await this.prisma.db.$transaction((tx) => this.voidInTx(tx, doc, reason, user.id));
     await this.audit.log({ action: 'VOID', entityType: 'ExpenseDoc', entityId: id, before: doc, after: { reason } });
     return this.get(id, user);
   }

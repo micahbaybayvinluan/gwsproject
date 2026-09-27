@@ -1,3 +1,4 @@
+import { loadWorkbook } from './workbook-readers';
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { PrismaService } from '../common/prisma.service';
 import { XlsxService } from '../reports/xlsx.service';
@@ -115,9 +116,27 @@ export class ImportsService {
     return { imported: n, errors };
   }
   /** Count upload (SKU, Name, System Qty, Actual Qty, Remarks) → lines for CountsService.enter. */
+  /**
+   * Actual counts typed into a count sheet in Excel. Works with the downloaded count sheet (title block above the table, "Actual count")
+   * and with a plain table whose first row is the header ("Actual Qty"): the header row is the first row with a "SKU" cell.
+   */
   async countLines(buf: Buffer) {
-    const { rows } = await this.xlsx.read(buf); const out = []; const errors: string[] = [];
-    for (const [i, r] of rows.entries()) { try { const p = await this.prisma.db.product.findUniqueOrThrow({ where: { sku: String(r.SKU) } }); if (r['Actual Qty'] == null || r['Actual Qty'] === '') continue; out.push({ productId: p.id, actualQty: Number(r['Actual Qty']), remarks: r.Remarks ? String(r.Remarks) : undefined }); } catch (e) { errors.push(`Row ${i + 2}: ${(e as Error).message}`); } }
+    const wb = await loadWorkbook(buf); const ws = wb.worksheets[0]; const out: { productId: string; actualQty: number; remarks?: string }[] = []; const errors: string[] = [];
+    const text = (v: unknown): string => { if (v && typeof v === 'object' && 'result' in (v as object)) v = (v as { result: unknown }).result; if (v && typeof v === 'object' && 'richText' in (v as object)) v = (v as { richText: { text: string }[] }).richText.map((t) => t.text).join(''); return v == null ? '' : String(v).trim(); };
+    let headerRow = 0; const col: Record<string, number> = {};
+    for (let r = 1; r <= Math.min(ws.rowCount, 30) && !headerRow; r++) { const vals = ws.getRow(r).values as unknown[]; if (vals.some((v) => text(v).toUpperCase() === 'SKU')) { headerRow = r; vals.forEach((v, j) => { col[text(v).toLowerCase()] = j; }); } }
+    if (!headerRow) return { lines: out, errors: ['No "SKU" column found in the first sheet'] };
+    const actualCol = col['actual count'] ?? col['actual qty'] ?? col['actual'];
+    if (actualCol == null) return { lines: out, errors: ['No "Actual count" column found'] };
+    const skus = new Map((await this.prisma.db.product.findMany({ select: { id: true, sku: true } })).map((p) => [p.sku, p.id]));
+    for (let r = headerRow + 1; r <= ws.rowCount; r++) {
+      const vals = ws.getRow(r).values as unknown[]; const sku = text(vals[col.sku]); const actual = text(vals[actualCol]);
+      if (!sku || actual === '') continue;
+      const productId = skus.get(sku); if (!productId) { errors.push(`Row ${r}: unknown SKU ${sku}`); continue; }
+      const n = Number(actual); if (!Number.isInteger(n) || n < 0) { errors.push(`Row ${r}: actual count for ${sku} must be a whole number of 0 or more`); continue; }
+      const remarks = col.remarks != null ? text(vals[col.remarks]) : '';
+      out.push({ productId, actualQty: n, remarks: remarks || undefined });
+    }
     return { lines: out, errors };
   }
   /** §10.1 COA import: preview (with parsed tags for the review screen) then commit with overrides. `sheet` = BALANCE SHEET / INCOME STATEMENT of the accounting workbook; no sheet = the template. */

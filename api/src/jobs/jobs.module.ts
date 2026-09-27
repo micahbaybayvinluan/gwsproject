@@ -2,6 +2,9 @@ import { Injectable, Logger, Module, OnModuleInit } from '@nestjs/common';
 import { Queue, Worker } from 'bullmq';
 import Redis from 'ioredis';
 import { ClosingService } from '../closing/closing.service';
+import { CashOnHandService } from '../closing/cash-on-hand.service';
+import { ReportSubmissionService } from '../reports/report-submission.service';
+import { CustomerFollowUpsService } from '../sales/customer-followups.service';
 import { AlertsService } from '../alerts/alerts.service';
 import { ApprovalsService } from '../approvals/approvals.service';
 import { CountsService } from '../counts/counts.service';
@@ -25,6 +28,10 @@ export const JOBS = {
   AR_OVERDUE: { name: 'ar-overdue', cron: '0 1 * * *' }, // 09:00 Manila
   EMAIL_DIGEST: { name: 'email-digest', cron: '0 10 * * *' }, // 18:00 Manila
   PRICE_NOTIFY: { name: 'price-notify', cron: '0 0 * * *' }, // 08:00 Manila
+  SALES_REPORT_REMINDER: { name: 'sales-report-reminder', cron: '30 11 * * *' }, // 7:30 PM Manila, before the 8 PM closing
+  SALES_REPORT_CUTOFF: { name: 'sales-report-cutoff', cron: '0 13 * * *' }, // 9:00 PM Manila: not submitted → submitted as it stands
+  CUSTOMER_FOLLOW_UPS: { name: 'customer-follow-ups', cron: '0 1 * * *' }, // 9:00 AM Manila: customers who may have finished their supplements
+  CASH_DEPOSIT_REMINDERS: { name: 'cash-deposit-reminders', cron: '0 2 * * *' }, // 10:00 Manila: cash on hand due / overdue
   MONTH_END_DEPRECIATION: { name: 'month-end-depreciation', cron: '0 17 1 * *' }, // 1st 01:00 Manila for previous month
 } as const;
 
@@ -33,7 +40,7 @@ export const JOBS = {
 export class JobsService implements OnModuleInit {
   private log = new Logger('Jobs');
   private queue!: Queue; private worker!: Worker;
-  constructor(private closing: ClosingService, private alerts: AlertsService, private approvals: ApprovalsService, private counts: CountsService, private sales: SalesService, private notifications: NotificationsService, private prices: PriceChangeService, private payroll: PayrollService) {}
+  constructor(private followUps: CustomerFollowUpsService, private reportSubmission: ReportSubmissionService, private cashOnHand: CashOnHandService, private closing: ClosingService, private alerts: AlertsService, private approvals: ApprovalsService, private counts: CountsService, private sales: SalesService, private notifications: NotificationsService, private prices: PriceChangeService, private payroll: PayrollService) {}
 
   async onModuleInit() {
     if (process.env.DISABLE_JOBS === 'true' || process.env.NODE_ENV === 'test') return;
@@ -54,6 +61,10 @@ export class JobsService implements OnModuleInit {
       case JOBS.AR_OVERDUE.name: return this.sales.notifyOverdue();
       case JOBS.EMAIL_DIGEST.name: return this.notifications.sendDigests();
       case JOBS.PRICE_NOTIFY.name: return this.prices.notifyPending();
+      case JOBS.SALES_REPORT_REMINDER.name: return this.reportSubmission.remind();
+      case JOBS.SALES_REPORT_CUTOFF.name: return this.reportSubmission.autoSubmit();
+      case JOBS.CUSTOMER_FOLLOW_UPS.name: return this.followUps.runDaily();
+      case JOBS.CASH_DEPOSIT_REMINDERS.name: return this.cashOnHand.remind();
       case JOBS.MONTH_END_DEPRECIATION.name: { const d = new Date(); d.setUTCMonth(d.getUTCMonth() - 1); return this.payroll.runDepreciation(d.getUTCFullYear(), d.getUTCMonth() + 1, null); }
       default: throw new Error(`Unknown job ${name}`);
     }

@@ -106,13 +106,24 @@ Each section below starts with a hidden line that says which roles it is for. Th
 - **Daily Close** shows today's cash sales, cash collections, cash expenses, cash fund replenishment and the **expected cash**.
 - Count the cash in the drawer and type how many of each bill and coin under **Money Breakdown**, then **Save cash count**. The variance shows at once (red if short).
 - Record the **bank deposit** with the amount, bank account and date.
-- The day closes by itself at midnight Manila time. After that, changes need approval.
+- The day closes when the branch **submits its Daily Sales Report**, or by itself at midnight Manila time. After that, changes need approval (post-close edit).
+- Record every deposit for the **sales day it covers**. Cash not yet deposited shows under **Cash on Hand**.
 - **Cash shortages:** HR or the Head Auditor can charge a shortage to the staff on duty from the **Cash shortages** list on the same page.
 
 ## Daily Sales Report
 <!-- for: report.sales.own, report.sales.all -->
 - **Reports → Daily Sales Report**, or the buttons on Daily Close: choose the branch and date, then **xlsx** (the same layout as the paper Sales Report) or **PDF**.
 - Branch staff get the report without cost. Admin, the auditors and Accounting can switch on the audit view with cost of sales.
+- Every sale is counted once. Cash subtotal plus online, card and shipping equals all sales of the day except AR / PDC.
+- **Credit Card** shows the number of card transactions and the products sold on card; card sales are counted in "Number of products".
+- **Online & card payments by account** shows where the non-cash money went (each bank, **Gcash (GWS)**, card and platform account). The Excel file has it on the **PAYMENT ACCOUNTS** sheet.
+
+## Submitting today's Daily Sales Report (branch staff)
+<!-- for: sale.create -->
+1. Before 8 PM, open **Daily Branch Sales Report** (the dashboard reminds you) and check every number.
+2. Press **Submit today's report…**, tick **"I acknowledge that this Daily Sales Report is true and correct"** and press **I agree — submit**.
+3. Today is then closed for your branch. Any later change follows the revision protocol: a post-close edit approved by the auditors.
+- You are reminded at 7:30 PM. A report not submitted by 9 PM is submitted automatically **as it stands**, and the Head Auditor, Asst Auditor, Audit Associate and HR are notified.
 
 ## Requesting stock from the warehouse (branch)
 <!-- for: transfer.confirm -->
@@ -173,15 +184,20 @@ Each section below starts with a hidden line that says which roles it is for. Th
 <!-- for: count.create -->
 - Every sales associate submits one count sheet each week (Monday to Sunday). Until you do, a red alarm shows on your dashboard.
 1. Press **Start my weekly count** on the dashboard (or Inventory Count → Start my weekly count sheet).
-2. Every item is already listed with today's beginning count. Type only the **actual count** you see.
-3. **Save actuals** as you go, then **Submit count**. The Head Auditor, Asst Auditor and Audit Associate are notified. HR can see who did and did not submit.
+2. Every item is listed:
+   - first the items the system has at your branch, with today's beginning count;
+   - then the items **not in the system** (for stock that was never transferred in the system).
+   Type the **actual count** for the first group. In the second group, type only what you find; blank means none.
+3. **Save actuals** as you go, then **Submit count**. HR can see who did and did not submit.
+4. If anything differs, a **discrepancy case** opens. You, the Head Auditor, Asst Auditor, Audit Associate, the Owner and HR are notified, and you have 7 days to explain.
+- **Excel:** **Download sheet (xlsx)**, type the counts in the "Actual count" column, and **Upload filled sheet**. The items come in the same order.
 - After submitting, the sheet is locked. If you made a mistake, use **Correct this count…**: the Head Auditor approves the change.
 
 ## Audit count (auditors and Field Auditor)
 <!-- for: discrepancy.resolve, cashfund.check, revision.request -->
 1. **Inventory Count → Start an audit count**: choose the branch or franchise you are auditing and press **Create count sheet**.
-2. Every item is filled in with the start-of-day beginning count and the expected quantity now. Type only the **actual count**. The difference is computed for you, and the expiry dates on hand are shown.
-3. **Submit count**. The sheet is locked. Any difference opens a discrepancy case and the people concerned are notified.
+2. Every item is listed: first those the system has at that location (with the start-of-day beginning count and the expected quantity now), then those not in the system. Type the **actual count**; in the second group, only what you find. The difference is computed for you, and the expiry dates on hand are shown.
+3. **Submit count**. The sheet is locked. Any difference opens a discrepancy case. The branch staff, the auditors, the Owner and HR (company branches) are notified.
 - **Revisions:** press **Correct this count…**, type the corrected numbers and the reason. Only the Head Auditor can approve, and Admin is notified. The revision is logged.
 - You can also download the sheet as Excel, fill it offline and upload it.
 
@@ -191,7 +207,7 @@ Each section below starts with a hidden line that says which roles it is for. Th
 - **Branch staff** see on their dashboard, in bold red, how many days are left before the shortage is charged to them.
 - **Explaining:** open the case (Discrepancies) and use **Explain this discrepancy**. HR is notified and the Head Auditor decides. If accepted, the difference is adjusted and nobody is charged.
 - **Head Auditor:** mark it resolved after a new matching count, or accept the variance as an adjustment.
-- At the deadline, an unresolved shortage becomes a **Charge Form** at franchise price, sent to HR.
+- At the deadline, a shortage with **no explanation** (or a rejected one) becomes a **Charge Form** at franchise price, sent to HR. An explanation still waiting for the Head Auditor holds the charge until it is decided.
 
 ## Write-offs: expired and damaged items
 <!-- for: writeoff.create, writeoff.approve -->
@@ -326,8 +342,14 @@ Each section below starts with a hidden line that says which roles it is for. Th
 - **Imports** loads products, the chart of accounts, opening balances and minimum stock levels from the company Excel files.
 
 ## Consignment
-<!-- for: consignment.manage -->
-- **Consignment** records stock placed with consignees (goods out) and consigned stock received (goods in), their sale reports and settlements.
+<!-- for: consignment.manage, consignment.request -->
+- **Consignee accounts** (Catalogue → Consignees, the Owner only): name, what they pay (retail price, consignee price or agreed cost), payment terms, contact and address. One step creates the consignee's stock location, customer, receivable account and agreement.
+- **Consignment (In & Out)** has three simple steps:
+  - **1. Send goods to a consignee:** choose the consignee and items → **Save draft** → **Print draft** → **Submit for approval**.
+  - **2. Record consignee sales:** consignee, period, items sold. Prices are filled in from the agreement and can be edited. Print the draft, then submit.
+  - **3. Goods returned by a consignee:** consignee, items and the branch taking them back → save, print, submit, then confirm when they arrive.
+- **Approvals:** a Sales Associate's consignment goes to the Head or Asst Auditor first; a Warehouse Associate's to the Warehouse In-Charge. **The Owner always gives the final approval.** The Owner's own entries apply at once.
+- **Stock at consignees** shows what each consignee holds, what they sold and what they still owe. Value at cost, and prices of cost-based agreements, are shown only to people allowed to see cost.
 
 ## Franchise portal
 <!-- for: franchise.portal -->
@@ -351,6 +373,57 @@ Each section below starts with a hidden line that says which roles it is for. Th
 - Click a user to change the role or branches, tick extra permissions for a custom role, switch the account off, or reset the password. **Activity** opens everything the person did.
 - **Audit Log** records every action with the person, time and details.
 - **Settings** holds thresholds (discrepancy days, alert levels, automatic posting and others).
+
+## Inventory reports: item search and items with movement first
+<!-- for: report.inventory.own, report.inventory.all -->
+- **Inventory Reports & Movement:** type part of a name, SKU or brand in **Search item** and press **Search**. It works for the daily report, the monthly movement sheet and the stock ledger.
+- The **Daily Inventory Report** lists the items that moved in the period first (with a "moved" badge), then the items only carried in stock. The Excel file follows the same order and has a **Movement** column. Cost columns appear only for people allowed to see cost.
+
+## Freebies received from suppliers
+<!-- for: receiving.create, cost.edit -->
+- Items a supplier gives for free go in the **Free (freebie)** column of the delivery, not in Qty.
+- They are added to stock at the cost the Head Auditor approves on that delivery.
+- With automatic posting on, they are booked as **Dr Inventory / Cr Other Income – Supplier Freebies**.
+
+## Incentive paid from a sale
+<!-- for: sale.incentive -->
+1. On **New Sale**, press **+ Add incentive expense**.
+2. Choose **Sales incentive** or **Rider / driver incentive**, who receives it, and the amount.
+3. It is recorded as the branch's expense (Incentives / Rider-Driver Incentive account), paid from the cash drawer. It lowers the cash to deposit and shows on the Daily Sales Report.
+- Voiding the sale voids the incentive too.
+
+## Cash on hand (sales cash not yet deposited)
+<!-- for: sale.create, cashdeposit.view.all, cashdeposit.settings -->
+- **Cash on Hand** lists each sales day's cash still to deposit, the deadline and how many days are left. The branch dashboard shows the same, in red when overdue.
+- **Days allowed:** the Head Auditor or the Owner sets, per branch, how many days after the sales day the cash must be in the bank (default 1).
+- **Extension:** press **Request extension** on a day, choose the new date and give the reason. The Head Auditor **and** the Owner must both approve.
+- **Reminders:** every morning the branch, Head Auditor, Asst Auditor and Audit Associate are told about cash due or overdue. A day past its deadline without an approved extension becomes an **HR notice** for a Notice to Explain.
+
+## HR notices (Notice to Explain)
+<!-- for: hr.notice -->
+- **HR Notices (NTE)** lists situations HR must act on, such as cash not deposited on time. Each notice shows the amount, the sales day, the deadline and the staff on duty.
+- Issue the NTE, press **Mark NTE issued** and write a note; **Close** it when settled.
+
+## Product cost and days to consume
+<!-- for: cost.edit, product.edit -->
+- **Edit cost** on a product: type the new cost, the effective date and the reason, then **Send for approval**.
+  - The Head Auditor's change is approved by the Owner, and the Owner's by the Head Auditor.
+  - On approval, the Owner, Head Auditor, External Auditor and Accounting Head are notified. Nobody else ever sees cost.
+- **Days to consume one unit** (for example 30 for a 30-serving tub): drives the customer re-order reminder.
+
+## Customer contacts and re-order follow-ups
+<!-- for: report.sales.own, report.sales.all -->
+- **Customer Contact List & Follow-ups → Customers & items ordered:** every customer with contact number, email, the **items they ordered**, number of purchases and totals. Export to Excel.
+- **Re-order follow-ups:**
+  - When a customer with a number or email buys a product that has days to consume, a follow-up is due after quantity × days.
+  - On that morning the store where they bought it is notified to call.
+  - Tap the number to call, or press **SMS** / **Email**: the Owner's message is filled in and can be edited before sending. Then press **Contacted** or **Dismiss**.
+- **The Owner** writes the SMS and email in **Settings → Customer re-order messages** and can make them go out automatically. SMS needs an SMS account (Semaphore) and email needs a mail server in the settings file; until then, messages are logged as "not set up".
+
+## Page names and what each page is for
+<!-- for: all -->
+- Every menu item has a descriptive name (for example **Supplier Deliveries (Receiving)** or **Stock Transfers & Pull-outs**).
+- The top of each page says in one line what the page is for.
 
 ## Form numbers
 <!-- for: all -->

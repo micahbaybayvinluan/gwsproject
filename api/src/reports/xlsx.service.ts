@@ -54,8 +54,9 @@ export class XlsxService {
     for (const [label, v] of [['Walk-in', rep.cash.walkIn], ['Delivery', rep.cash.delivery], ['Franchise', rep.cash.franchise], ['Prothin Dealer', rep.cash.dealer], ['Agent (Cash)', rep.cash.agent], ['Delivery Fee', rep.cash.deliveryFee]] as const) { put(r, 1, label); put(r, 2, asNum(v)); r++; }
     put(r, 1, 'Subtotal', true); f.getCell(r, 2).value = { formula: `SUM(B${cashStart}:B${r - 1})` }; f.getCell(r, 2).numFmt = money; const cashSubRow = r; r += 2;
     put(r, 1, 'CREDIT CARD', true); r++; const ccStart = r;
-    for (const [label, v] of [['Walk-in (CC)', rep.creditCard.walkIn], ['Delivery (CC)', rep.creditCard.delivery], ['Agent (CC)', rep.creditCard.agent], ['Other (CC)', rep.creditCard.other]] as const) { put(r, 1, label); put(r, 2, asNum(v)); r++; }
-    put(r, 1, 'Total Credit Card', true); f.getCell(r, 2).value = { formula: `SUM(B${ccStart}:B${r - 1})` }; f.getCell(r, 2).numFmt = money; r += 2;
+    for (const [label, v] of [['Walk-in (CC)', rep.creditCard.walkIn], ['Delivery (CC)', rep.creditCard.delivery], ['Agent (CC)', rep.creditCard.agent], ['Other (CC)', rep.creditCard.other], ['Delivery / shipping fees (CC)', rep.creditCard.deliveryFee]] as const) { put(r, 1, label); put(r, 2, asNum(v)); r++; }
+    put(r, 1, 'Total Credit Card', true); f.getCell(r, 2).value = { formula: `SUM(B${ccStart}:B${r - 1})` }; f.getCell(r, 2).numFmt = money; r++;
+    put(r, 1, 'Card transactions'); put(r, 2, rep.creditCard.transactions).numFmt = '0'; r++; put(r, 1, 'Products sold on card'); put(r, 2, rep.creditCard.products).numFmt = '0'; r += 2;
     put(r, 1, 'WALK-IN (ONLINE)', true); r++; const olStart = r;
     for (const [label, v] of [['Walk-in (Online)', rep.onlineWalkIn.walkIn], ['Franchise (Online)', rep.onlineWalkIn.franchise], ['Prothin Dealer (Online)', rep.onlineWalkIn.dealer], ['Agent (Online)', rep.onlineWalkIn.agent], ['Delivery (Online)', rep.onlineDelivery.delivery], ['Delivery Fee (Online)', rep.onlineDelivery.deliveryFee]] as const) { put(r, 1, label); put(r, 2, asNum(v)); r++; }
     put(r, 1, 'SHIPPING', true); r++;
@@ -98,6 +99,8 @@ export class XlsxService {
     lineSheet('WALK IN', rep.sheets.walkIn); lineSheet('DELIVERY', rep.sheets.delivery); lineSheet('SHIPPING', rep.sheets.shipping);
     const cc = wb.addWorksheet('CREDIT CARD'); cc.columns = [{ header: 'DR#/SI#', key: 'drSiNo', width: 14 }, { header: 'Customer', key: 'customer', width: 24 }, { header: 'Items', key: 'items', width: 40 }, { header: 'Amount', key: 'amount', width: 14 }, { header: 'MID', key: 'mid', width: 14 }, { header: 'Slip #', key: 'slip', width: 12 }, { header: 'Approval', key: 'approval', width: 12 }, { header: 'Batch', key: 'batch', width: 12 }]; cc.getRow(1).font = { bold: true };
     for (const x of rep.sheets.creditCard) cc.addRow({ ...x, amount: asNum(x.amount as never) });
+    const pa = wb.addWorksheet('PAYMENT ACCOUNTS'); pa.columns = [{ header: 'Account', key: 'account', width: 36 }, { header: 'Type', key: 'mode', width: 14 }, { header: 'Sales', key: 'count', width: 8 }, { header: 'Amount', key: 'amount', width: 14 }];
+    for (const a of rep.byPaymentAccount) pa.addRow({ account: a.account, mode: a.mode, count: a.count, amount: asNum(a.amount) });
     const rt = wb.addWorksheet('RECEIPT TRACKER'); rt.columns = [{ header: 'DR#/SI#', key: 'drSiNo', width: 14 }, { header: 'Customer', key: 'customer', width: 24 }, { header: 'Channel', key: 'channel', width: 20 }, { header: 'Payment', key: 'paymentMode', width: 14 }, { header: 'Amount', key: 'amount', width: 14 }]; rt.getRow(1).font = { bold: true };
     for (const x of rep.sheets.receiptTracker) rt.addRow({ ...x, amount: asNum(x.amount as never) });
     return Buffer.from(await wb.xlsx.writeBuffer());

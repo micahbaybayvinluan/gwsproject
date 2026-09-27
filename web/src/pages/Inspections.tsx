@@ -16,7 +16,7 @@ export function InspectionsPage() {
   const nav = useNavigate(); const { can } = useAuth(); const [sp] = useSearchParams();
   const q = useQuery({ queryKey: ['inspections', sp.get('status')], queryFn: () => api.get<Insp[]>(`/api/inspections${sp.get('status') ? `?status=${sp.get('status')}` : ''}`) });
   return <div className="space-y-4">
-    <div className="flex flex-wrap items-center gap-2"><h1 className="mr-auto text-xl font-semibold">Store inspection reports</h1>{can('inspection.create') && <Button onClick={() => nav('/inspections/new')}>New inspection</Button>}</div>
+    <div className="flex flex-wrap items-center gap-2"><h1 className="mr-auto text-2xl font-bold tracking-tight text-navy">Store Inspection Reports</h1>{can('inspection.create') && <Button onClick={() => nav('/inspections/new')}>New inspection</Button>}</div>
     <DataTable exportName="StoreInspections" data={q.data ?? []} onRowClick={(r) => nav(`/inspections/${r.id}`)} columns={[{ header: 'No.', accessorKey: 'controlNo' }, { header: 'Date', accessorKey: 'inspectionDate', cell: (c) => fmtDate(c.getValue()) }, { header: 'Branch', accessorFn: (r) => r.location.name }, { header: 'Inspector', accessorKey: 'inspectorName' }, { header: 'Staff on duty', accessorFn: (r) => r.staffOnDuty?.fullName ?? r.staffOnDutyName ?? '' }, { header: 'Not complied', accessorKey: 'nonCompliant', cell: (c) => <span className={Number(c.getValue()) ? 'font-semibold text-red-700' : ''}>{String(c.getValue() ?? 0)}</span> }, { header: 'Status', accessorKey: 'status', cell: (c) => <Badge tone={statusTone(String(c.getValue()))}>{String(c.getValue())}</Badge> }]} />
   </div>;
 }
@@ -40,7 +40,7 @@ export function InspectionFormPage() {
   let section = '';
   if (existing.data && existing.data.status !== 'DRAFT') return <p className="text-sm">This report is already submitted. <a className="text-brand underline" href={`/inspections/${id}`}>Open it</a></p>;
   return <div className="mx-auto max-w-3xl space-y-4">
-    <h1 className="text-xl font-semibold">Store inspection report {existing.data?.controlNo ?? '(new)'}</h1>
+    <h1 className="text-2xl font-bold tracking-tight text-navy">Store inspection report {existing.data?.controlNo ?? '(new)'}</h1>
     <Card>
       <div className="grid gap-3 md:grid-cols-2">
         <Field label="Branch"><Select value={h.locationId} onChange={(e) => setH({ ...h, locationId: e.target.value, staffOnDutyEmployeeId: '' })}><option value="">—</option>{locations.data?.filter((l) => ['BRANCH', 'WAREHOUSE', 'FRANCHISE'].includes(l.type)).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</Select></Field>
@@ -81,7 +81,7 @@ export function InspectionDetailPage() {
   const items = r.checklist ?? []; let section = '';
   const mineToAck = r.staffOnDuty?.userId === me?.id && !r.staffAcknowledgedAt && r.status !== 'DRAFT';
   return <div className="mx-auto max-w-3xl space-y-4">
-    <div className="flex flex-wrap items-center gap-2"><h1 className="text-xl font-semibold">{r.controlNo}</h1><Badge tone={statusTone(r.status)}>{r.status}</Badge>
+    <div className="flex flex-wrap items-center gap-2"><h1 className="text-2xl font-bold tracking-tight text-navy">{r.controlNo}</h1><Badge tone={statusTone(r.status)}>{r.status}</Badge>
       <span className="ml-auto flex gap-2">{r.status === 'DRAFT' && r.inspectorId === me?.id && <Button size="sm" onClick={() => nav(`/inspections/${r.id}/edit`)}>Continue</Button>}<Button size="sm" variant="outline" onClick={() => api.download(`/api/reports/forms/inspection/${r.id}.pdf`, `${r.controlNo}.pdf`)}>Print</Button></span></div>
     <Card><dl className="grid grid-cols-2 gap-3 text-sm md:grid-cols-4">{[['Date', fmtDate(r.inspectionDate)], ['Branch', r.location.name], ['Inspector', r.inspectorName ?? ''], ['Staff on duty', r.staffOnDuty?.fullName ?? r.staffOnDutyName ?? '']].map(([k, v]) => <div key={k}><dt className="text-xs uppercase text-slate-500">{k}</dt><dd>{v}</dd></div>)}</dl></Card>
     <Card title="Checklist"><table className="w-full text-sm"><thead className="text-left text-xs text-slate-500"><tr><th>No.</th><th>Item</th><th className="text-center">Complied</th><th className="text-center">No</th><th className="text-center">N/A</th><th>Details</th></tr></thead>

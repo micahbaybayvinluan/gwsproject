@@ -33,7 +33,8 @@ export class BankEntriesService {
   private mainAccounts(classes: AccountClass[]) { return this.prisma.db.account.findMany({ where: { active: true, branchTagId: null, class: { in: classes } }, select: { id: true, code: true, title: true, class: true, paymentAccountType: true }, orderBy: { code: 'asc' } }); }
 
   async options() {
-    const banks = (await this.mainAccounts(['CASH'])).filter((a) => a.paymentAccountType === 'BANK' || /bank|bdo|bpi|metrobank|security|union|landbank|pnb|rcbc|chinabank/i.test(a.title));
+    // main bank accounts and the company GCash (owner request 2026-09-27)
+    const banks = (await this.mainAccounts(['CASH'])).filter((a) => a.paymentAccountType === 'BANK' || a.paymentAccountType === 'GCASH' || /bank|bdo|bpi|metrobank|security|union|landbank|pnb|rcbc|chinabank|gcash/i.test(a.title));
     const groups = [];
     for (const [key, g] of Object.entries(BANK_ENTRY_GROUPS)) groups.push({ key, label: g.label, accounts: await this.mainAccounts(g.classes) });
     return { banks, groups };

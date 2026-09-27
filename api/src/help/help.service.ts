@@ -2,7 +2,7 @@ import { HttpException, Injectable, Logger } from '@nestjs/common';
 import Anthropic from '@anthropic-ai/sdk';
 import type { SessionUser } from '../common/request-context';
 import { ROLE_BY_KEY } from '../common/permissions';
-import { Guide, GuideSection, loadGuideFile, parseGuide, searchSections, sectionsFor } from './guide';
+import { Guide, GuideSection, loadGuideFile, parseGuide, roleGuideFor, searchSections, sectionsFor } from './guide';
 
 export interface AskTurn { role: 'user' | 'assistant'; content: string }
 export interface AskResult { mode: 'ai' | 'guide'; answer: string | null; note?: string; sections: GuideSection[] }
@@ -33,12 +33,24 @@ export class HelpService {
   private client: Anthropic | null = null;
   private asked = new Map<string, number[]>();
 
+  private roles: Guide | null = null;
   private load(): Guide { if (!this.guide || process.env.NODE_ENV !== 'production') this.guide = parseGuide(loadGuideFile()); return this.guide; }
+  private loadRoles(): Guide { if (!this.roles || process.env.NODE_ENV !== 'production') this.roles = parseGuide(loadGuideFile('ROLE-GUIDES.md')); return this.roles; }
   aiEnabled() { return !!process.env.ANTHROPIC_API_KEY?.trim(); }
 
   sections(user: SessionUser) {
     const g = this.load();
-    return { intro: g.intro, aiEnabled: this.aiEnabled(), role: ROLE_BY_KEY[user.roleKey]?.name ?? user.roleKey, sections: sectionsFor(g, user.permissions) };
+    const mine = sectionsFor(g, user.permissions); const rg = this.loadRoles();
+    return {
+      intro: g.intro, aiEnabled: this.aiEnabled(), role: ROLE_BY_KEY[user.roleKey]?.name ?? user.roleKey,
+      // step-by-step guide for this person's role, the processes everyone uses, and the other topics their permissions open
+      roleGuide: roleGuideFor(rg, user.roleKey),
+      everyone: mine.filter((x) => x.roles === 'all'),
+      topics: mine.filter((x) => x.roles !== 'all'),
+      // the Owner trains staff, so sees every role's guide
+      allRoleGuides: user.roleKey === 'ADMIN' ? rg.sections : undefined,
+      sections: mine,
+    };
   }
 
   /** At most HELP_AI_PER_HOUR questions per person per hour (default 30) to keep the AI bill predictable. */
@@ -57,7 +69,7 @@ export class HelpService {
     if (!this.allow(user.id)) return { mode: 'guide', answer: null, sections: related, note: 'You have asked many questions this hour; here are the matching guide sections instead.' };
 
     const role = ROLE_BY_KEY[user.roleKey];
-    const guideText = g.sections.map((s) => `## ${s.title}\n(for: ${s.roles === 'all' ? 'everyone' : s.roles.join(', ')})\n${s.body}`).join('\n\n');
+    const guideText = [...g.sections.map((s) => `## ${s.title}\n(for: ${s.roles === 'all' ? 'everyone' : s.roles.join(', ')})\n${s.body}`), ...this.loadRoles().sections.map((s) => `## Role guide: ${s.title}\n(for role: ${(s.roleKeys ?? []).join(', ')})\n${s.body}`)].join('\n\n');
     this.client ??= new Anthropic();
     try {
       const response = await this.client.beta.messages.create({

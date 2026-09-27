@@ -17,6 +17,12 @@ export const SETTING_DEFAULTS: Record<string, unknown> = {
   'session.idle_minutes_long': 720,
   'fiscal.year_start': '2026-01-01',
   'discrepancy.window_days': 7,
+  // customer re-order follow-ups (owner request 2026-09-27): messages the Owner can edit; {customer} {product} {store} {storePhone} are filled in
+  'followup.auto_sms': false,
+  'followup.auto_email': false,
+  'followup.sms_template': 'Hi {customer}! This is {store}. Your {product} may be running out soon. Call or text us at {storePhone} to reserve your next one. Thank you!',
+  'followup.email_subject': 'Time to restock your {product}?',
+  'followup.email_template': 'Hi {customer},\n\nThank you for buying {product} at {store}. By now you may be close to finishing it. Reply to this email or call us at {storePhone} and we will have your next one ready.\n\nGet Wheysted Supplements',
 };
 
 @Injectable()

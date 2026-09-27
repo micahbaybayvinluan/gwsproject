@@ -6,6 +6,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import request from 'supertest';
+import ExcelJS from 'exceljs';
 import { authenticator } from 'otplib';
 import { INestApplication } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
@@ -55,7 +56,8 @@ const ok = (r: request.Response) => { if (r.status >= 400) throw new Error(`${r.
 async function resetTransactionalData() {
   if (process.env.NODE_ENV !== 'test') throw new Error('refusing to reset data outside NODE_ENV=test');
   await prisma.$executeRawUnsafe(`TRUNCATE stock_ledger, stock_balances, receiving_lines, receiving_docs, transfer_lines, transfer_docs, sales_lines, payment_allocations, payments, sales_docs, expense_docs, count_lines, count_docs, discrepancy_cases, charge_form_allocations, charge_form_lines, charge_forms, expiry_writeoff_lines, expiry_writeoff_docs, approval_decisions, approval_requests, notifications, audit_log, batches, daily_closes, post_close_edits, journal_lines, journal_vouchers, beginning_balances, accounting_periods, voucher_sequences, control_sequences, alert_states, attachments, employee_loans, payroll_lines, payroll_runs, employees, min_stock_levels, revaluation_lines, revaluation_entries, cash_deposits, login_session_records, cash_fund_txns, cash_fund_checks, store_inspections, contribution_remittances, document_revisions, price_change_lines, price_change_docs, price_update_logs, franchise_salaries, franchise_charges, franchise_expenses CASCADE`);
-  await prisma.$executeRawUnsafe(`UPDATE locations SET franchise_associate_receives = false`);
+  await prisma.$executeRawUnsafe(`TRUNCATE cash_deposits, cash_deposit_extensions, hr_notices, sales_report_submissions`);
+  await prisma.$executeRawUnsafe(`UPDATE locations SET franchise_associate_receives = false, cash_deposit_max_days = 1`);
   await prisma.$executeRawUnsafe(`UPDATE cash_funds SET balance = imprest_amount`);
   await prisma.priceList.deleteMany({ where: { product: { name: { startsWith: 'E2E ' } } } });
   await prisma.productCost.deleteMany({ where: { product: { name: { startsWith: 'E2E ' } } } });
@@ -351,6 +353,29 @@ describe('Phase 2: posting, period lock, beginning balances', () => {
     void branchId;
     ok(await as('admin').put('/api/settings').send({ 'gl.auto_posting_enabled': false }));
   });
+  it('supplier freebies received at an approved cost post Dr Inventory / Cr Other Income - Supplier Freebies at that cost', async () => {
+    ok(await as('admin').put('/api/settings').send({ 'gl.auto_posting_enabled': true }));
+    const cats = ok(await as('admin').get('/api/categories')).body as { id: string; accountingClass: string }[];
+    const sup = (await prisma.supplier.findFirstOrThrow({ where: { active: true } })).id;
+    // an older standard cost of ₱1 must not be used: the freebies are worth the ₱40 approved on this receiving
+    const fp = ok(await as('admin').post('/api/products').send({ name: `E2E Freebie Shaker ${run}`, categoryId: cats.find((c) => c.accountingClass === 'FREEBIE')!.id, prices: { RETAIL: 100 }, cost: 1 })).body.id;
+    const r = ok(await as('wh.incharge').post('/api/receiving').send({ supplierId: sup, supplierRef: `FREE-${run}`, lines: [{ productId: fp, qty: 2, freeQty: 3, expiryDate: '2030-01-01' }] })).body;
+    const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(64)]);
+    await http.post(`/api/attachments/ReceivingDoc/${r.id}`).set('Authorization', `Bearer ${tokens['wh.incharge']}`).attach('file', png, { filename: 'inv.png', contentType: 'image/png' }).expect(201);
+    ok(await as('wh.incharge').post(`/api/receiving/${r.id}/submit`));
+    const line = ok(await as('head.auditor').get(`/api/receiving/${r.id}`)).body.lines[0];
+    ok(await as('head.auditor').post(`/api/receiving/${r.id}/costs`).send({ costs: [{ lineId: line.id, unitCost: 40 }] }));
+    const req = ok(await as('head.auditor').get('/api/approvals/inbox?type=COST_ON_RECEIVING')).body.items.find((i: { documentId: string }) => i.documentId === r.id);
+    ok(await as('head.auditor').post(`/api/approvals/${req.id}/decide`).send({ decision: 'APPROVE' }));
+    expect((await prisma.receivingDoc.findUniqueOrThrow({ where: { id: r.id } })).status).toBe('POSTED');
+    const vouchers = ok(await as('acct.head').get(`/api/gl/vouchers?sourceType=ReceivingDoc&sourceId=${r.id}`)).body as { rule: string; lines: { debit: string; credit: string; account: { title: string } }[] }[];
+    const r2 = vouchers.find((v) => v.rule === 'R2');
+    expect(r2).toBeTruthy();
+    expect(r2!.lines.find((l) => /Supplier Freebies/.test(l.account.title))!.credit).toBe('120'); // 3 free × ₱40
+    expect(r2!.lines.reduce((t, l) => t + Number(l.debit), 0)).toBe(120);
+    expect(vouchers.find((v) => v.rule === 'R1')!.lines.reduce((t, l) => t + Number(l.debit), 0)).toBe(80); // 2 bought × ₱40
+    ok(await as('admin').put('/api/settings').send({ 'gl.auto_posting_enabled': false }));
+  });
 });
 
 describe('warehouse: transfers to any branch/franchise, In-Charge input, edits accepted by the preparer, printable drafts', () => {
@@ -591,14 +616,16 @@ describe('HR charges, cash fund, inspections, counts, AR & contacts (owner reque
     expect(await prisma.cashFundCheck.count({ where: { inspectionId: r.id } })).toBe(1);
   });
 
-  it('weekly count sheet: pre-filled, submitted by the associate, auditors notified, no discrepancy case; HR sees who complied', async () => {
+  it('weekly count sheet: pre-filled, submitted by the associate; a difference opens a case and notifies the associate, auditors, Owner and HR; HR sees who complied', async () => {
     await as('sales.westave').post('/api/counts').send({ countType: 'AUDIT' }).expect(403);
     const c = ok(await as('sales.westave').post('/api/counts').send({})).body;
     expect(c.countType).toBe('WEEKLY'); expect(c.controlNo).toMatch(/^WA-IC-\d{6}$/); expect(c.lines.length).toBeGreaterThan(0);
     expect(c.lines.every((l: { beginQty: number }) => typeof l.beginQty === 'number')).toBe(true);
     ok(await as('sales.westave').put(`/api/counts/${c.id}/lines`).send({ lines: c.lines.map((l: { productId: string; systemQty: number }, i: number) => ({ productId: l.productId, actualQty: i === 0 ? l.systemQty + 1 : l.systemQty })) }));
-    const sub = ok(await as('sales.westave').post(`/api/counts/${c.id}/submit`)).body; expect(sub.discrepancyCase).toBeNull();
-    for (const u of ['head.auditor', 'asst.auditor', 'audit.assoc']) expect(await notified(u, 'WEEKLY_COUNT_SUBMITTED')).toBe(true);
+    const sub = ok(await as('sales.westave').post(`/api/counts/${c.id}/submit`)).body; expect(sub.discrepancyCase.caseNo).toMatch(/^WA-DC-\d{6}$/);
+    for (const u of ['sales.westave', 'head.auditor', 'asst.auditor', 'audit.assoc', 'admin', 'hr.staff']) expect(await notified(u, 'DISCREPANCY_OPENED')).toBe(true);
+    // the case is cleared so the audit-count test below starts from a clean branch
+    await prisma.discrepancyCase.update({ where: { id: sub.discrepancyCase.id }, data: { status: 'RESOLVED' } });
     expect(ok(await as('sales.westave').get('/api/counts/my-weekly')).body.submitted).toBe(true);
     expect(ok(await as('sales.csr').get('/api/dashboard')).body.weeklyCount.submitted).toBe(false);
     const grid = ok(await as('hr.staff').get('/api/hr/weekly-counts?weeks=4')).body as { weeks: string[]; rows: { username: string; weeks: { current: boolean; submitted: boolean }[] }[] };
@@ -608,10 +635,10 @@ describe('HR charges, cash fund, inspections, counts, AR & contacts (owner reque
   });
 
   it('audit count: locked after submission; revision only with Head Auditor approval (Admin notified); branch staff explain a discrepancy — HR notified, Head Auditor decides; red countdown on the dashboard', async () => {
-    const mk = async () => { const c = ok(await as('field.auditor').post('/api/counts').send({ locationId: westId })).body; ok(await as('field.auditor').put(`/api/counts/${c.id}/lines`).send({ lines: c.lines.map((l: { productId: string; systemQty: number }, i: number) => ({ productId: l.productId, actualQty: i === 0 ? l.systemQty - 1 : l.systemQty })) })); return ok(await as('field.auditor').post(`/api/counts/${c.id}/submit`)).body; };
-    const a = await mk(); expect(a.countType).toBe('AUDIT'); expect(a.discrepancyCase.caseNo).toMatch(/^WA-DC-\d{6}$/);
-    await as('field.auditor').put(`/api/counts/${a.id}/lines`).send({ lines: [{ productId: a.lines[0].productId, actualQty: 0 }] }).expect(400);
-    ok(await as('field.auditor').post(`/api/counts/${a.id}/revision`).send({ reason: 'Found 1 box behind the counter', lines: [{ productId: a.lines[0].productId, actualQty: a.lines[0].systemQty }] }));
+    const mk = async () => { const c = ok(await as('field.auditor').post('/api/counts').send({ locationId: westId })).body; ok(await as('field.auditor').put(`/api/counts/${c.id}/lines`).send({ lines: c.lines.map((l: { productId: string; systemQty: number }, i: number) => ({ productId: l.productId, actualQty: i === c.lines.findIndex((x: { systemQty: number }) => x.systemQty > 0) ? l.systemQty - 1 : l.systemQty })) })); return ok(await as('field.auditor').post(`/api/counts/${c.id}/submit`)).body; };
+    const a = await mk(); const s0 = a.lines.find((l: { variance: number }) => l.variance !== 0); expect(a.countType).toBe('AUDIT'); expect(a.discrepancyCase.caseNo).toMatch(/^WA-DC-\d{6}$/);
+    await as('field.auditor').put(`/api/counts/${a.id}/lines`).send({ lines: [{ productId: s0.productId, actualQty: 0 }] }).expect(400);
+    ok(await as('field.auditor').post(`/api/counts/${a.id}/revision`).send({ reason: 'Found 1 box behind the counter', lines: [{ productId: s0.productId, actualQty: s0.systemQty }] }));
     expect(await notified('admin', 'COUNT_REVISION_REQUESTED')).toBe(true);
     const rq = (ok(await as('head.auditor').get('/api/approvals/inbox?type=COUNT_REVISION')).body.items as { id: string; documentId: string }[]).find((i) => i.documentId === a.id)!;
     await as('admin').post(`/api/approvals/${rq.id}/decide`).send({ decision: 'APPROVE' }).expect(403);
@@ -870,5 +897,228 @@ describe('Owner controls batch (owner requests 2026-09-26): In-Charge approvals,
     const f = await as('wh.incharge').get(`/api/reports/forms/pull-out/${t.id}.pdf`).expect(200);
     const html = f.text || f.body.toString(); expect(html).toContain('123 Main St, Quezon City'); expect(html).toContain('data:image/png;base64'); expect(html).toContain('TIN 123-456-789-000');
     expect(ok(await as('sales.westave').get('/api/letterhead')).body.name).toBe('Get Wheysted Supplements');
+  });
+});
+
+describe('Owner requests 2026-09-27: sale incentives, count sheets, count discrepancies, cash on hand, GCash', () => {
+  let west = ''; let pid = ''; let idle = ''; let caseId = '';
+  const notes = async (u: string) => JSON.stringify(ok(await as(u).get('/api/notifications')).body);
+  const today = () => new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);
+  const dateOnly = (d: Date) => d.toISOString().slice(0, 10);
+  /** Opening stock straight into the ledger (as the seed does), dated yesterday so it is part of the beginning count. */
+  const giveStock = async (locationId: string, productId: string, qty: number, cost = 100) => {
+    const batch = await prisma.batch.create({ data: { productId, batchNo: `T-${run}`, receivedRef: 'TEST', unitCost: cost.toFixed(2) } });
+    const d = new Date(`${today()}T00:00:00Z`); d.setUTCDate(d.getUTCDate() - 1);
+    await prisma.stockLedger.create({ data: { locationId, productId, batchId: batch.id, qtyDelta: qty, movementType: 'RECEIVE', documentType: 'OpeningStock', documentId: batch.id, unitCost: cost.toFixed(2), businessDate: d } });
+    await prisma.stockBalance.create({ data: { locationId, productId, batchId: batch.id, qty } });
+  };
+  beforeAll(async () => {
+    west = (await prisma.location.findUniqueOrThrow({ where: { code: 'WESTAVE' } })).id;
+    const cats = ok(await as('admin').get('/api/categories')).body as { id: string; accountingClass: string }[];
+    const supp = cats.find((c) => c.accountingClass === 'SUPPLEMENT')!.id;
+    pid = ok(await as('admin').post('/api/products').send({ name: `AAA Incentive Whey ${run}`, categoryId: supp, prices: { RETAIL: 1000, FRANCHISE: 700 }, cost: 500 })).body.id;
+    idle = ok(await as('admin').post('/api/products').send({ name: `AAA Never Stocked ${run}`, categoryId: supp, prices: { RETAIL: 10, FRANCHISE: 8 } })).body.id;
+    await giveStock(west, pid, 20, 500);
+  });
+
+  it('an incentive on a sale is a branch expense paid from the cash: less cash to deposit, on the daily report, voided with the sale', async () => {
+    const before = ok(await as('sales.westave').get(`/api/closing/summary?locationId=${west}`)).body;
+    const s = ok(await as('sales.westave').post('/api/sales').send({ channel: 'WALK_IN', paymentMode: 'CASH', drSiNo: `DR-${run}-INC`, lines: [{ productId: pid, qty: 1 }], incentive: { amount: 50, payee: 'Juan (agent)' } })).body;
+    expect(s.incentiveAmount).toBe('50'); expect(s.incentiveExpenseId).toBeTruthy();
+    const ex = await prisma.expenseDoc.findUniqueOrThrow({ where: { id: s.incentiveExpenseId }, include: { account: true } });
+    expect(ex.paidFrom).toBe('CASH_DRAWER'); expect(ex.account.title).toMatch(/Incentives/); expect(ex.locationId).toBe(west);
+    const after = ok(await as('sales.westave').get(`/api/closing/summary?locationId=${west}`)).body;
+    expect(Number(after.expectedCash) - Number(before.expectedCash)).toBe(1000 - 50);
+    const dsr = ok(await as('sales.westave').get(`/api/reports/daily-sales?locationId=${west}&date=${today()}`)).body;
+    expect(dsr.expenses.some((e: { accountTitle: string; payee: string }) => /Incentives/.test(e.accountTitle) && e.payee === 'Juan (agent)')).toBe(true);
+    // the expense cannot be voided on its own; voiding the sale voids it
+    await as('admin').post(`/api/expenses/${ex.id}/void`).send({ reason: 'test' }).expect(400);
+    ok(await as('sales.westave').post(`/api/sales/${s.id}/void`).send({ reason: 'wrong item' }));
+    expect((await prisma.expenseDoc.findUniqueOrThrow({ where: { id: ex.id } })).voidedAt).toBeTruthy();
+    // only accounts with the permission may add one
+    await as('wh.incharge').post('/api/sales').send({ channel: 'WALK_IN', paymentMode: 'CASH', drSiNo: `DR-${run}-INC2`, lines: [{ productId: pid, qty: 1 }], incentive: { amount: 5, payee: 'x' } }).expect(403);
+  });
+
+  it('count sheet lists every item: items the system has first, then items not in the system (blank = none); the downloaded Excel sheet is filled and uploaded back', async () => {
+    const c = ok(await as('sales.westave').post('/api/counts').send({})).body as { id: string; lines: { productId: string; beginQty: number; systemQty: number; product: { sku: string } }[] };
+    const idx = (id: string) => c.lines.findIndex((l) => l.productId === id);
+    expect(idx(pid)).toBeGreaterThanOrEqual(0); expect(idx(idle)).toBeGreaterThan(idx(pid)); // never-stocked items are listed too, after the stocked ones
+    const firstOut = c.lines.findIndex((l) => !(l.beginQty || l.systemQty));
+    expect(c.lines.slice(firstOut).every((l) => !(l.beginQty || l.systemQty))).toBe(true);
+    // Excel sheet in the same order, with a System column
+    const res = await http.get(`/api/reports/forms/count/${c.id}.xlsx`).set('Authorization', `Bearer ${tokens['sales.westave']}`).buffer(true).parse((r, cb) => { const b: Buffer[] = []; r.on('data', (d: Buffer) => b.push(d)); r.on('end', () => cb(null, Buffer.concat(b))); }).expect(200);
+    const wb = new ExcelJS.Workbook(); await wb.xlsx.load(res.body as never); const ws = wb.worksheets[0];
+    let hdr = 0; const col: Record<string, number> = {};
+    ws.eachRow((row, r) => { if (!hdr && (row.values as unknown[]).some((v) => v === 'SKU')) { hdr = r; (row.values as unknown[]).forEach((v, j) => { col[String(v)] = j; }); } });
+    expect(hdr).toBeGreaterThan(0); expect(col.System).toBeTruthy();
+    const skuRows: string[] = []; for (let r = hdr + 1; r <= ws.rowCount; r++) { const v = ws.getRow(r).getCell(col.SKU).value; if (v) skuRows.push(String(v)); }
+    expect(skuRows.indexOf(c.lines[idx(pid)].product.sku)).toBeLessThan(skuRows.indexOf(c.lines[idx(idle)].product.sku));
+    // the counter types actual counts in the downloaded sheet: 2 short on our item, the rest as expected; items not in the system left blank
+    for (let r = hdr + 1; r <= ws.rowCount; r++) {
+      const sku = String(ws.getRow(r).getCell(col.SKU).value ?? ''); const line = c.lines.find((l) => l.product.sku === sku); if (!line || !(line.beginQty || line.systemQty)) continue;
+      ws.getRow(r).getCell(col['Actual count']).value = line.productId === pid ? line.systemQty - 2 : line.systemQty;
+    }
+    const filled = Buffer.from(await wb.xlsx.writeBuffer());
+    const up = (await http.post('/api/imports/count-lines').set('Authorization', `Bearer ${tokens['sales.westave']}`).attach('file', filled, { filename: 'count.xlsx', contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }).expect(201)).body as { lines: { productId: string; actualQty: number }[]; errors: string[] };
+    expect(up.errors).toEqual([]); expect(up.lines.find((l) => l.productId === pid)!.actualQty).toBe(c.lines[idx(pid)].systemQty - 2);
+    ok(await as('sales.westave').put(`/api/counts/${c.id}/lines`).send({ lines: up.lines }));
+    const sub = ok(await as('sales.westave').post(`/api/counts/${c.id}/submit`)).body;
+    expect(sub.discrepancyCase).toBeTruthy(); caseId = sub.discrepancyCase.id;
+    expect(sub.lines.find((l: { productId: string }) => l.productId === idle).actualQty).toBe(0);
+    for (const u of ['sales.westave', 'head.auditor', 'asst.auditor', 'audit.assoc', 'admin', 'hr.staff']) expect(await notes(u)).toContain(sub.controlNo);
+  });
+
+  it('no explanation by the deadline → charged at franchise price; an explanation still waiting for the Head Auditor holds the charge until it is decided', async () => {
+    await prisma.discrepancyCase.update({ where: { id: caseId }, data: { deadline: new Date(Date.now() - 60e3) } });
+    ok(await as('admin').post('/api/discrepancies/run-deadline'));
+    const c1 = await prisma.discrepancyCase.findUniqueOrThrow({ where: { id: caseId }, include: { chargeForm: { include: { lines: true } } } });
+    expect(c1.status).toBe('FINALIZED'); expect(Number(c1.chargeForm!.lines.find((l) => l.productId === pid)!.amount)).toBe(2 * 700);
+    // Field Auditor count, one short, explained by the associate before the deadline
+    const c = ok(await as('field.auditor').post('/api/counts').send({ locationId: west })).body as { id: string; lines: { productId: string; systemQty: number }[] };
+    ok(await as('field.auditor').put(`/api/counts/${c.id}/lines`).send({ lines: c.lines.filter((l) => l.systemQty).map((l) => ({ productId: l.productId, actualQty: l.productId === pid ? l.systemQty - 1 : l.systemQty })) }));
+    const sub = ok(await as('field.auditor').post(`/api/counts/${c.id}/submit`)).body;
+    expect(await notes('hr.staff')).toContain(sub.controlNo); expect(await notes('sales.westave')).toContain(sub.controlNo);
+    ok(await as('sales.westave').post(`/api/discrepancies/${sub.discrepancyCase.id}/explain`).send({ explanation: 'One unit was sold and keyed the next day' }));
+    await prisma.discrepancyCase.update({ where: { id: sub.discrepancyCase.id }, data: { deadline: new Date(Date.now() - 60e3) } });
+    ok(await as('admin').post('/api/discrepancies/run-deadline'));
+    expect((await prisma.discrepancyCase.findUniqueOrThrow({ where: { id: sub.discrepancyCase.id } })).status).toBe('OPEN');
+    const req = (await prisma.approvalRequest.findFirst({ where: { type: 'DISCREPANCY_EXPLANATION', documentId: sub.discrepancyCase.id, status: 'PENDING' } }))!;
+    ok(await as('head.auditor').post(`/api/approvals/${req.id}/decide`).send({ decision: 'REJECT', note: 'No DR found' }));
+    ok(await as('admin').post('/api/discrepancies/run-deadline'));
+    expect((await prisma.discrepancyCase.findUniqueOrThrow({ where: { id: sub.discrepancyCase.id } })).status).toBe('FINALIZED');
+  });
+
+  it('cash on hand: undeposited sales per day, days allowed set by the Head Auditor, reminders to the auditors, extension needs Head Auditor and Admin, overdue → HR notice; GCash (GWS) usable for deposits', async () => {
+    const day = (n: number) => { const d = new Date(`${today()}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d; };
+    ok(await as('sales.westave').post('/api/sales').send({ channel: 'WALK_IN', paymentMode: 'CASH', drSiNo: `DR-${run}-COH`, lines: [{ productId: pid, qty: 1 }] }));
+    let b = ok(await as('sales.westave').get('/api/cash-on-hand')).body;
+    expect(b.days.find((d: { businessDate: string }) => d.businessDate === today()).status).toBe('OPEN'); // 1 day allowed by default
+    await as('sales.westave').put(`/api/cash-on-hand/settings/${west}`).send({ maxDays: 0 }).expect(403);
+    ok(await as('head.auditor').put(`/api/cash-on-hand/settings/${west}`).send({ maxDays: 1 }));
+    // two earlier days with cash still in the branch
+    await prisma.dailyClose.create({ data: { locationId: west, businessDate: day(-3), closedAt: new Date(), totalCashDeposit: '2000.00', expectedCash: '2000.00', cashSales: '2000.00' } });
+    await prisma.dailyClose.create({ data: { locationId: west, businessDate: day(-1), closedAt: new Date(), totalCashDeposit: '500.00', expectedCash: '500.00', cashSales: '500.00' } });
+    b = ok(await as('sales.westave').get('/api/cash-on-hand')).body;
+    const st = (d: string) => b.days.find((x: { businessDate: string }) => x.businessDate === d).status;
+    expect(st(dateOnly(day(-3)))).toBe('OVERDUE'); expect(st(dateOnly(day(-1)))).toBe('DUE_TODAY');
+    expect(Number(b.cashOnHand)).toBeGreaterThanOrEqual(3500);
+    expect(ok(await as('sales.westave').get('/api/dashboard')).body.cashOnHand.overdue).toBe(1);
+    expect(ok(await as('head.auditor').get('/api/dashboard')).body.cashOnHandBranches.some((x: { id: string }) => x.id === west)).toBe(true);
+    // the branch asks for more days for yesterday's cash; the Head Auditor and the Owner both approve
+    const ext = ok(await as('sales.westave').post('/api/cash-on-hand/extensions').send({ locationId: west, businessDate: dateOnly(day(-1)), requestedUntil: dateOnly(day(2)), reason: 'Bank closed for the holiday' })).body;
+    ok(await as('head.auditor').post(`/api/approvals/${ext.approvalRequestId}/decide`).send({ decision: 'APPROVE' }));
+    expect((await prisma.cashDepositExtension.findUniqueOrThrow({ where: { id: ext.id } })).status).toBe('PENDING');
+    ok(await as('admin').post(`/api/approvals/${ext.approvalRequestId}/decide`).send({ decision: 'APPROVE' }));
+    b = ok(await as('sales.westave').get('/api/cash-on-hand')).body;
+    const y = b.days.find((x: { businessDate: string }) => x.businessDate === dateOnly(day(-1))); expect(y.status).toBe('OPEN'); expect(y.dueDate).toBe(dateOnly(day(2)));
+    // daily reminder: auditors and branch reminded; the overdue day becomes an HR notice (once)
+    ok(await as('admin').post('/api/cash-on-hand/remind')); ok(await as('admin').post('/api/cash-on-hand/remind'));
+    for (const u of ['head.auditor', 'asst.auditor', 'audit.assoc', 'sales.westave']) expect(await notes(u)).toContain('CASH_DEPOSIT_DUE');
+    expect(await notes('hr.staff')).toContain('HR_NOTICE_NTE');
+    await as('sales.westave').get('/api/hr-notices').expect(403);
+    const notices = ok(await as('hr.staff').get('/api/hr-notices')).body as { id: string; title: string; locationId: string }[];
+    const mine = notices.filter((n) => n.locationId === west); expect(mine).toHaveLength(1); expect(mine[0].title).toContain(dateOnly(day(-3)));
+    expect(ok(await as('hr.staff').put(`/api/hr-notices/${mine[0].id}`).send({ status: 'NTE_ISSUED', note: 'NTE served' })).body.status).toBe('NTE_ISSUED');
+    // deposit the overdue day to the company GCash
+    const payAccts = ok(await as('sales.westave').get(`/api/accounts/payment?locationId=${west}`)).body as { id: string; title: string }[];
+    const gcash = payAccts.find((a) => a.title === 'Gcash (GWS)')!; expect(gcash).toBeTruthy();
+    expect((ok(await as('exec.assistant').get('/api/bank-entries/options')).body.banks as { title: string }[]).some((a) => a.title === 'Gcash (GWS)')).toBe(true);
+    ok(await as('sales.westave').post('/api/expenses/deposits').send({ locationId: west, businessDate: dateOnly(day(-3)), amount: 2000, bankAccountId: gcash.id, depositedAt: today() }));
+    b = ok(await as('sales.westave').get('/api/cash-on-hand')).body;
+    expect(b.days.find((x: { businessDate: string }) => x.businessDate === dateOnly(day(-3))).status).toBe('DEPOSITED'); expect(b.overdue).toBe(0);
+  });
+
+  it('customer follow-ups: items ordered in the contact list; days to consume per product → the store is reminded to call; SMS / email with the Owner\'s message (sent by hand or automatically)', async () => {
+    ok(await as('admin').patch(`/api/products/${pid}`).send({ consumptionDays: 10 }));
+    const s = ok(await as('sales.westave').post('/api/sales').send({ channel: 'WALK_IN', paymentMode: 'CASH', drSiNo: `DR-${run}-FU`, customerName: 'Maria Santos', customerPhone: '0917 123 4567', customerEmail: 'maria@example.com', lines: [{ productId: pid, qty: 2 }] })).body;
+    const f = await prisma.customerFollowUp.findFirstOrThrow({ where: { salesDocId: s.id } });
+    expect(f.dueDate.toISOString().slice(0, 10)).toBe(new Date(new Date(`${today()}T00:00:00Z`).getTime() + 20 * 86400e3).toISOString().slice(0, 10)); // 2 units × 10 days
+    const contacts = ok(await as('sales.westave').get(`/api/reports/customers?locationId=${west}`)).body as { name: string; itemsOrdered: string }[];
+    expect(contacts.find((c) => c.name === 'Maria Santos')!.itemsOrdered).toMatch(/2× AAA Incentive Whey/);
+    // the Owner edits the message; the morning job tells the store and (when switched on) sends it
+    await as('sales.westave').put('/api/settings').send({ 'followup.sms_template': 'x' }).expect(403);
+    ok(await as('admin').put('/api/settings').send({ 'followup.sms_template': 'Hi {customer}, your {product} from {store} may be finished!', 'followup.auto_sms': true }));
+    await prisma.customerFollowUp.update({ where: { id: f.id }, data: { dueDate: new Date(Date.now() - 86400e3) } });
+    const job = ok(await as('admin').post('/api/customer-follow-ups/run')).body; expect(job.notified).toBeGreaterThanOrEqual(1);
+    expect(await notes('sales.westave')).toContain('CUSTOMER_FOLLOW_UP');
+    const logged = await prisma.customerMessage.findFirstOrThrow({ where: { followUpId: f.id, channel: 'SMS' } });
+    expect(logged.body).toBe('Hi Maria Santos, your AAA Incentive Whey ' + run + ' from Get Wheysted West Ave may be finished!'); expect(logged.status).toBe('NOT_CONFIGURED'); // no SMS key in tests
+    const list = ok(await as('sales.westave').get('/api/customer-follow-ups')).body as { id: string; status: string; product: string }[];
+    expect(list.find((x) => x.id === f.id)!.status).toBe('NOTIFIED');
+    const pv = ok(await as('sales.westave').get(`/api/customer-follow-ups/${f.id}/preview`)).body; expect(pv.email).toMatch(/Maria Santos/);
+    const m = ok(await as('sales.westave').post('/api/customer-follow-ups/send').send({ channel: 'EMAIL', followUpId: f.id, body: 'Edited message' })).body; expect(m.to).toBe('maria@example.com'); expect(m.body).toBe('Edited message');
+    ok(await as('sales.westave').put(`/api/customer-follow-ups/${f.id}`).send({ status: 'CONTACTED', note: 'Will visit Saturday' }));
+    ok(await as('admin').put('/api/settings').send({ 'followup.auto_sms': false }));
+  });
+
+  it('daily sales report: the branch reviews and submits it as true and correct (day closes); reminder before 8 PM; not submitted by the cut-off → submitted as it stood, auditors and HR notified', async () => {
+    const csr = (await prisma.location.findUniqueOrThrow({ where: { code: 'CSR' } })).id;
+    expect(ok(await as('sales.csr').get('/api/reports/daily-sales/submission')).body.submitted).toBe(false);
+    expect(ok(await as('head.auditor').get('/api/dashboard')).body.salesReportsMissing.map((b: { name: string }) => b.name)).toContain('West Ave');
+    await as('sales.csr').post('/api/reports/daily-sales/submit').send({ date: today(), acknowledged: false }).expect(400);
+    const sub = ok(await as('sales.csr').post('/api/reports/daily-sales/submit').send({ date: today(), acknowledged: true })).body;
+    expect(sub.status).toBe('SUBMITTED'); expect(sub.acknowledgement).toMatch(/true and correct/);
+    await as('sales.csr').post('/api/reports/daily-sales/submit').send({ date: today(), acknowledged: true }).expect(400);
+    expect(ok(await as('sales.csr').get('/api/dashboard')).body.salesReport.submitted).toBe(true);
+    // the day is closed for CSR: a new sale or an edit goes through the revision (post-close) protocol
+    const r = await as('sales.csr').post('/api/sales').send({ channel: 'WALK_IN', paymentMode: 'CASH', drSiNo: `DR-${run}-LATE`, lines: [{ productId: pid, qty: 1 }] }).expect(400);
+    expect(JSON.stringify(r.body)).toMatch(/closed/i);
+    ok(await as('admin').post('/api/reports/daily-sales/remind'));
+    expect(await notes('sales.westave')).toContain('SALES_REPORT_REMINDER'); expect(await notes('sales.csr')).not.toContain('SALES_REPORT_REMINDER');
+    ok(await as('admin').post('/api/reports/daily-sales/auto-submit'));
+    const w = await prisma.salesReportSubmission.findUniqueOrThrow({ where: { locationId_businessDate: { locationId: west, businessDate: new Date(`${today()}T00:00:00Z`) } } });
+    expect(w.status).toBe('AUTO_SUBMITTED'); expect(Number(w.overallSales)).toBeGreaterThan(0);
+    for (const u of ['head.auditor', 'asst.auditor', 'audit.assoc', 'hr.staff']) expect(await notes(u)).toContain('SALES_REPORT_NOT_SUBMITTED');
+    expect((await prisma.salesReportSubmission.findUniqueOrThrow({ where: { locationId_businessDate: { locationId: csr, businessDate: new Date(`${today()}T00:00:00Z`) } } })).status).toBe('SUBMITTED');
+  });
+
+  it('consignments: the Owner creates consignee accounts; a sales associate sends goods, reports consignee sales (prices pre-filled, editable, printable draft) and takes returns — manager first, the Owner last; cost stays hidden', async () => {
+    const pending = async (type: string, where: Record<string, unknown> = {}) => (await prisma.approvalRequest.findFirst({ where: { type, status: 'PENDING', ...where }, orderBy: { createdAt: 'desc' } }))!;
+    await as('head.auditor').post('/api/consignment/consignees').send({ name: `Gym ${run}`, priceBasis: 'SRP' }).expect(403);
+    const cn = ok(await as('admin').post('/api/consignment/consignees').send({ name: `Gym ${run}`, contactPerson: 'Ana', phone: '0917', address: 'QC', priceBasis: 'SRP', settlementDays: 30 })).body;
+    const costCn = ok(await as('admin').post('/api/consignment/consignees').send({ name: `CostGym ${run}`, priceBasis: 'COST' })).body;
+    expect((ok(await as('sales.westave').get('/api/consignment/consignees')).body as { id: string }[]).some((c) => c.id === cn.id)).toBe(true);
+    // goods out: branch → consignee; Asst Auditor checks, then the Owner
+    const t = ok(await as('sales.westave').post('/api/transfers').send({ fromLocationId: west, toLocationId: cn.id, transferType: 'CONSIGNMENT_OUT', lines: [{ productId: pid, qty: 3 }] })).body;
+    ok(await as('sales.westave').post(`/api/transfers/${t.id}/submit`));
+    expect(await prisma.approvalRequest.count({ where: { type: 'CONSIGNMENT_OUT', documentId: t.id } })).toBe(0); // the Owner only after the manager
+    ok(await as('asst.auditor').post(`/api/approvals/${(await pending('CONSIGNMENT_CHECK_BRANCH', { documentId: t.id })).id}/decide`).send({ decision: 'APPROVE' }));
+    ok(await as('admin').post(`/api/approvals/${(await pending('CONSIGNMENT_OUT', { documentId: t.id })).id}/decide`).send({ decision: 'APPROVE' }));
+    expect((await prisma.stockBalance.aggregate({ where: { locationId: cn.id, productId: pid }, _sum: { qty: true } }))._sum.qty).toBe(3);
+    // consignee sales: prices pre-filled from the agreement, edited, printed as a draft, then approved
+    const pre = ok(await as('sales.westave').post('/api/consignment/sale-reports/prefill').send({ agreementId: cn.agreementId, productIds: [pid], date: today() })).body;
+    expect(pre.prices[pid]).toBe(1000);
+    const body = { agreementId: cn.agreementId, periodFrom: today(), periodTo: today(), lines: [{ productId: pid, qty: 2, unitPrice: 950 }] };
+    const draft = await as('sales.westave').post('/api/consignment/sale-reports/draft').send(body).expect(201);
+    expect(draft.text || draft.body.toString()).toMatch(/DRAFT/);
+    expect(ok(await as('sales.westave').post('/api/consignment/sale-reports').send(body)).body.pending).toBe(true);
+    const chk = await pending('CONSIGNMENT_CHECK_BRANCH', { documentType: 'ConsignmentSaleRequest' });
+    ok(await as('head.auditor').post(`/api/approvals/${chk.id}/decide`).send({ decision: 'APPROVE' }));
+    ok(await as('admin').post(`/api/approvals/${(await pending('CONSIGNMENT_OUT', { documentType: 'ConsignmentSaleRequest', documentId: chk.documentId })).id}/decide`).send({ decision: 'APPROVE' }));
+    const rep = await prisma.consignmentSaleReport.findFirstOrThrow({ where: { agreementId: cn.agreementId }, include: { lines: true } });
+    expect(Number(rep.lines[0].unitPrice)).toBe(950); expect(rep.salesDocId).toBeTruthy();
+    // a cost-based consignee: people without cost access never get the price or the value at cost
+    const hidden = ok(await as('sales.westave').post('/api/consignment/sale-reports/prefill').send({ agreementId: costCn.agreementId, productIds: [pid], date: today() })).body;
+    expect(hidden.hidden).toBe(true); expect(hidden.prices[pid]).toBeNull();
+    expect(ok(await as('head.auditor').post('/api/consignment/sale-reports/prefill').send({ agreementId: costCn.agreementId, productIds: [pid], date: today() })).body.prices[pid]).toBe(500);
+    expect(JSON.stringify(ok(await as('sales.westave').get('/api/consignment/out-summary')).body)).not.toMatch(/valueAtCost/);
+    expect(JSON.stringify(ok(await as('head.auditor').get('/api/consignment/out-summary')).body)).toMatch(/valueAtCost/);
+    // goods back from the consignee to the branch
+    const back = ok(await as('sales.westave').post('/api/transfers').send({ fromLocationId: cn.id, toLocationId: west, transferType: 'CONSIGNMENT_RETURN', lines: [{ productId: pid, qty: 1 }] })).body;
+    ok(await as('sales.westave').post(`/api/transfers/${back.id}/submit`));
+    expect(await pending('CONSIGNMENT_CHECK_BRANCH', { documentId: back.id })).toBeTruthy();
+  });
+
+  it('cost typed directly on a product: the Head Auditor sends it, the Owner approves (and the other way round); cost roles are told; others cannot', async () => {
+    await as('sales.westave').post(`/api/products/${pid}/cost`).send({ cost: 1, reason: 'test' }).expect(403);
+    const r = ok(await as('head.auditor').post(`/api/products/${pid}/cost`).send({ cost: 520, reason: 'New supplier price list' })).body; expect(r.pending).toBe(true);
+    const req = await prisma.approvalRequest.findUniqueOrThrow({ where: { id: r.approvalRequestId } }); expect(req.requiredApproverRoles).toEqual(['ADMIN']);
+    await as('head.auditor').post(`/api/products/${pid}/cost`).send({ cost: 530, reason: 'again' }).expect(400); // one pending change at a time
+    ok(await as('admin').post(`/api/approvals/${req.id}/decide`).send({ decision: 'APPROVE' }));
+    const p = ok(await as('head.auditor').get(`/api/products/${pid}`)).body; expect(p.costHistory[0].cost).toBe('520');
+    expect(await notes('acct.head')).toContain('COST'); expect(((ok(await as('sales.westave').get('/api/dashboard')).body.priceUpdates ?? []) as { newValue: string | null }[]).some((u) => Number(u.newValue) === 520)).toBe(false);
+    expect(((ok(await as('acct.head').get('/api/dashboard')).body.priceUpdates ?? []) as { newValue: string | null }[]).some((u) => Number(u.newValue) === 520)).toBe(true);
+    const r2 = ok(await as('admin').post(`/api/products/${pid}/cost`).send({ cost: 515, reason: 'Owner correction' })).body;
+    expect((await prisma.approvalRequest.findUniqueOrThrow({ where: { id: r2.approvalRequestId } })).requiredApproverRoles).toEqual(['HEAD_AUDITOR']);
   });
 });

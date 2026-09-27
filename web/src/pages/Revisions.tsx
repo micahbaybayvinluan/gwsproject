@@ -28,7 +28,7 @@ export function RevisionsPage() {
   const log = useQuery({ queryKey: ['revisions', qs, source, staff], queryFn: () => api.get<Rev[]>(`/api/revisions?${qs}${source ? `&source=${source}` : ''}${staff ? `&staffUserId=${staff}` : ''}`) });
   const max = Math.max(1, ...(by.data ?? []).map((r) => r.total));
   return <div className="space-y-4">
-    <div className="flex flex-wrap items-end gap-2"><h1 className="mr-auto text-xl font-semibold">Revision Log</h1>
+    <div className="flex flex-wrap items-end gap-2"><h1 className="mr-auto text-2xl font-bold tracking-tight text-navy">Revision Log (Errors per Staff)</h1>
       <Field label="From"><Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></Field>
       <Field label="To"><Input type="date" value={to} onChange={(e) => setTo(e.target.value)} /></Field>
       <Field label="Kind"><Select value={source} onChange={(e) => setSource(e.target.value)}><option value="">All</option>{Object.entries(SOURCE).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</Select></Field>

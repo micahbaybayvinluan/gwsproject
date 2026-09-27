@@ -7,7 +7,7 @@ import { Badge, Button, Card, Empty, ErrorBox, Input, statusTone } from '@/compo
 
 interface Req { id: string; type: string; documentType: string; documentId: string; requestedBy: string; requesterName: string; requiredApproverRoles: string[]; anyOf: boolean; status: string; summary: Record<string, unknown> | null; autoApproveAt: string | null; createdAt: string; decisions: { roleKey: string; decision: string; note: string | null; user: { fullName: string } }[] }
 const LINKS: Record<string, string> = { ReceivingDoc: '/receiving', TransferDoc: '/transfers', SalesDoc: '/sales', ExpiryWriteoffDoc: '/writeoffs', PriceChangeDoc: '/price-changes', CountDoc: '/counts', DiscrepancyCase: '/discrepancies', PostCloseEdit: '/closing', Payment: '/ar' };
-const TYPE_LABEL: Record<string, string> = { AUDIT_REVISION: 'Audit Associate correction (Head Auditor only)', AR_PAYMENT: 'AR payment entered by branch', COUNT_REVISION: 'Count sheet revision', DISCREPANCY_EXPLANATION: 'Discrepancy explanation', WAREHOUSE_EDIT: 'Edit of your warehouse document', MASTER_DATA_NEW: 'New master data (Owner approves)', WAREHOUSE_IN: 'Goods into the warehouse (In-Charge approves)', WAREHOUSE_OUT: 'Goods out of the warehouse (In-Charge approves)' };
+const TYPE_LABEL: Record<string, string> = { AUDIT_REVISION: 'Audit Associate correction (Head Auditor only)', AR_PAYMENT: 'AR payment entered by branch', COUNT_REVISION: 'Count sheet revision', DISCREPANCY_EXPLANATION: 'Discrepancy explanation', WAREHOUSE_EDIT: 'Edit of your warehouse document', MASTER_DATA_NEW: 'New master data (Owner approves)', WAREHOUSE_IN: 'Goods into the warehouse (In-Charge approves)', WAREHOUSE_OUT: 'Goods out of the warehouse (In-Charge approves)', CASH_DEPOSIT_EXTENSION: 'More days to deposit cash sales (Head Auditor + Admin)', CONSIGNMENT_CHECK_WH: 'Consignment check (In-Charge, then the Owner)', CONSIGNMENT_CHECK_BRANCH: 'Consignment check (auditor, then the Owner)', CONSIGNMENT_OUT: 'Consignment (Owner approves)', COST_EDIT: 'Product cost change' };
 
 /** §6.2 Approvals inbox: grouped by type, newest first, select-all + bulk approve/reject with one note, inline expand. */
 export function ApprovalsPage() {
@@ -22,7 +22,7 @@ export function ApprovalsPage() {
   const toggle = (id: string) => { const n = new Set(selected); n.has(id) ? n.delete(id) : n.add(id); setSelected(n); };
   const selectAll = () => setSelected(selected.size === items.length ? new Set() : new Set(items.map((i) => i.id)));
   return <div className="space-y-4">
-    <div className="flex flex-wrap items-center justify-between gap-2"><h1 className="text-xl font-semibold">Approvals <span className="text-base text-slate-500">({q.data?.count ?? 0} pending{q.data?.oldestDays ? `, oldest ${q.data.oldestDays} d` : ''})</span></h1></div>
+    <div className="flex flex-wrap items-center justify-between gap-2"><h1 className="text-2xl font-bold tracking-tight text-navy">Approvals Waiting for Me <span className="text-base text-slate-500">({q.data?.count ?? 0} pending{q.data?.oldestDays ? `, oldest ${q.data.oldestDays} d` : ''})</span></h1></div>
     <Card>
       <div className="flex flex-wrap items-center gap-2">
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={items.length > 0 && selected.size === items.length} onChange={selectAll} /> Select all ({selected.size})</label>

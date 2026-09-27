@@ -18,7 +18,8 @@ import { StockPage, ExpiryPage } from './pages/Stock';
 import { ReceivingDetailPage, ReceivingPage } from './pages/Receiving';
 import { TransferDetailPage, TransfersPage } from './pages/Transfers';
 import { CountDetailPage, CountsPage, DiscrepanciesPage, DiscrepancyDetailPage } from './pages/Counts';
-import { WriteoffsPage, ConsignmentPage } from './pages/Writeoffs';
+import { WriteoffsPage } from './pages/Writeoffs';
+import { ConsignmentPage, ConsigneesPage } from './pages/Consignment';
 import { ProductDetailPage, ProductsPage, PriceChangesPage, SuppliersPage } from './pages/Products';
 import { ImportsPage } from './pages/Imports';
 import { DailySalesReportPage, InventoryReportsPage } from './pages/Reports';
@@ -30,6 +31,7 @@ import { MyHrPage, WeeklyCompliancePage } from './pages/HrExtra';
 import { RevisionsPage } from './pages/Revisions';
 import { HelpPage } from './pages/Help';
 import { BankOfficePage } from './pages/BankOffice';
+import { CashOnHandPage, HrNoticesPage } from './pages/CashOnHand';
 import { CashFundPage } from './pages/CashFund';
 import { InspectionDetailPage, InspectionFormPage, InspectionsPage } from './pages/Inspections';
 import { CustomersReportPage, InventoryCostPage } from './pages/ReportsExtra';
@@ -74,6 +76,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
               <Route path="/discrepancies/:id" element={<DiscrepancyDetailPage />} />
               <Route path="/writeoffs" element={<WriteoffsPage />} />
               <Route path="/consignment" element={<ConsignmentPage />} />
+              <Route path="/consignees" element={<ConsigneesPage />} />
               <Route path="/products" element={<ProductsPage />} />
               <Route path="/products/:id" element={<ProductDetailPage />} />
               <Route path="/price-changes" element={<PriceChangesPage />} />
@@ -96,6 +99,8 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
               <Route path="/revisions" element={<RevisionsPage />} />
               <Route path="/help" element={<HelpPage />} />
               <Route path="/bank" element={<BankOfficePage />} />
+              <Route path="/cash-on-hand" element={<CashOnHandPage />} />
+              <Route path="/hr-notices" element={<HrNoticesPage />} />
               <Route path="/cash-fund" element={<CashFundPage />} />
               <Route path="/inspections" element={<InspectionsPage />} />
               <Route path="/inspections/new" element={<InspectionFormPage />} />

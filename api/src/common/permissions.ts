@@ -31,6 +31,10 @@ export const APPROVAL_TYPES = [
   'MASTER_DATA_NEW',
   'WAREHOUSE_IN',
   'WAREHOUSE_OUT',
+  'CASH_DEPOSIT_EXTENSION',
+  'CONSIGNMENT_CHECK_WH',
+  'CONSIGNMENT_CHECK_BRANCH',
+  'COST_EDIT',
 ] as const;
 export type ApprovalType = (typeof APPROVAL_TYPES)[number];
 
@@ -69,6 +73,12 @@ const BASE_KEYS = [
   'gl.voucher.edit',
   // editing / deleting master data (Owner; Head Auditor edits products and suppliers)
   'master.delete',
+  // incentive paid from a sale's cash, recorded as a branch expense (owner request 2026-09-27)
+  'sale.incentive',
+  // cash on hand not yet deposited: see all branches and set the days allowed per branch (Head Auditor, Admin); HR acts on notices (NTE)
+  'cashdeposit.view.all', 'cashdeposit.settings', 'hr.notice',
+  // consignment requests by associates (manager first, the Owner last)
+  'consignment.request',
 ] as const;
 
 export const PERMISSION_KEYS: readonly string[] = [
@@ -140,8 +150,8 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
       'sale.create', 'sale.edit.sameday', 'sale.edit.postclose', 'sale.void', 'ar.collect', 'expense.create.branch',
       'count.create', 'discrepancy.resolve', 'writeoff.create', 'writeoff.approve', 'consignment.manage', 'gl.view', 'audit_log.view',
       'cashfund.view.all', 'cashfund.check', 'inspection.view', 'inspection.create', 'charge.assign',
-      ...approvals('COST_ON_RECEIVING', 'TRANSFER_INTERNAL', 'POST_CLOSE_EDIT', 'WRITEOFF', 'DISCREPANCY_RESOLUTION', 'EDIT_REQUEST', 'COUNT_REVISION', 'DISCREPANCY_EXPLANATION', 'AUDIT_REVISION'),
-      'revision.view',
+      ...approvals('COST_ON_RECEIVING', 'TRANSFER_INTERNAL', 'POST_CLOSE_EDIT', 'WRITEOFF', 'DISCREPANCY_RESOLUTION', 'EDIT_REQUEST', 'COUNT_REVISION', 'DISCREPANCY_EXPLANATION', 'AUDIT_REVISION', 'CASH_DEPOSIT_EXTENSION', 'CONSIGNMENT_CHECK_BRANCH', 'COST_EDIT'),
+      'revision.view', 'sale.incentive', 'cashdeposit.view.all', 'cashdeposit.settings',
     ],
   },
   {
@@ -151,22 +161,22 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
     permissions: [
       ...READ_ALL, ...COST_BUNDLE, 'receiving.create', 'transfer.create', 'transfer.confirm', 'transfer.approve.internal',
       'sale.create', 'sale.edit.sameday', 'ar.collect', 'expense.create.branch', 'count.create', 'writeoff.create', 'gl.view',
-      'cashfund.view.all', 'cashfund.check', 'inspection.view', 'inspection.create', 'revision.view',
-      ...approvals('TRANSFER_INTERNAL', 'POST_CLOSE_EDIT', 'EDIT_REQUEST'),
+      'cashfund.view.all', 'cashfund.check', 'inspection.view', 'inspection.create', 'revision.view', 'cashdeposit.view.all', 'sale.incentive',
+      ...approvals('TRANSFER_INTERNAL', 'POST_CLOSE_EDIT', 'EDIT_REQUEST', 'CONSIGNMENT_CHECK_BRANCH'), 'consignment.request',
     ],
   },
   {
     key: 'AUDIT_ASSOCIATE',
     name: 'Audit Associate',
     description: 'Views branch reports including supplier cost. Requests corrections (revisions) of branch documents; the Head Auditor approves; the staff involved are notified and the revision is logged.',
-    permissions: [...READ_ALL, ...COST_BUNDLE, 'inspection.view', 'revision.request', 'revision.view'],
+    permissions: [...READ_ALL, ...COST_BUNDLE, 'inspection.view', 'revision.request', 'revision.view', 'cashdeposit.view.all'],
   },
   {
     key: 'WAREHOUSE_IN_CHARGE',
     name: 'Warehouse In-Charge',
     description: 'Inputs warehouse receiving, transfers (to any branch or franchise), counts and write-offs; costs are entered and approved by the Head Auditor. Approves every warehouse associate\'s goods in and out before stock moves (own entries need no second approval). Can edit an associate\'s entry, which takes effect only after that associate accepts it. No cost.',
     permissions: [
-      'product.view', 'supplier.view.code', 'location.view.own', 'receiving.create', 'transfer.create', 'transfer.confirm', 'warehouse.edit_others', 'approval.act.WAREHOUSE_EDIT', 'approval.act.WAREHOUSE_IN', 'approval.act.WAREHOUSE_OUT',
+      'product.view', 'supplier.view.code', 'location.view.own', 'receiving.create', 'transfer.create', 'transfer.confirm', 'warehouse.edit_others', 'approval.act.CONSIGNMENT_CHECK_WH', 'consignment.request', 'approval.act.WAREHOUSE_EDIT', 'approval.act.WAREHOUSE_IN', 'approval.act.WAREHOUSE_OUT',
       'count.create', 'writeoff.create', 'report.inventory.own', 'dashboard.view', 'notification.view', 'price.view.RETAIL', 'cashfund.use', 'discrepancy.explain',
     ],
   },
@@ -174,7 +184,7 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
     key: 'WAREHOUSE_ASSOCIATE',
     name: 'Warehouse Associate',
     description: 'Creates receiving docs (qty, expiry, batch) and transfers from the warehouse to any branch or franchise. Accepts or rejects the In-Charge\'s edits to own entries. Cost hidden.',
-    permissions: ['product.view', 'supplier.view.code', 'location.view.own', 'receiving.create', 'transfer.create', 'transfer.confirm', 'report.inventory.own', 'dashboard.view', 'notification.view', 'approval.act.WAREHOUSE_EDIT', 'discrepancy.explain'],
+    permissions: ['consignment.request', 'product.view', 'supplier.view.code', 'location.view.own', 'receiving.create', 'transfer.create', 'transfer.confirm', 'report.inventory.own', 'dashboard.view', 'notification.view', 'approval.act.WAREHOUSE_EDIT', 'discrepancy.explain'],
   },
   {
     key: 'SALES_ASSOCIATE',
@@ -184,6 +194,7 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
       'product.view', 'location.view.own', 'price.view.RETAIL', 'price.view.DEALER', 'price.view.AGENT',
       'transfer.create', 'transfer.confirm', 'sale.create', 'sale.edit.sameday', 'ar.view', 'ar.collect',
       'expense.create.branch', 'expense.view', 'count.create', 'report.sales.own', 'report.inventory.own', 'dashboard.view', 'notification.view', 'writeoff.create', 'cashfund.use', 'discrepancy.explain',
+      'sale.incentive', 'consignment.request',
     ],
   },
   {
@@ -228,7 +239,7 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
     key: 'HR_STAFF',
     name: 'HR Staff',
     description: 'Payroll runs, employee master, loans/advances, charge-form allocation. Zero access to inventory/sales.',
-    permissions: ['payroll.view.summary', 'payroll.view.detail', 'payroll.edit', 'employee.manage', 'location.view.all', 'charge_form.finalize', 'dashboard.view', 'notification.view', 'inspection.view', 'inspection.review', 'contribution.remit', 'revision.view'],
+    permissions: ['payroll.view.summary', 'payroll.view.detail', 'payroll.edit', 'employee.manage', 'location.view.all', 'charge_form.finalize', 'dashboard.view', 'notification.view', 'inspection.view', 'inspection.review', 'contribution.remit', 'revision.view', 'hr.notice'],
   },
   {
     key: 'FIELD_AUDITOR',
@@ -290,6 +301,14 @@ export const APPROVAL_ROUTING: Record<ApprovalType, { roles: RoleKey[]; anyOf?: 
   WAREHOUSE_IN: { roles: ['WAREHOUSE_IN_CHARGE'] },
   /** Goods out of the warehouse prepared by a Warehouse Associate (pull-outs / transfers, write-offs): the In-Charge approves first. */
   WAREHOUSE_OUT: { roles: ['WAREHOUSE_IN_CHARGE'] },
+  /** More days to deposit a day's cash sales: the Head Auditor and Admin must both approve. */
+  CASH_DEPOSIT_EXTENSION: { roles: ['HEAD_AUDITOR', 'ADMIN'] },
+  /** Consignment prepared by a Warehouse Associate: the In-Charge checks it first; the Owner approves last (CONSIGNMENT_OUT). */
+  CONSIGNMENT_CHECK_WH: { roles: ['WAREHOUSE_IN_CHARGE'] },
+  /** Consignment prepared by a Sales Associate: the Head Auditor or Asst Auditor checks it first; the Owner approves last. */
+  CONSIGNMENT_CHECK_BRANCH: { roles: ['HEAD_AUDITOR', 'ASST_AUDITOR'], anyOf: true },
+  /** Cost typed directly on a product: the Head Auditor and the Owner, except the one who typed it. */
+  COST_EDIT: { roles: ['HEAD_AUDITOR', 'ADMIN'] },
 };
 
 /** EDIT_REQUEST approvers depend on who asks (§6.1). */

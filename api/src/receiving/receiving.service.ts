@@ -220,7 +220,8 @@ export class ReceivingService implements OnModuleInit {
       await tx.receivingDoc.update({ where: { id: docId }, data: { status: 'POSTED', postedAt: new Date() } });
       await this.posting.post(tx, { type: 'ReceivingDoc', id: doc.id, date: businessDate, createdBy: actorId }, (r) => r1Receiving(r, {
         warehouseId: doc.locationId, supplierId: doc.supplierId, controlNo: doc.controlNo, paidOnReceipt: doc.paidOnReceipt, paymentAccountId: doc.paymentAccountId, isConsignmentIn: doc.isConsignmentIn, consignmentInOnBalanceSheet: consignmentOnBS,
-        lines: doc.lines.map((l) => ({ accountingClass: l.product.category.accountingClass, qty: l.qty, freeQty: l.freeQty, unitCost: l.unitCost ?? stdCosts.get(l.productId)!, stdCost: stdCosts.get(l.productId) ?? l.unitCost ?? 0 })),
+        // freebies are valued at the cost approved on this receiving (the same cost their batch carries in stock), so the income matches the inventory added
+        lines: doc.lines.map((l) => ({ accountingClass: l.product.category.accountingClass, qty: l.qty, freeQty: l.freeQty, unitCost: l.unitCost ?? stdCosts.get(l.productId)!, stdCost: l.unitCost ?? stdCosts.get(l.productId) ?? 0 })),
       }));
     });
     await this.notify.toLocation(doc.locationId, { type: 'RECEIVING_POSTED', title: `Receiving ${doc.controlNo} posted`, link: `/receiving/${doc.id}` });

@@ -22,7 +22,7 @@ export function BankOfficePage() {
   const m = useMutation({ mutationFn: () => api.post<Entry>('/api/bank-entries', { ...f, amount: Number(f.amount) }), onSuccess: () => { setF({ ...f, amount: '', name: '', reference: '', remarks: '' }); void qc.invalidateQueries({ queryKey: ['bank-entries'] }); void qc.invalidateQueries({ queryKey: ['bs-balances'] }); } });
   const tabs = [['entry', 'Bank entries'], ['payables', 'Supplier payables'], ['expenses', 'Office expenses'], ...(can('bs.accounts.view') ? [['balances', 'Balance sheet accounts']] : [])] as [typeof tab, string][];
   return <div className="space-y-5">
-    <div><h1 className="text-2xl font-bold tracking-tight text-navy">Bank & Office</h1><p className="text-sm text-slate-500">Receipts and payments on the main bank accounts, supplier payables and main office expenses.</p></div>
+    <div><h1 className="text-2xl font-bold tracking-tight text-navy">Main Bank & Office Entries</h1><p className="text-sm text-slate-500">Receipts and payments on the main bank accounts, supplier payables and main office expenses.</p></div>
     <div className="inline-flex rounded-xl bg-white p-1 shadow-sm ring-1 ring-slate-200">{tabs.map(([k, l]) => <button key={k} onClick={() => setTab(k)} className={cn('rounded-lg px-3.5 py-1.5 text-sm font-semibold transition', tab === k ? 'bg-navy text-white shadow' : 'text-slate-600 hover:text-navy')}>{l}</button>)}</div>
     {tab === 'entry' && <>
       <Card title="New bank entry">

@@ -34,6 +34,18 @@ describe('user guide', () => {
   });
 });
 
+describe('guides per role', () => {
+  it('every role has its own step-by-step guide, and the Help page returns it with the guide for everyone', () => {
+    const rg = parseGuide(loadGuideFile('ROLE-GUIDES.md'));
+    for (const role of Object.keys(ROLE_BY_KEY)) expect(rg.sections.filter((s) => s.roleKeys?.includes(role)), role).toHaveLength(1);
+    const h = new HelpService().sections(user('SALES_ASSOCIATE'));
+    expect(h.roleGuide[0].title).toMatch(/Sales Associate/); expect(h.roleGuide[0].body).toMatch(/true and correct/);
+    expect(h.everyone.every((x) => x.roles === 'all')).toBe(true); expect(h.topics.some((x) => x.title === 'Recording a sale')).toBe(true);
+    expect(h.allRoleGuides).toBeUndefined(); expect(new HelpService().sections(user('ADMIN')).allRoleGuides!.length).toBe(Object.keys(ROLE_BY_KEY).length);
+    expect(new HelpService().sections(user('HR_STAFF')).roleGuide[0].body).not.toMatch(/New Sale/);
+  });
+});
+
 describe('help assistant', () => {
   afterEach(() => { delete process.env.ANTHROPIC_API_KEY; });
   it('without an API key answers with guide sections', async () => {

@@ -31,6 +31,7 @@ export class TransfersService implements OnModuleInit {
     this.approvals.register('WRITEOFF', (r, outcome, actor) => this.onWriteoffDecision(r.documentId, outcome, actor?.id ?? null));
     // Warehouse In-Charge approves a Warehouse Associate's goods out (before the auditors) and goods in (owner request 2026-09-26)
     this.approvals.register('WAREHOUSE_OUT', (r, outcome, actor) => this.onWarehouseOut(r.documentId, outcome, actor?.id ?? null), 'TransferDoc');
+    for (const t of ['CONSIGNMENT_CHECK_WH', 'CONSIGNMENT_CHECK_BRANCH'] as ApprovalType[]) this.approvals.register(t, (r, outcome, actor) => this.onWarehouseOut(r.documentId, outcome, actor?.id ?? null), 'TransferDoc');
     this.approvals.register('WAREHOUSE_IN', (r, outcome, actor) => this.onWarehouseIn(r.documentId, outcome, actor?.id ?? null), 'TransferDoc');
   }
 
@@ -84,7 +85,10 @@ export class TransfersService implements OnModuleInit {
   assertRoute(user: SessionUser, fromLoc: { id: string; type: string }, toLoc: { id: string; type: string }, transferType: string) {
     if (fromLoc.id === toLoc.id) throw new BadRequestException('From and To must differ');
     // Forms are prepared by the sending location only (owner rule): a branch receiving stock just gets the copy; to ask for stock it sends a Stock Request
-    if (user.locationScoped && !user.locationIds.includes(fromLoc.id)) throw new ForbiddenException('Transfer forms are prepared by the sending location. To get stock, send a Stock Request to the warehouse.');
+    // goods coming back from a consignee are recorded by the branch / warehouse that takes them back
+    const consigneeReturn = transferType === 'CONSIGNMENT_RETURN' && fromLoc.type === 'CONSIGNEE' && user.locationIds.includes(toLoc.id);
+    if (transferType === 'CONSIGNMENT_RETURN' && fromLoc.type !== 'CONSIGNEE') throw new BadRequestException('A consignment return comes from a consignee');
+    if (user.locationScoped && !user.locationIds.includes(fromLoc.id) && !consigneeReturn) throw new ForbiddenException('Transfer forms are prepared by the sending location. To get stock, send a Stock Request to the warehouse.');
     if (transferType === 'CONSIGNMENT_OUT' && toLoc.type !== 'CONSIGNEE') throw new BadRequestException('Consignment out must target a CONSIGNEE location');
   }
 
@@ -170,6 +174,14 @@ export class TransfersService implements OnModuleInit {
       await this.prisma.db.transferDoc.update({ where: { id }, data: { status: 'SUBMITTED', approvalRequestId: req.id, updatedBy: requestedBy } });
       return;
     }
+    // consignments prepared by an associate: their manager checks first (Head / Asst Auditor for branches, In-Charge for the warehouse), the Owner approves last
+    const consign = doc.transferType === 'CONSIGNMENT_OUT' || doc.transferType === 'CONSIGNMENT_RETURN';
+    const check: ApprovalType | null = !consign ? null : preparer?.role.key === 'SALES_ASSOCIATE' ? 'CONSIGNMENT_CHECK_BRANCH' : preparer?.role.key === 'WAREHOUSE_ASSOCIATE' ? 'CONSIGNMENT_CHECK_WH' : null;
+    if (check && !skipInCharge) {
+      const req = await this.approvals.request({ type: check, documentType: 'TransferDoc', documentId: id, requestedBy, summary: { controlNo: doc.controlNo, locationId: doc.fromLocationId, locationName: `${doc.fromLocation.name} → ${doc.toLocation.name}`, lines: doc.lines.length, units: doc.lines.reduce((t, l) => t + l.qtySent, 0), step: 'Manager check, then the Owner approves' } });
+      await this.prisma.db.transferDoc.update({ where: { id }, data: { status: 'SUBMITTED', approvalRequestId: req.id, updatedBy: requestedBy } });
+      return;
+    }
     await this.requestRouteApproval(id, requestedBy);
   }
 
@@ -187,7 +199,7 @@ export class TransfersService implements OnModuleInit {
   private async requestRouteApproval(id: string, requestedBy: string, afterInCharge = false) {
     const doc = await this.prisma.db.transferDoc.findUniqueOrThrow({ where: { id }, include: TransfersService.INCLUDE });
     if (doc.status !== (afterInCharge ? 'SUBMITTED' : 'DRAFT')) throw new BadRequestException('Only drafts can be submitted');
-    const type: ApprovalType = doc.transferType === 'CONSIGNMENT_OUT' ? 'CONSIGNMENT_OUT' : doc.toLocation.type === 'FRANCHISE' ? 'TRANSFER_TO_FRANCHISE' : 'TRANSFER_INTERNAL';
+    const type: ApprovalType = doc.transferType === 'CONSIGNMENT_OUT' || doc.transferType === 'CONSIGNMENT_RETURN' ? 'CONSIGNMENT_OUT' : doc.toLocation.type === 'FRANCHISE' ? 'TRANSFER_TO_FRANCHISE' : 'TRANSFER_INTERNAL';
     const totalAtCost = sum(doc.lines.map((l) => l.batch.unitCost.mul(l.qtySent)));
     // Optional auto-approve thresholds (§6.1), default off
     const maxInternal = await this.settings.get<number | null>('approval.transfer_internal_auto_max');

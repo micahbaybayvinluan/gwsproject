@@ -162,6 +162,24 @@ Accounting → Journal Vouchers → open one → Edit entry → change the lines
 **38. Company letterhead and logo** — `admin`
 Settings → Company letterhead → type the details → Save details. Upload a logo… → slide "Remove the background" until the background is checkered → Use this logo. Print any form: the letterhead is at the top; the sign-in page and menu show the logo.
 
+**39. Incentive and daily report submission** — `sales.westave`
+New Sale → add an item → **+ Add incentive expense** (Sales incentive, given to "Juan", ₱50) → Save. Daily Close: expected cash is ₱50 lower. Daily Branch Sales Report → **Submit today's report…** → tick "true and correct" → **I agree — submit**. Try a new sale: the day is closed.
+
+**40. Count sheet with every item** — `sales.csr`, then `head.auditor`, `hr.staff`
+Inventory Count Sheets → Start my weekly count sheet. Items in the system come first, then items not in the system. Download the sheet, type the counts in Excel (one item short), upload, submit. Everyone concerned is notified; the case gives 7 days to explain.
+
+**41. Cash on hand** — `head.auditor`, then `sales.westave`, `admin`
+Cash on Hand → set West Ave "Days allowed" to 0. As `sales.westave`: the dashboard shows cash due today; **Request extension** with a reason. `head.auditor` and `admin` both approve in Approvals. Record the deposit in Daily Close (choose **Gcash (GWS)** or a bank).
+
+**42. Consignments** — `admin`, then `sales.westave`, `asst.auditor`, `admin`
+As `admin`: Catalogue → Consignees → New consignee. As `sales.westave`: Consignment → 1. Send goods → Save draft → Print draft → Submit. `asst.auditor` approves the check, `admin` gives the final approval. Then 2. Record consignee sales: prices are pre-filled and editable; print the draft and submit.
+
+**43. Cost edit, days to consume and customer follow-ups** — `head.auditor`, `admin`, `sales.westave`
+As `head.auditor`: open a product → Edit cost → Send for approval; `admin` approves. Set "Days to consume one unit" to 30. As `sales.westave`: sell it with the customer's mobile number. As `admin`: Settings → Customer re-order messages → edit the SMS. Customer Contact List & Follow-ups shows the items ordered and, when due, the customer to call with SMS / Email buttons.
+
+**44. Help** — any account
+Help & User Guide opens on **My guide** (the steps for your role), with **Guide for everyone** and **More topics** next to it. `admin` also sees **Every role** for training.
+
 ## Where the files come out
 
 All exports download through the browser: Daily Sales Report (xlsx/PDF), Daily Inventory Report (xlsx, one sheet per day plus Summary and Per-day sheets), every paper form (Pull-Out, Transfer-In, DR-Sales, Supplier's Form, Count sheet, Discrepancy Report, Charge Form, Credit Note, Journal Voucher), every list (Export xlsx / CSV buttons), Trial Balance and the financial statements.

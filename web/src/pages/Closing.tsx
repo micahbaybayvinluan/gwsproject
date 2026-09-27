@@ -23,7 +23,7 @@ export function ClosingPage() {
   const counted = DENOMS.reduce((t, d) => t + (bd[String(d)] ?? 0) * d, 0);
   const d = s.data;
   return <div className="space-y-4">
-    <div className="flex flex-wrap items-end gap-2"><h1 className="mr-auto text-xl font-semibold">Daily Close</h1>{!me!.locationScoped && <Field label="Branch"><Select value={locationId} onChange={(e) => setLocationId(e.target.value)}><option value="">—</option>{locations.data?.filter((l) => l.isSelling).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</Select></Field>}<Field label="Business day"><Input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field></div>
+    <div className="flex flex-wrap items-end gap-2"><h1 className="mr-auto text-2xl font-bold tracking-tight text-navy">Daily Close, Cash Count & Bank Deposit</h1>{!me!.locationScoped && <Field label="Branch"><Select value={locationId} onChange={(e) => setLocationId(e.target.value)}><option value="">—</option>{locations.data?.filter((l) => l.isSelling).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</Select></Field>}<Field label="Business day"><Input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field></div>
     {d && <>
       <div className="flex items-center gap-2 text-sm">{d.closed ? <Badge tone="red">CLOSED — edits need approval</Badge> : <Badge tone="green">OPEN (closes 00:00 Manila)</Badge>}</div>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">

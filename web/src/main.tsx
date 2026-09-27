@@ -32,6 +32,7 @@ import { RevisionsPage } from './pages/Revisions';
 import { HelpPage } from './pages/Help';
 import { BankOfficePage } from './pages/BankOffice';
 import { CashOnHandPage, HrNoticesPage } from './pages/CashOnHand';
+import { PerformancePage, SalesReportPage } from './pages/SalesReports';
 import { CashFundPage } from './pages/CashFund';
 import { InspectionDetailPage, InspectionFormPage, InspectionsPage } from './pages/Inspections';
 import { CustomersReportPage, InventoryCostPage } from './pages/ReportsExtra';
@@ -100,6 +101,8 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
               <Route path="/help" element={<HelpPage />} />
               <Route path="/bank" element={<BankOfficePage />} />
               <Route path="/cash-on-hand" element={<CashOnHandPage />} />
+              <Route path="/reports/sales" element={<SalesReportPage />} />
+              <Route path="/reports/performance" element={<PerformancePage />} />
               <Route path="/hr-notices" element={<HrNoticesPage />} />
               <Route path="/cash-fund" element={<CashFundPage />} />
               <Route path="/inspections" element={<InspectionsPage />} />

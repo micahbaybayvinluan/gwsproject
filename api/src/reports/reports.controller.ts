@@ -5,6 +5,7 @@ import { Audited, CurrentUser, RequireAnyPermission, RequirePermission } from '.
 import { z } from 'zod';
 import { Z } from '../common/zod.pipe';
 import { ReportSubmissionService } from './report-submission.service';
+import { SalesSummaryService } from './sales-summary.service';
 import type { SessionUser } from '../common/request-context';
 import { ScopeService } from '../common/scope.service';
 import { manilaDateStr } from '../common/manila';
@@ -15,7 +16,10 @@ function send(res: Response, out: Out) { res.setHeader('Content-Type', out.conte
 
 @Controller('api/reports')
 export class ReportsController {
-  constructor(private r: ReportsService, private scope: ScopeService, private sub: ReportSubmissionService) {}
+  constructor(private r: ReportsService, private scope: ScopeService, private sub: ReportSubmissionService, private sales: SalesSummaryService) {}
+  @Get('sales-summary') @RequireAnyPermission('report.sales.own', 'report.sales.all') salesSummary(@CurrentUser() u: SessionUser, @Query('locationId') locationId?: string, @Query('from') from?: string, @Query('to') to?: string) { const d = manilaDateStr(); return this.sales.summary(u, { locationId: locationId || (u.locationScoped ? u.locationIds[0] : undefined), from: from || `${d.slice(0, 8)}01`, to: to || d }); }
+  @Get('sales-summary.xlsx') @RequireAnyPermission('report.sales.own', 'report.sales.all') async salesSummaryXlsx(@CurrentUser() u: SessionUser, @Res() res: Response, @Query('locationId') locationId?: string, @Query('from') from?: string, @Query('to') to?: string) { const d = manilaDateStr(); send(res, await this.sales.summaryXlsx(u, { locationId: locationId || (u.locationScoped ? u.locationIds[0] : undefined), from: from || `${d.slice(0, 8)}01`, to: to || d })); }
+  @Get('sales-performance') @RequireAnyPermission('report.sales.own', 'report.sales.all') performance(@CurrentUser() u: SessionUser, @Query('year') year?: string, @Query('month') month?: string) { return this.sales.performance(u, { year: year ? Number(year) : undefined, month: month ? Number(month) : undefined }); }
   @Get('daily-sales/submission') @RequireAnyPermission('report.sales.own', 'report.sales.all') submission(@CurrentUser() u: SessionUser, @Query('locationId') locationId?: string, @Query('date') date?: string) { return this.sub.status(locationId || u.locationIds[0], date || manilaDateStr(), u); }
   @Post('daily-sales/submit') @RequirePermission('sale.create') @Audited('SalesReportSubmission', 'SUBMIT') submit(@CurrentUser() u: SessionUser, @Body(Z(SubmitReport)) dto: z.infer<typeof SubmitReport>) { return this.sub.submit({ locationId: dto.locationId ?? u.locationIds[0], date: dto.date, acknowledged: dto.acknowledged }, u); }
   @Post('daily-sales/remind') @RequirePermission('settings.thresholds') remind() { return this.sub.remind(); }

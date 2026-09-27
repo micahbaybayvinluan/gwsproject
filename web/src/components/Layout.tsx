@@ -44,6 +44,8 @@ const NAV: { group: string; items: NavItem[] }[] = [
     { to: '/imports', label: 'Imports', any: ['product.create', 'gl.account.edit', 'settings.thresholds'] },
   ] },
   { group: 'Reports', items: [
+    { to: '/reports/sales', label: 'Sales Report', any: ['report.sales.own', 'report.sales.all'] },
+    { to: '/reports/performance', label: 'Monthly Sales Performance', any: ['report.sales.own', 'report.sales.all'] },
     { to: '/reports/daily-sales', label: 'Daily Sales Report', any: ['report.sales.own', 'report.sales.all'] },
     { to: '/reports/inventory', label: 'Inventory Reports', any: ['report.inventory.own', 'report.inventory.all'] },
     { to: '/reports/customers', label: 'Customer Contacts', any: ['report.sales.own', 'report.sales.all'] },

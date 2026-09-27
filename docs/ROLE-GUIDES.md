@@ -78,6 +78,10 @@ You run one branch: sales, expenses, stock received and sent, the weekly count, 
 **Your pay** (menu: My Pay & Charges)
 - See only your own payslips and charges. Press **Acknowledge** on every new charge.
 
+**How your branch is doing**
+- **Sales Report:** your branch's sales for any period (today, this month, last month or your own dates), with payment modes, top products and a per-day table. Export it to Excel.
+- **Monthly Sales Performance:** a graph of your branch's sales this month so far and month by month this year.
+
 **Customers who may have finished their supplements** (menu: Customer Contact List & Follow-ups → Re-order follow-ups)
 1. When a customer with a contact number or email buys a product that has "days to consume", a reminder is set for the day it is probably finished. That morning you are notified.
 2. Open **Re-order follow-ups**: call the number (tap it on a phone), or press **SMS** / **Email**. The Owner's message is filled in; you may edit it before sending.
@@ -368,7 +372,10 @@ You see and can do everything. You are the final approver.
 8. **Watching:**
    - The dashboard shows cash on hand per branch, branches without today's report, discrepancies and price updates (cost included).
    - HR Notices are visible to you too.
-9. **Reports:** Financial Statements, all branch reports with margin, and the Audit Log.
+9. **Reports:**
+   - **Monthly Sales Performance:** every branch's month-to-date running total in its own colour, the company total, and each month of the year.
+   - **Sales Report:** any branch or all, any period, with gross profit.
+   - Financial Statements, all branch reports with margin, and the Audit Log.
 
 ## Other users (custom permissions)
 <!-- role: CUSTOM -->

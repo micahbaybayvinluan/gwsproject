@@ -425,6 +425,17 @@ Each section below starts with a hidden line that says which roles it is for. Th
 - Every menu item has a descriptive name (for example **Supplier Deliveries (Receiving)** or **Stock Transfers & Pull-outs**).
 - The top of each page says in one line what the page is for.
 
+## Sales Report and Monthly Sales Performance
+<!-- for: report.sales.own, report.sales.all -->
+- **Sales Report:**
+  - Choose the branch (or **All branches**) and the period, or press **Today**, **This month**, **Last month** or **This year**.
+  - It shows total sales, number of sales and average per sale, products sold, how customers paid, sales by channel, per branch (with each branch's share), per day and the top products.
+  - Gross profit shows only for people allowed to see cost. **Excel** exports the same report.
+- **Monthly Sales Performance:**
+  - Choose the month. The first graph shows each branch's running total for the month so far, each branch in its own colour; the second shows the whole company.
+  - The third graph shows every month of the year: the column height is the company total, and the coloured parts are the branches.
+  - Hover for exact amounts, or press **Show as tables**. Branch staff see only their own branch.
+
 ## Form numbers
 <!-- for: all -->
 - Every form number starts with the branch code, then the form code, then the number. Example: **WA-DR-000123** is a West Ave sale.

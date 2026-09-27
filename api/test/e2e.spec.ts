@@ -1121,4 +1121,23 @@ describe('Owner requests 2026-09-27: sale incentives, count sheets, count discre
     const r2 = ok(await as('admin').post(`/api/products/${pid}/cost`).send({ cost: 515, reason: 'Owner correction' })).body;
     expect((await prisma.approvalRequest.findUniqueOrThrow({ where: { id: r2.approvalRequestId } })).requiredApproverRoles).toEqual(['HEAD_AUDITOR']);
   });
+
+  it('sales report for any branch and period, and month-to-date / year performance per branch; branch staff see only their branch; profit only with cost access', async () => {
+    const all = ok(await as('admin').get(`/api/reports/sales-summary?from=${today().slice(0, 8)}01&to=${today()}`)).body;
+    expect(all.branch).toBe('All branches'); expect(all.totals.sales).toBeGreaterThan(0);
+    expect(all.perBranch.reduce((t: number, b: { total: number }) => t + b.total, 0)).toBeCloseTo(all.totals.sales, 2);
+    expect(all.perDay.reduce((t: number, d: { total: number }) => t + d.total, 0)).toBeCloseTo(all.totals.sales, 2);
+    expect(Object.values(all.totals.byMode as Record<string, number>).reduce((t, v) => t + v, 0)).toBeCloseTo(all.totals.sales, 2);
+    expect(all.totals.grossProfit).toBeDefined();
+    const mine = ok(await as('sales.westave').get('/api/reports/sales-summary')).body;
+    expect(mine.branch).toBe('West Ave'); expect(mine.totals.grossProfit).toBeUndefined(); expect(mine.perBranch).toHaveLength(1);
+    await as('sales.westave').get(`/api/reports/sales-summary?locationId=${(await prisma.location.findUniqueOrThrow({ where: { code: 'CSR' } })).id}`).expect(403);
+    const x = await as('admin').get(`/api/reports/sales-summary.xlsx?from=${today()}&to=${today()}`).expect(200); expect(x.headers['content-type']).toMatch(/spreadsheet/);
+    const perf = ok(await as('head.auditor').get('/api/reports/sales-performance')).body;
+    expect(perf.branches.length).toBeGreaterThan(3); expect(perf.days.length).toBe(Number(today().slice(8)));
+    const wa = perf.branches.find((b: { name: string }) => b.name === 'West Ave').id;
+    expect(perf.cumulative[wa].at(-1)).toBe(perf.monthToDate.perBranch.find((b: { id: string }) => b.id === wa).total);
+    expect(perf.byMonth[wa].at(-1)).toBeCloseTo(perf.cumulative[wa].at(-1), 2);
+    expect(ok(await as('sales.westave').get('/api/reports/sales-performance')).body.branches).toHaveLength(1);
+  });
 });

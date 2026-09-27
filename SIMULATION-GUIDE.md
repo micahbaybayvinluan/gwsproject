@@ -180,6 +180,9 @@ As `head.auditor`: open a product → Edit cost → Send for approval; `admin` a
 **44. Help** — any account
 Help & User Guide opens on **My guide** (the steps for your role), with **Guide for everyone** and **More topics** next to it. `admin` also sees **Every role** for training.
 
+**45. Sales Report and graphs** — `admin`, then `sales.westave`
+Reports → Sales Report: choose All branches and This month, then one branch and Last month; Excel. Reports → Monthly Sales Performance: each branch's running total in its own colour, the company total, and each month of the year (hover for amounts, or Show as tables). As `sales.westave` only West Ave appears.
+
 ## Where the files come out
 
 All exports download through the browser: Daily Sales Report (xlsx/PDF), Daily Inventory Report (xlsx, one sheet per day plus Summary and Per-day sheets), every paper form (Pull-Out, Transfer-In, DR-Sales, Supplier's Form, Count sheet, Discrepancy Report, Charge Form, Credit Note, Journal Voucher), every list (Export xlsx / CSV buttons), Trial Balance and the financial statements.

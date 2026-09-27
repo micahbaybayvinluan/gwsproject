@@ -32,6 +32,8 @@ export const PAGES: Record<string, PageInfo> = {
   '/suppliers': { label: 'Suppliers', summary: 'Supplier list (codes for warehouse staff; names for the Owner and auditors). New suppliers wait for the Owner’s approval.' },
   '/imports': { label: 'Excel Imports & Templates', summary: 'Load products, prices, minimum stock, opening balances and other lists from Excel templates.' },
   '/reports/daily-sales': { label: 'Daily Branch Sales Report', summary: 'The day’s sales report in the company format. Branch staff review it and submit it as true and correct before 8 PM.' },
+  '/reports/sales': { label: 'Sales Report (Any Branch & Period)', summary: 'Choose a branch (or all) and a period: total sales, number of sales, how customers paid, channels, per branch, per day and top products. Export to Excel.' },
+  '/reports/performance': { label: 'Monthly Sales Performance (Graphs)', summary: 'This month so far per branch and for the whole company, and this year month by month, as graphs (each branch has its own colour). Hover for exact amounts, or show as tables.' },
   '/reports/inventory': { label: 'Inventory Reports & Movement', summary: 'Daily inventory report (items with movement first), monthly movement sheet and the stock ledger, with item search.' },
   '/reports/customers': { label: 'Customer Contact List & Follow-ups', summary: 'Customers with their contact details and the items they ordered, and re-order follow-ups: customers who may have finished their supplements, to call, text or email.' },
   '/franchise': { label: 'Franchise Portal (Your Branch)', summary: 'Your franchise only: stock, deliveries, staff pay and charges, and your own income statement and balance sheet.' },

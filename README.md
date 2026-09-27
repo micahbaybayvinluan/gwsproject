@@ -62,6 +62,12 @@ pnpm login-check
 
 It checks the settings file, Docker (database and Redis), the app server and the web page, then tries to sign in as admin. Each problem it finds comes with the fix. `pnpm login-check --reset` also resets every demo account to the password `ChangeMe!2026`, switches it back on and removes any authenticator.
 
+## Guides and proposals
+
+- `docs/USER-GUIDE.md`: the guide for everyone (Help page, "Guide for everyone" / "More topics").
+- `docs/ROLE-GUIDES.md`: one step-by-step guide per role (Help page, "My guide").
+- `docs/ECOMMERCE-PROPOSAL.md`: recommended e-commerce (TikTok / Shopee / Lazada) process, entries, reports and guide, for approval before building.
+
 ## Help & Guide and the AI assistant
 
 Everyone has **Help & Guide** in the menu. It shows the user guide (`docs/USER-GUIDE.md`) filtered to the person's role, with a filter box and a Print button, and an **Ask** box.

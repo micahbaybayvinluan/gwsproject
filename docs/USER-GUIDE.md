@@ -420,6 +420,26 @@ Each section below starts with a hidden line that says which roles it is for. Th
   - Tap the number to call, or press **SMS** / **Email**: the Owner's message is filled in and can be edited before sending. Then press **Contacted** or **Dismiss**.
 - **The Owner** writes the SMS and email in **Settings → Customer re-order messages** and can make them go out automatically. SMS needs an SMS account (Semaphore) and email needs a mail server in the settings file; until then, messages are logged as "not set up".
 
+## E-commerce: TikTok, Shopee and Lazada
+<!-- for: ecom.manage, ecom.view, ecom.receive -->
+Each platform has its own tab, reports and accounts; nothing is mixed. E-commerce keeps no stock of its own: items come from the Warehouse.
+
+1. **Orders → pull-out:** the E-comm Associate uploads the platform's order / waybill export. The new orders go on one draft Warehouse pull-out (oldest expiry first). Unknown SKUs are matched once and remembered; duplicates and cancelled orders are skipped.
+2. **Warehouse In-Charge:** approves the pull-out (the only approval). The items move to "TikTok / Shopee / Lazada – with courier" until the platform pays or the parcel comes back.
+3. **Payouts:** the associate uploads the platform's payout file and sends it to Accounting. The Accounting Head checks that gross sales − discounts − fees − refunds − withholding tax = payout, then approves. The posting books:
+   - the sale;
+   - each fee to its own account per platform;
+   - the 1% creditable withholding tax;
+   - the payout to the platform's cash account;
+   - the cost of goods sold.
+4. **Returns:** the associate records the parcel by order ID or tracking number. The In-Charge marks each item:
+   - **Good:** back to Warehouse stock.
+   - **Damaged:** a write-off goes to the Head Auditor.
+   - For an order already paid, the cost goes back to inventory.
+5. **Ads:** entered or uploaded per platform and month as an expense, paid from the platform balance or a bank / card account.
+6. **Order tracker:** shipped, paid, returned and **overdue** orders (shipped over 30 days ago, not paid nor returned; the days are in Settings as `ecom.overdue_days`). Reminder every Friday.
+7. **Profit report:** TikTok | Shopee | Lazada | All. Cost of goods and profit after cost only for people allowed to see cost. Each platform also appears as its own line in Monthly Sales Performance.
+
 ## Page names and what each page is for
 <!-- for: all -->
 - Every menu item has a descriptive name (for example **Supplier Deliveries (Receiving)** or **Stock Transfers & Pull-outs**).

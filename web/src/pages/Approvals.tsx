@@ -7,7 +7,7 @@ import { Badge, Button, Card, Empty, ErrorBox, Input, statusTone } from '@/compo
 
 interface Req { id: string; type: string; documentType: string; documentId: string; requestedBy: string; requesterName: string; requiredApproverRoles: string[]; anyOf: boolean; status: string; summary: Record<string, unknown> | null; autoApproveAt: string | null; createdAt: string; decisions: { roleKey: string; decision: string; note: string | null; user: { fullName: string } }[] }
 const LINKS: Record<string, string> = { ReceivingDoc: '/receiving', TransferDoc: '/transfers', SalesDoc: '/sales', ExpiryWriteoffDoc: '/writeoffs', PriceChangeDoc: '/price-changes', CountDoc: '/counts', DiscrepancyCase: '/discrepancies', PostCloseEdit: '/closing', Payment: '/ar' };
-const TYPE_LABEL: Record<string, string> = { AUDIT_REVISION: 'Audit Associate correction (Head Auditor only)', AR_PAYMENT: 'AR payment entered by branch', COUNT_REVISION: 'Count sheet revision', DISCREPANCY_EXPLANATION: 'Discrepancy explanation', WAREHOUSE_EDIT: 'Edit of your warehouse document', MASTER_DATA_NEW: 'New master data (Owner approves)', WAREHOUSE_IN: 'Goods into the warehouse (In-Charge approves)', WAREHOUSE_OUT: 'Goods out of the warehouse (In-Charge approves)', CASH_DEPOSIT_EXTENSION: 'More days to deposit cash sales (Head Auditor + Admin)', CONSIGNMENT_CHECK_WH: 'Consignment check (In-Charge, then the Owner)', CONSIGNMENT_CHECK_BRANCH: 'Consignment check (auditor, then the Owner)', CONSIGNMENT_OUT: 'Consignment (Owner approves)', COST_EDIT: 'Product cost change' };
+const TYPE_LABEL: Record<string, string> = { AUDIT_REVISION: 'Audit Associate correction (Head Auditor only)', AR_PAYMENT: 'AR payment entered by branch', COUNT_REVISION: 'Count sheet revision', DISCREPANCY_EXPLANATION: 'Discrepancy explanation', WAREHOUSE_EDIT: 'Edit of your warehouse document', MASTER_DATA_NEW: 'New master data (Owner approves)', WAREHOUSE_IN: 'Goods into the warehouse (In-Charge approves)', WAREHOUSE_OUT: 'Goods out of the warehouse (In-Charge approves)', CASH_DEPOSIT_EXTENSION: 'More days to deposit cash sales (Head Auditor + Admin)', CONSIGNMENT_CHECK_WH: 'Consignment check (In-Charge, then the Owner)', CONSIGNMENT_CHECK_BRANCH: 'Consignment check (auditor, then the Owner)', CONSIGNMENT_OUT: 'Consignment (Owner approves)', COST_EDIT: 'Product cost change', ECOM_PULLOUT: 'E-commerce pull-out from the Warehouse (In-Charge approves)', ECOM_SETTLEMENT: 'E-commerce payout: sale, fees and payout (Accounting Head)' };
 
 /** §6.2 Approvals inbox: grouped by type, newest first, select-all + bulk approve/reject with one note, inline expand. */
 export function ApprovalsPage() {
@@ -50,7 +50,7 @@ export function ApprovalsPage() {
         </div>}
         {open === r.id && <div className="mt-2 rounded bg-slate-50 p-3 text-sm">
           <Summary s={r.summary} showCost={can('cost.view')} />
-          <Link className="mt-2 inline-block text-brand underline" to={`${LINKS[r.documentType] ?? '/'}${['PostCloseEdit', 'Payment'].includes(r.documentType) ? '' : `/${r.documentId}`}`}>Open full document</Link>
+          <Link className="mt-2 inline-block text-brand underline" to={r.documentType === 'EcomSettlement' ? `/ecommerce?payout=${r.documentId}` : `${LINKS[r.documentType] ?? '/'}${['PostCloseEdit', 'Payment'].includes(r.documentType) ? '' : `/${r.documentId}`}`}>Open full document</Link>
         </div>}
       </li>)}</ul>
     </Card>)}

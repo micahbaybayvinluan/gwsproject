@@ -36,6 +36,7 @@ Two-factor codes are switched off for the simulation (`AUTH_TOTP_OPTIONAL=true` 
 | XIV | HR Staff | `hr.staff` | Payroll & charge forms only | No |
 | XV | Field Auditor | `field.auditor` | Every branch, franchise and the warehouse (inventory only, counts, inspections) | No |
 | XVI | Executive Assistant | `exec.assistant` | Main-office bank accounts, supplier payables, office expenses, balance-sheet accounts | No |
+| XVII | E-comm Associate (TikTok, Shopee, Lazada) | `ecomm.assoc` | E-commerce only; items come from the Warehouse | No |
 
 Admin can add more users of any role under **Admin → Users & Roles** (for example a Sales Associate for another branch or a Franchise Owner for Parañaque): username, email, the person's full name, their **company ID number** (required), role, a temporary password, and the branch(es) to assign. At first sign-in that person must set their own password and accept the accountability statement. Users & Roles shows each person's ID, whether they accepted, their last sign-in and recent devices; **Activity** opens everything they did in the Audit Log.
 
@@ -182,6 +183,9 @@ Help & User Guide opens on **My guide** (the steps for your role), with **Guide 
 
 **45. Sales Report and graphs** — `admin`, then `sales.westave`
 Reports → Sales Report: choose All branches and This month, then one branch and Last month; Excel. Reports → Monthly Sales Performance: each branch's running total in its own colour, the company total, and each month of the year (hover for amounts, or Show as tables). As `sales.westave` only West Ave appears.
+
+**46. E-commerce: TikTok, Shopee and Lazada** — `ecomm.assoc`, `wh.incharge`, `acct.head`, `admin`
+As `ecomm.assoc`: E-commerce → TikTok Shop → 1. Orders → pull-out → **GWS orders template** → fill two orders with GWS SKUs → upload. A draft pull-out appears; open it, **Print picking list**, **Submit**. As `wh.incharge`: Approvals → approve it (stock moves to "TikTok – with courier"). As `ecomm.assoc`: 2. Payouts → **GWS payout template** → one row per order (gross, fees, payout) → upload → check ✓ → **Send to Accounting**. As `acct.head`: approve; Journal Vouchers shows the payout, each TikTok fee, withholding tax and the cost of sales. Back as `ecomm.assoc`: 3. Returns → type an order ID → `wh.incharge` receives it (E-commerce → Returned parcels) marking one item damaged. 4. Ads → record ₱1,000. As `admin`: E-commerce → All platforms: profit report. Do the same on the Shopee and Lazada tabs: each keeps its own orders, payouts and totals.
 
 ## Where the files come out
 

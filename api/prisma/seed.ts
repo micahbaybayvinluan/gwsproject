@@ -37,6 +37,10 @@ const LOCATIONS: { code: string; shortCode: string; name: string; type: 'WAREHOU
   { code: 'V-PULLOUT2', shortCode: 'P2', name: 'Pull Out 2', type: 'VIRTUAL' },
   { code: 'V-PULLOUT3', shortCode: 'P3', name: 'Pull Out 3', type: 'VIRTUAL' },
   { code: 'V-REPLACE', shortCode: 'RP', name: 'For Replacement', type: 'VIRTUAL' },
+  // e-commerce holding places: items pulled out of the Warehouse for platform orders, until the platform pays or the parcel returns
+  { code: 'ECOM-TIKTOK', shortCode: 'TT', name: 'TikTok – with courier', type: 'VIRTUAL' },
+  { code: 'ECOM-SHOPEE', shortCode: 'SP', name: 'Shopee – with courier', type: 'VIRTUAL' },
+  { code: 'ECOM-LAZADA', shortCode: 'LZ', name: 'Lazada – with courier', type: 'VIRTUAL' },
 ];
 
 const CATEGORIES: { name: string; accountingClass: 'SUPPLEMENT' | 'FREEBIE' | 'PLASTIC' | 'APPAREL' | 'EQUIPMENT' | 'OTHER' | 'REPACKED' | 'BUNDLE' }[] = [
@@ -73,6 +77,7 @@ const TEST_USERS: { username: string; role: string; fullName: string; locations?
   { username: 'hr.staff', role: 'HR_STAFF', fullName: 'HR Staff' },
   { username: 'field.auditor', role: 'FIELD_AUDITOR', fullName: 'Field Auditor', locations: [] }, // inventory of every location
   { username: 'exec.assistant', role: 'EXECUTIVE_ASSISTANT', fullName: 'Executive Assistant' },
+  { username: 'ecomm.assoc', role: 'ECOMM_ASSOCIATE', fullName: 'E-comm Associate' },
 ];
 
 async function main() {
@@ -81,7 +86,11 @@ async function main() {
     await prisma.role.upsert({ where: { key: r.key }, create: { key: r.key, name: r.name, description: r.description, permissions: r.permissions }, update: { name: r.name, description: r.description, permissions: r.permissions } });
   }
   console.log('Seeding locations…');
-  for (const l of LOCATIONS) await prisma.location.upsert({ where: { code: l.code }, create: { ...l, isSelling: !!l.isSelling }, update: { name: l.name, type: l.type, isSelling: !!l.isSelling } });
+  for (const l of LOCATIONS) {
+    // a location added later in the app may already use this 2-letter code: the new location then gets its own code on first use
+    const taken = await prisma.location.findFirst({ where: { shortCode: l.shortCode, code: { not: l.code } } });
+    await prisma.location.upsert({ where: { code: l.code }, create: { ...l, shortCode: taken ? null : l.shortCode, isSelling: !!l.isSelling }, update: { name: l.name, type: l.type, isSelling: !!l.isSelling } });
+  }
   console.log('Seeding categories & tiers…');
   for (const c of CATEGORIES) await prisma.category.upsert({ where: { name: c.name }, create: c, update: { accountingClass: c.accountingClass } });
   for (const [i, [key, name]] of TIERS.entries()) await prisma.priceTier.upsert({ where: { key }, create: { key, name, sortOrder: i, isSystem: true }, update: { name } });

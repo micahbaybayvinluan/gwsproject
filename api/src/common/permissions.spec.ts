@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { LOCATION_SCOPED_ROLES, APPROVAL_ROUTING, PERMISSION_KEYS, ROLE_CATALOGUE, effectivePermissions, editRequestApprovers, TOTP_REQUIRED_ROLES, SINGLE_LOCATION_ROLES } from './permissions';
 
 describe('permissions & approval routing (§5, §6.1)', () => {
-  it('has 16 roles and every role permission is a known key', () => {
-    expect(ROLE_CATALOGUE).toHaveLength(16);
+  it('has 17 roles and every role permission is a known key', () => {
+    expect(ROLE_CATALOGUE).toHaveLength(17);
     for (const r of ROLE_CATALOGUE) for (const k of r.permissions) expect(PERMISSION_KEYS, `${r.key}:${k}`).toContain(k);
   });
   it('financial statements are Admin + External Auditor only (§9)', () => {
@@ -20,7 +20,7 @@ describe('permissions & approval routing (§5, §6.1)', () => {
     expect(withCost).toEqual(['ACCOUNTING_ASSOCIATE', 'ACCOUNTING_HEAD', 'ADMIN', 'ASST_AUDITOR', 'AUDIT_ASSOCIATE', 'EXTERNAL_AUDITOR', 'HEAD_AUDITOR']);
   });
   it('cost-blind roles have no cost.view', () => {
-    for (const k of ['WAREHOUSE_IN_CHARGE', 'WAREHOUSE_ASSOCIATE', 'SALES_ASSOCIATE', 'FRANCHISE_SALES_ASSOCIATE', 'FRANCHISE_OWNER', 'HR_STAFF', 'FIELD_AUDITOR']) expect(ROLE_CATALOGUE.find((r) => r.key === k)!.permissions).not.toContain('cost.view');
+    for (const k of ['WAREHOUSE_IN_CHARGE', 'WAREHOUSE_ASSOCIATE', 'SALES_ASSOCIATE', 'FRANCHISE_SALES_ASSOCIATE', 'FRANCHISE_OWNER', 'HR_STAFF', 'FIELD_AUDITOR', 'ECOMM_ASSOCIATE']) expect(ROLE_CATALOGUE.find((r) => r.key === k)!.permissions).not.toContain('cost.view');
   });
   it('only the Warehouse In-Charge (and Admin) may edit other people\'s warehouse entries; both warehouse roles accept edits', () => {
     const perms = (k: string) => ROLE_CATALOGUE.find((r) => r.key === k)!.permissions;

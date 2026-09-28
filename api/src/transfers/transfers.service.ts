@@ -33,7 +33,12 @@ export class TransfersService implements OnModuleInit {
     this.approvals.register('WAREHOUSE_OUT', (r, outcome, actor) => this.onWarehouseOut(r.documentId, outcome, actor?.id ?? null), 'TransferDoc');
     for (const t of ['CONSIGNMENT_CHECK_WH', 'CONSIGNMENT_CHECK_BRANCH'] as ApprovalType[]) this.approvals.register(t, (r, outcome, actor) => this.onWarehouseOut(r.documentId, outcome, actor?.id ?? null), 'TransferDoc');
     this.approvals.register('WAREHOUSE_IN', (r, outcome, actor) => this.onWarehouseIn(r.documentId, outcome, actor?.id ?? null), 'TransferDoc');
+    // e-commerce pull-out: the In-Charge is the only approver; the e-commerce module then marks the orders shipped
+    this.approvals.register('ECOM_PULLOUT', async (r, outcome, actor) => { await this.onDecision(r.documentId, outcome, actor?.id ?? null); for (const h of this.ecomHooks) await h(r.documentId, outcome); });
   }
+  private ecomHooks: ((docId: string, outcome: 'APPROVED' | 'REJECTED') => Promise<void>)[] = [];
+  /** Called after an e-commerce pull-out is approved or rejected (the e-commerce module updates its orders). */
+  onEcomPulloutDecided(fn: (docId: string, outcome: 'APPROVED' | 'REJECTED') => Promise<void>) { this.ecomHooks.push(fn); }
 
   private static readonly INCLUDE = { fromLocation: { select: { id: true, code: true, name: true, type: true } }, toLocation: { select: { id: true, code: true, name: true, type: true } }, lines: { include: { product: { select: { id: true, sku: true, name: true, category: { select: { accountingClass: true } } } }, batch: { select: { id: true, batchNo: true, expiryDate: true, unitCost: true, isConsignmentIn: true } } } } } as const;
 
@@ -82,7 +87,7 @@ export class TransfersService implements OnModuleInit {
   }
 
   /** Who may send what where (§7.3): location-scoped users send from their own location, or request from the warehouse to their own location. */
-  assertRoute(user: SessionUser, fromLoc: { id: string; type: string }, toLoc: { id: string; type: string }, transferType: string) {
+  assertRoute(user: SessionUser, fromLoc: { id: string; type: string }, toLoc: { id: string; type: string; code?: string }, transferType: string) {
     if (fromLoc.id === toLoc.id) throw new BadRequestException('From and To must differ');
     // Forms are prepared by the sending location only (owner rule): a branch receiving stock just gets the copy; to ask for stock it sends a Stock Request
     // goods coming back from a consignee are recorded by the branch / warehouse that takes them back
@@ -90,6 +95,8 @@ export class TransfersService implements OnModuleInit {
     if (transferType === 'CONSIGNMENT_RETURN' && fromLoc.type !== 'CONSIGNEE') throw new BadRequestException('A consignment return comes from a consignee');
     if (user.locationScoped && !user.locationIds.includes(fromLoc.id) && !consigneeReturn) throw new ForbiddenException('Transfer forms are prepared by the sending location. To get stock, send a Stock Request to the warehouse.');
     if (transferType === 'CONSIGNMENT_OUT' && toLoc.type !== 'CONSIGNEE') throw new BadRequestException('Consignment out must target a CONSIGNEE location');
+    if ((transferType === 'ECOMMERCE') !== ('code' in toLoc && String(toLoc.code).startsWith('ECOM-'))) throw new BadRequestException('E-commerce pull-outs go from the Warehouse to an e-commerce platform, and are made from the E-commerce page');
+    if (transferType === 'ECOMMERCE' && fromLoc.type !== 'WAREHOUSE') throw new BadRequestException('E-commerce items come from the Warehouse only');
   }
 
   /** FEFO-picked lines (or the newest batch for customer returns). No stock moves until approval. */
@@ -199,7 +206,7 @@ export class TransfersService implements OnModuleInit {
   private async requestRouteApproval(id: string, requestedBy: string, afterInCharge = false) {
     const doc = await this.prisma.db.transferDoc.findUniqueOrThrow({ where: { id }, include: TransfersService.INCLUDE });
     if (doc.status !== (afterInCharge ? 'SUBMITTED' : 'DRAFT')) throw new BadRequestException('Only drafts can be submitted');
-    const type: ApprovalType = doc.transferType === 'CONSIGNMENT_OUT' || doc.transferType === 'CONSIGNMENT_RETURN' ? 'CONSIGNMENT_OUT' : doc.toLocation.type === 'FRANCHISE' ? 'TRANSFER_TO_FRANCHISE' : 'TRANSFER_INTERNAL';
+    const type: ApprovalType = doc.transferType === 'ECOMMERCE' ? 'ECOM_PULLOUT' : doc.transferType === 'CONSIGNMENT_OUT' || doc.transferType === 'CONSIGNMENT_RETURN' ? 'CONSIGNMENT_OUT' : doc.toLocation.type === 'FRANCHISE' ? 'TRANSFER_TO_FRANCHISE' : 'TRANSFER_INTERNAL';
     const totalAtCost = sum(doc.lines.map((l) => l.batch.unitCost.mul(l.qtySent)));
     // Optional auto-approve thresholds (§6.1), default off
     const maxInternal = await this.settings.get<number | null>('approval.transfer_internal_auto_max');
@@ -230,11 +237,16 @@ export class TransfersService implements OnModuleInit {
         }
         const out = doc.lines.map((l) => ({ productId: l.productId, batchId: l.batchId, unitCost: l.batch.unitCost, qty: l.qtySent }));
         const isConsign = doc.transferType === 'CONSIGNMENT_OUT';
+        // e-commerce: the goods go straight to the platform's "with courier" holding place (still the Warehouse's inventory in the books until sold)
+        const isEcom = doc.transferType === 'ECOMMERCE';
         await this.stock.post(tx, out.flatMap((l) => [
           { locationId: doc.fromLocationId, productId: l.productId, batchId: l.batchId, qtyDelta: -l.qty, movementType: (isConsign ? 'CONSIGN_OUT' : 'TRANSFER_OUT') as never, documentType: 'TransferDoc', documentId: doc.id, unitCost: l.unitCost, businessDate: doc.docDate, createdBy: actorId ?? undefined },
-          { locationId: isConsign ? doc.toLocationId : transit.id, productId: l.productId, batchId: l.batchId, qtyDelta: l.qty, movementType: (isConsign ? 'CONSIGN_OUT' : 'TRANSFER_OUT') as never, documentType: 'TransferDoc', documentId: doc.id, unitCost: l.unitCost, businessDate: doc.docDate, createdBy: actorId ?? undefined },
+          { locationId: isConsign || isEcom ? doc.toLocationId : transit.id, productId: l.productId, batchId: l.batchId, qtyDelta: l.qty, movementType: (isConsign ? 'CONSIGN_OUT' : isEcom ? 'TRANSFER_IN' : 'TRANSFER_OUT') as never, documentType: 'TransferDoc', documentId: doc.id, unitCost: l.unitCost, businessDate: doc.docDate, createdBy: actorId ?? undefined },
         ]));
-        if (isConsign) {
+        if (isEcom) {
+          for (const l of doc.lines) await tx.transferLine.update({ where: { id: l.id }, data: { qtyReceived: l.qtySent } });
+          await tx.transferDoc.update({ where: { id: docId }, data: { status: 'RECEIVED', approvedAt: new Date(), receivedAt: new Date(), receivedBy: actorId } });
+        } else if (isConsign) {
           for (const l of doc.lines) await tx.transferLine.update({ where: { id: l.id }, data: { qtyReceived: l.qtySent } });
           await tx.transferDoc.update({ where: { id: docId }, data: { status: 'RECEIVED', approvedAt: new Date(), receivedAt: new Date() } });
           await this.posting.post(tx, { type: 'TransferDoc', id: doc.id, date: doc.docDate, createdBy: actorId }, (r) => r8ConsignOut(r, { fromLocationId: doc.fromLocationId, controlNo: doc.controlNo, lines: doc.lines.map((l) => ({ accountingClass: l.product.category.accountingClass, qty: l.qtySent, unitCost: l.batch.unitCost })) }));
@@ -242,7 +254,7 @@ export class TransfersService implements OnModuleInit {
           await tx.transferDoc.update({ where: { id: docId }, data: { status: 'APPROVED', approvedAt: new Date() } });
         }
       });
-      if (!customerReturn && doc.transferType !== 'CONSIGNMENT_OUT') await this.notify.toLocation(doc.toLocationId, { type: 'TRANSFER_INCOMING', title: `Incoming transfer ${doc.controlNo} from ${doc.fromLocation.name}`, body: `${doc.lines.length} line(s) to confirm`, link: `/transfers/${doc.id}` });
+      if (!customerReturn && doc.transferType !== 'CONSIGNMENT_OUT' && doc.transferType !== 'ECOMMERCE') await this.notify.toLocation(doc.toLocationId, { type: 'TRANSFER_INCOMING', title: `Incoming transfer ${doc.controlNo} from ${doc.fromLocation.name}`, body: `${doc.lines.length} line(s) to confirm`, link: `/transfers/${doc.id}` });
     });
   }
 

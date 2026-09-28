@@ -47,7 +47,7 @@ async function inChargeApproves(documentType: string, id: string) {
   if (!r) throw new Error(`No In-Charge approval pending for ${documentType} ${id}`);
   ok(await as('wh.incharge').post(`/api/approvals/${r.id}/decide`).send({ decision: 'APPROVE' }));
 }
-const USERS = ['admin', 'ext.auditor', 'head.auditor', 'asst.auditor', 'audit.assoc', 'wh.incharge', 'wh.assoc', 'sales.westave', 'fr.mayon.assoc', 'fr.mayon.owner', 'custom.user', 'acct.head', 'acct.assoc', 'hr.staff', 'field.auditor', 'sales.dasma', 'sales.csr', 'exec.assistant'];
+const USERS = ['admin', 'ext.auditor', 'head.auditor', 'asst.auditor', 'audit.assoc', 'wh.incharge', 'wh.assoc', 'sales.westave', 'fr.mayon.assoc', 'fr.mayon.owner', 'custom.user', 'acct.head', 'acct.assoc', 'hr.staff', 'field.auditor', 'sales.dasma', 'sales.csr', 'exec.assistant', 'ecomm.assoc'];
 const as = (u: string) => ({ get: (p: string) => http.get(p).set('Authorization', `Bearer ${tokens[u]}`), post: (p: string) => http.post(p).set('Authorization', `Bearer ${tokens[u]}`), put: (p: string) => http.put(p).set('Authorization', `Bearer ${tokens[u]}`), patch: (p: string) => http.patch(p).set('Authorization', `Bearer ${tokens[u]}`), delete: (p: string) => http.delete(p).set('Authorization', `Bearer ${tokens[u]}`) });
 const has = (o: unknown, re: RegExp): boolean => JSON.stringify(o).match(re) !== null;
 const ok = (r: request.Response) => { if (r.status >= 400) throw new Error(`${r.request?.method} ${r.request?.url} → ${r.status} ${JSON.stringify(r.body)}`); return r; };
@@ -57,6 +57,7 @@ async function resetTransactionalData() {
   if (process.env.NODE_ENV !== 'test') throw new Error('refusing to reset data outside NODE_ENV=test');
   await prisma.$executeRawUnsafe(`TRUNCATE stock_ledger, stock_balances, receiving_lines, receiving_docs, transfer_lines, transfer_docs, sales_lines, payment_allocations, payments, sales_docs, expense_docs, count_lines, count_docs, discrepancy_cases, charge_form_allocations, charge_form_lines, charge_forms, expiry_writeoff_lines, expiry_writeoff_docs, approval_decisions, approval_requests, notifications, audit_log, batches, daily_closes, post_close_edits, journal_lines, journal_vouchers, beginning_balances, accounting_periods, voucher_sequences, control_sequences, alert_states, attachments, employee_loans, payroll_lines, payroll_runs, employees, min_stock_levels, revaluation_lines, revaluation_entries, cash_deposits, login_session_records, cash_fund_txns, cash_fund_checks, store_inspections, contribution_remittances, document_revisions, price_change_lines, price_change_docs, price_update_logs, franchise_salaries, franchise_charges, franchise_expenses CASCADE`);
   await prisma.$executeRawUnsafe(`TRUNCATE cash_deposits, cash_deposit_extensions, hr_notices, sales_report_submissions`);
+  await prisma.$executeRawUnsafe(`TRUNCATE ecom_orders, ecom_order_lines, ecom_settlements, ecom_returns, ecom_ad_spend, ecom_sku_maps`);
   await prisma.$executeRawUnsafe(`UPDATE locations SET franchise_associate_receives = false, cash_deposit_max_days = 1`);
   await prisma.$executeRawUnsafe(`UPDATE cash_funds SET balance = imprest_amount`);
   await prisma.priceList.deleteMany({ where: { product: { name: { startsWith: 'E2E ' } } } });
@@ -1139,5 +1140,141 @@ describe('Owner requests 2026-09-27: sale incentives, count sheets, count discre
     expect(perf.cumulative[wa].at(-1)).toBe(perf.monthToDate.perBranch.find((b: { id: string }) => b.id === wa).total);
     expect(perf.byMonth[wa].at(-1)).toBeCloseTo(perf.cumulative[wa].at(-1), 2);
     expect(ok(await as('sales.westave').get('/api/reports/sales-performance')).body.branches).toHaveLength(1);
+  });
+});
+
+describe('E-commerce: TikTok, Shopee and Lazada kept separate (owner request 2026-09-28)', () => {
+  let wh = ''; let pid = ''; let pid2 = ''; let tiktok = ''; let skuA = ''; let skuB = '';
+  const today = () => new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);
+  const giveStock = async (locationId: string, productId: string, qty: number, cost: number) => {
+    const batch = await prisma.batch.create({ data: { productId, batchNo: `E-${run}`, receivedRef: 'TEST', unitCost: cost.toFixed(2) } });
+    await prisma.stockLedger.create({ data: { locationId, productId, batchId: batch.id, qtyDelta: qty, movementType: 'RECEIVE', documentType: 'OpeningStock', documentId: batch.id, unitCost: cost.toFixed(2), businessDate: new Date(`${today()}T00:00:00Z`) } });
+    await prisma.stockBalance.create({ data: { locationId, productId, batchId: batch.id, qty } });
+  };
+  const onHand = async (locationId: string, productId: string) => (await prisma.stockBalance.aggregate({ where: { locationId, productId }, _sum: { qty: true } }))._sum.qty ?? 0;
+  const upload = (u: string, path: string, csv: string, name: string) => as(u).post(path).attach('file', Buffer.from(csv), name);
+  const approve = async (u: string, type: string, documentId: string) => {
+    const r = await prisma.approvalRequest.findFirst({ where: { type, documentId, status: 'PENDING' } });
+    if (!r) throw new Error(`no pending ${type}`);
+    ok(await as(u).post(`/api/approvals/${r.id}/decide`).send({ decision: 'APPROVE' }));
+  };
+  beforeAll(async () => {
+    wh = (await prisma.location.findUniqueOrThrow({ where: { code: 'WH' } })).id;
+    tiktok = (await prisma.location.findUniqueOrThrow({ where: { code: 'ECOM-TIKTOK' } })).id;
+    const cats = ok(await as('admin').get('/api/categories')).body as { id: string; accountingClass: string }[];
+    const supp = cats.find((c) => c.accountingClass === 'SUPPLEMENT')!.id;
+    const a = ok(await as('admin').post('/api/products').send({ name: `ECOM Whey ${run}`, categoryId: supp, prices: { RETAIL: 1000, FRANCHISE: 700 }, cost: 600 })).body;
+    const b = ok(await as('admin').post('/api/products').send({ name: `ECOM Creatine ${run}`, categoryId: supp, prices: { RETAIL: 500, FRANCHISE: 350 }, cost: 200 })).body;
+    pid = a.id; pid2 = b.id; skuA = a.sku; skuB = b.sku;
+    await giveStock(wh, pid, 10, 600); await giveStock(wh, pid2, 10, 200);
+    ok(await as('admin').put('/api/settings').send({ 'gl.auto_posting_enabled': true }));
+  });
+  afterAll(async () => { await as('admin').put('/api/settings').send({ 'gl.auto_posting_enabled': false }); });
+
+  it('order file → draft pull-out from the Warehouse; unknown SKUs are matched once and remembered; duplicates and cancelled orders skipped; each platform separate', async () => {
+    const file = ['Order ID,Order Status,Seller SKU,Product Name,Quantity,Tracking ID', `T${run}A,To ship,${skuA},Whey,2,TRK${run}A`, `T${run}B,To ship,TT-CREATINE-${run},Creatine,1,TRK${run}B`, `T${run}C,Cancelled,${skuA},Whey,1,`].join('\n');
+    const r1 = ok(await upload('ecomm.assoc', '/api/ecommerce/tiktok/orders/upload', file, 'tiktok-orders.csv')).body;
+    expect(r1.ordersAdded).toBe(1); expect(r1.cancelled).toEqual([`T${run}C`]); expect(r1.unknownSkus[0].platformSku).toBe(`TT-CREATINE-${run}`);
+    ok(await as('ecomm.assoc').post('/api/ecommerce/tiktok/sku-maps').send({ platformSku: `TT-CREATINE-${run}`, productId: pid2 }));
+    const r2 = ok(await upload('ecomm.assoc', '/api/ecommerce/tiktok/orders/upload', file, 'tiktok-orders.csv')).body;
+    expect(r2.ordersAdded).toBe(1); expect(r2.duplicates).toEqual([`T${run}A`]);
+    // Shopee is its own list: removing an order from the draft re-totals the items
+    const s = ok(await upload('ecomm.assoc', '/api/ecommerce/shopee/orders/upload', `Order ID,SKU Reference No.,Quantity,Tracking Number*\nS${run}1,${skuA},1,SPX1\nS${run}2,${skuA},3,SPX2\n`, 'shopee.csv')).body;
+    const sp = ok(await as('ecomm.assoc').get(`/api/ecommerce/pullouts/${s.pullOut.id}`)).body;
+    expect(sp.picking.reduce((t: number, l: { qty: number }) => t + l.qty, 0)).toBe(4);
+    ok(await as('ecomm.assoc').post(`/api/ecommerce/pullouts/${s.pullOut.id}/remove-order/${sp.orders.find((o: { orderId: string }) => o.orderId === `S${run}2`).id}`));
+    expect(ok(await as('ecomm.assoc').get(`/api/ecommerce/pullouts/${s.pullOut.id}`)).body.picking[0].qty).toBe(1);
+    const tt = ok(await as('ecomm.assoc').get('/api/ecommerce/tiktok/pullouts')).body as { id: string }[];
+    expect(tt).toHaveLength(2); expect(tt.map((x) => x.id)).not.toContain(s.pullOut.id);
+    // not enough stock in the Warehouse → the order waits, nothing is pulled out
+    const big = ok(await upload('ecomm.assoc', '/api/ecommerce/lazada/orders/upload', `Order Number,Seller SKU,Quantity\nL${run}1,${skuB},99\n`, 'lazada.csv')).body;
+    expect(big.ordersAdded).toBe(0); expect(big.notEnoughStock).toHaveLength(1);
+    // the E-comm Associate works only in E-commerce and never sees cost
+    await as('ecomm.assoc').get('/api/transfers').expect(403);
+    expect(has(sp, /unitCost/)).toBe(false);
+  });
+
+  it('only the Warehouse In-Charge approves the pull-out; the items move to "TikTok – with courier" and the orders are shipped', async () => {
+    const [first, second] = (ok(await as('ecomm.assoc').get('/api/ecommerce/tiktok/pullouts')).body as { id: string; orders: number }[]).reverse();
+    ok(await as('ecomm.assoc').post(`/api/ecommerce/pullouts/${first.id}/submit`));
+    const req = await prisma.approvalRequest.findFirstOrThrow({ where: { documentId: first.id, status: 'PENDING' } });
+    expect(req.type).toBe('ECOM_PULLOUT'); expect(req.requiredApproverRoles).toEqual(['WAREHOUSE_IN_CHARGE']);
+    await approve('wh.incharge', 'ECOM_PULLOUT', first.id);
+    expect(await onHand(tiktok, pid)).toBe(2); expect(await onHand(wh, pid)).toBe(8);
+    expect((await prisma.transferDoc.findUniqueOrThrow({ where: { id: first.id } })).status).toBe('RECEIVED');
+    ok(await as('ecomm.assoc').post(`/api/ecommerce/pullouts/${second.id}/submit`));
+    await approve('wh.incharge', 'ECOM_PULLOUT', second.id);
+    const tracker = ok(await as('ecomm.assoc').get('/api/ecommerce/tiktok/orders?status=SHIPPED')).body;
+    expect(tracker.orders.map((o: { orderId: string }) => o.orderId).sort()).toEqual([`T${run}A`, `T${run}B`]);
+    expect(await prisma.ecomOrder.count({ where: { platform: 'SHOPEE', status: 'SHIPPED' } })).toBe(0);
+  });
+
+  it('payout file: the sale, each TikTok fee, withholding tax and the payout; Accounting approves before it posts; balanced entries; orders not in GWS-ERP listed apart', async () => {
+    const file = [
+      'Order ID,Subtotal before discounts,Seller discounts,TikTok Shop commission fee,Transaction fee,Seller shipping fee,Withholding tax,Total settlement amount',
+      `T${run}A,2000,-100,-152,-42.56,-40,-10,1655.44`,
+      `OLD${run},400,0,-30,-9,0,-2,359`,
+    ].join('\n');
+    const s = ok(await upload('ecomm.assoc', '/api/ecommerce/tiktok/settlements/upload', file, `tiktok-statement-${run}.csv`)).body;
+    expect(s.orders).toBe(1); expect(s.counts).toMatchObject({ SALE: 1, UNKNOWN: 1 }); expect(Number(s.payout)).toBe(1655.44); expect(Number(s.check.notInBatch)).toBe(359);
+    expect(Number(s.check.computed)).toBe(1655.44); expect(s.costOfSales).toBeUndefined();
+    await upload('ecomm.assoc', '/api/ecommerce/tiktok/settlements/upload', file, `tiktok-statement-${run}.csv`).expect(400); // same file twice
+    ok(await as('ecomm.assoc').post(`/api/ecommerce/settlements/${s.id}/submit`));
+    expect((await prisma.approvalRequest.findFirstOrThrow({ where: { documentId: s.id } })).requiredApproverRoles).toEqual(['ACCOUNTING_HEAD']);
+    await approve('acct.head', 'ECOM_SETTLEMENT', s.id);
+    const order = await prisma.ecomOrder.findFirstOrThrow({ where: { platform: 'TIKTOK', orderId: `T${run}A` } });
+    expect(order.status).toBe('SETTLED');
+    const sale = await prisma.salesDoc.findUniqueOrThrow({ where: { id: order.salesDocId! }, include: { lines: true } });
+    expect(sale.locationId).toBe(tiktok); expect(sale.channelSub).toBe('TIKTOK'); expect(Number(sale.grandTotal)).toBe(1900);
+    expect(sale.lines.reduce((t, l) => t + Number(l.amount), 0)).toBeCloseTo(1900, 2);
+    expect(await onHand(tiktok, pid)).toBe(0);
+    const vouchers = await prisma.journalVoucher.findMany({ where: { sourceDocumentId: s.id }, include: { lines: { include: { account: true } } } });
+    expect(vouchers.length).toBe(2);
+    for (const v of vouchers) expect(v.lines.reduce((t, l) => t + Number(l.debit) - Number(l.credit), 0)).toBeCloseTo(0, 2);
+    const all = vouchers.flatMap((v) => v.lines);
+    expect(Number(all.find((l) => l.account.code === '1091')!.debit)).toBe(1655.44);
+    expect(Number(all.find((l) => l.account.title === 'Sales - E-commerce TikTok')!.credit)).toBe(2000);
+    expect(Number(all.find((l) => l.account.title === 'Commission Fee - TikTok')!.debit)).toBe(152);
+    expect(Number(all.find((l) => l.account.title === 'Creditable Withholding Tax (E-commerce)')!.debit)).toBe(10);
+    expect(Number(all.find((l) => /^Direct Cost . Supplements/.test(l.account.title))!.debit)).toBe(1200);
+  });
+
+  it('returns: the associate logs the parcel, the In-Charge marks good / damaged; good back to stock, damaged → write-off for the Head Auditor; paid orders reverse the cost', async () => {
+    // failed delivery of an order not yet paid
+    const r = ok(await as('ecomm.assoc').post('/api/ecommerce/tiktok/returns').send({ ref: `TRK${run}B` })).body;
+    const waiting = ok(await as('wh.incharge').get('/api/ecommerce/returns?status=PENDING')).body as { id: string }[];
+    expect(waiting.map((x) => x.id)).toContain(r.id);
+    await as('ecomm.assoc').post(`/api/ecommerce/returns/${r.id}/receive`).send({ lines: [] }).expect(403);
+    const whBefore = await onHand(wh, pid2);
+    const got = ok(await as('wh.incharge').post(`/api/ecommerce/returns/${r.id}/receive`).send({ lines: [{ productId: pid2, goodQty: 0, damagedQty: 1 }] })).body;
+    expect(await onHand(wh, pid2)).toBe(whBefore + 1);
+    expect(got.writeoffId).toBeTruthy();
+    expect((await prisma.approvalRequest.findFirstOrThrow({ where: { documentId: got.writeoffId } })).type).toBe('WRITEOFF');
+    expect((await prisma.ecomOrder.findFirstOrThrow({ where: { orderId: `T${run}B` } })).status).toBe('RETURNED');
+    // buyer return of a paid order: back to the Warehouse as a sales return, cost back to inventory
+    const r2 = ok(await as('ecomm.assoc').post('/api/ecommerce/tiktok/returns').send({ ref: `T${run}A`, reason: 'BUYER_RETURN' })).body;
+    const before = await onHand(wh, pid);
+    ok(await as('wh.incharge').post(`/api/ecommerce/returns/${r2.id}/receive`).send({ lines: [{ productId: pid, goodQty: 2, damagedQty: 0 }] }));
+    expect(await onHand(wh, pid)).toBe(before + 2);
+    const v = await prisma.journalVoucher.findFirstOrThrow({ where: { sourceDocumentId: r2.id }, include: { lines: true } });
+    expect(v.lines.reduce((t, l) => t + Number(l.debit), 0)).toBe(1200);
+  });
+
+  it('ads per platform and month are an expense; the report compares TikTok, Shopee and Lazada; cost only for cost roles', async () => {
+    const month = today().slice(0, 7);
+    ok(await as('ecomm.assoc').post('/api/ecommerce/tiktok/ads').send({ month, amount: 500 }));
+    const up = ok(await upload('ecomm.assoc', '/api/ecommerce/tiktok/ads/upload', `Date,Campaign,Cost\n${today()},Sept sale,250\n`, `ads-${run}.csv`)).body;
+    expect(up.months).toEqual([{ month, amount: 250 }]);
+    const rep = ok(await as('admin').get(`/api/ecommerce/report?from=${month}-01&to=${today()}`)).body;
+    const t = rep.columns.find((c: { platform: string }) => c.platform === 'TIKTOK');
+    expect(t).toMatchObject({ grossSales: 2000, sellerDiscounts: 100, netSales: 1900, totalFees: 234.56, withholdingTax: 10, payout: 1655.44, ads: 750, costOfSales: 1200 });
+    expect(t.contribution).toBeCloseTo(1900 - 234.56 - 750 - 1200, 2);
+    expect(rep.columns.map((c: { name: string }) => c.name)).toEqual(['TikTok Shop', 'Shopee', 'Lazada', 'All platforms']);
+    const mine = ok(await as('ecomm.assoc').get(`/api/ecommerce/report?from=${month}-01&to=${today()}`)).body;
+    expect(mine.columns[0].costOfSales).toBeUndefined(); expect(mine.columns[0].contribution).toBeUndefined();
+    await as('sales.westave').get('/api/ecommerce/report').expect(403);
+    // each platform is its own line in the company sales performance graphs
+    const perf = ok(await as('admin').get('/api/reports/sales-performance')).body;
+    expect(perf.branches.map((b: { name: string }) => b.name)).toContain('E-commerce – TikTok');
   });
 });

@@ -35,6 +35,8 @@ export const APPROVAL_TYPES = [
   'CONSIGNMENT_CHECK_WH',
   'CONSIGNMENT_CHECK_BRANCH',
   'COST_EDIT',
+  'ECOM_PULLOUT',
+  'ECOM_SETTLEMENT',
 ] as const;
 export type ApprovalType = (typeof APPROVAL_TYPES)[number];
 
@@ -79,6 +81,8 @@ const BASE_KEYS = [
   'cashdeposit.view.all', 'cashdeposit.settings', 'hr.notice',
   // consignment requests by associates (manager first, the Owner last)
   'consignment.request',
+  // e-commerce (TikTok, Shopee, Lazada): upload orders / payouts / ads (E-comm Associate), see the reports, receive returned parcels (Warehouse)
+  'ecom.manage', 'ecom.view', 'ecom.receive',
 ] as const;
 
 export const PERMISSION_KEYS: readonly string[] = [
@@ -91,6 +95,7 @@ export const ROLE_KEYS = [
   'ADMIN', 'EXTERNAL_AUDITOR', 'HEAD_AUDITOR', 'ASST_AUDITOR', 'AUDIT_ASSOCIATE',
   'WAREHOUSE_IN_CHARGE', 'WAREHOUSE_ASSOCIATE', 'SALES_ASSOCIATE', 'FRANCHISE_SALES_ASSOCIATE',
   'FRANCHISE_OWNER', 'CUSTOM', 'ACCOUNTING_HEAD', 'ACCOUNTING_ASSOCIATE', 'HR_STAFF', 'FIELD_AUDITOR', 'EXECUTIVE_ASSISTANT',
+  'ECOMM_ASSOCIATE',
 ] as const;
 export type RoleKey = (typeof ROLE_KEYS)[number];
 
@@ -137,7 +142,7 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
     description: 'Read-only everything incl. balance sheet, payroll, supplier names. No edits, no approvals.',
     permissions: [
       ...READ_ALL, ...COST_BUNDLE, 'gl.view', 'fs.income_statement', 'fs.balance_sheet',
-      'payroll.view.summary', 'payroll.view.detail', 'audit_log.view', 'cashfund.view.all', 'inspection.view', 'revision.view',
+      'payroll.view.summary', 'payroll.view.detail', 'audit_log.view', 'cashfund.view.all', 'inspection.view', 'revision.view', 'ecom.view',
     ],
   },
   {
@@ -151,7 +156,7 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
       'count.create', 'discrepancy.resolve', 'writeoff.create', 'writeoff.approve', 'consignment.manage', 'gl.view', 'audit_log.view',
       'cashfund.view.all', 'cashfund.check', 'inspection.view', 'inspection.create', 'charge.assign',
       ...approvals('COST_ON_RECEIVING', 'TRANSFER_INTERNAL', 'POST_CLOSE_EDIT', 'WRITEOFF', 'DISCREPANCY_RESOLUTION', 'EDIT_REQUEST', 'COUNT_REVISION', 'DISCREPANCY_EXPLANATION', 'AUDIT_REVISION', 'CASH_DEPOSIT_EXTENSION', 'CONSIGNMENT_CHECK_BRANCH', 'COST_EDIT'),
-      'revision.view', 'sale.incentive', 'cashdeposit.view.all', 'cashdeposit.settings',
+      'revision.view', 'sale.incentive', 'cashdeposit.view.all', 'cashdeposit.settings', 'ecom.view',
     ],
   },
   {
@@ -176,7 +181,7 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
     name: 'Warehouse In-Charge',
     description: 'Inputs warehouse receiving, transfers (to any branch or franchise), counts and write-offs; costs are entered and approved by the Head Auditor. Approves every warehouse associate\'s goods in and out before stock moves (own entries need no second approval). Can edit an associate\'s entry, which takes effect only after that associate accepts it. No cost.',
     permissions: [
-      'product.view', 'supplier.view.code', 'location.view.own', 'receiving.create', 'transfer.create', 'transfer.confirm', 'warehouse.edit_others', 'approval.act.CONSIGNMENT_CHECK_WH', 'consignment.request', 'approval.act.WAREHOUSE_EDIT', 'approval.act.WAREHOUSE_IN', 'approval.act.WAREHOUSE_OUT',
+      'product.view', 'supplier.view.code', 'location.view.own', 'receiving.create', 'transfer.create', 'transfer.confirm', 'warehouse.edit_others', 'approval.act.CONSIGNMENT_CHECK_WH', 'consignment.request', 'approval.act.WAREHOUSE_EDIT', 'approval.act.WAREHOUSE_IN', 'approval.act.WAREHOUSE_OUT', 'approval.act.ECOM_PULLOUT', 'ecom.receive',
       'count.create', 'writeoff.create', 'report.inventory.own', 'dashboard.view', 'notification.view', 'price.view.RETAIL', 'cashfund.use', 'discrepancy.explain',
     ],
   },
@@ -226,14 +231,14 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
     permissions: [
       ...READ_ALL, ...COST_BUNDLE, ...ACCOUNTING_BASE, 'gl.period.lock', 'gl.beginning_balance',
       'payroll.view.summary', 'payroll.view.detail', 'payroll.close', 'expense.view', 'cashfund.view.all', 'cashfund.manage', 'contribution.remit',
-      'ar.collect', 'ar.approve', ...approvals('AR_PAYMENT'), 'gl.voucher.edit', 'bank.entry', 'bs.accounts.view',
+      'ar.collect', 'ar.approve', ...approvals('AR_PAYMENT', 'ECOM_SETTLEMENT'), 'gl.voucher.edit', 'bank.entry', 'bs.accounts.view', 'ecom.view',
     ],
   },
   {
     key: 'ACCOUNTING_ASSOCIATE',
     name: 'Accounting Associate',
     description: 'Ledger, vouchers, main expenses. Payroll totals only.',
-    permissions: [...READ_ALL, ...COST_BUNDLE, ...ACCOUNTING_BASE, 'payroll.view.summary', 'cashfund.view.all', 'ar.collect', 'ar.approve', ...approvals('AR_PAYMENT'), 'gl.voucher.edit', 'bank.entry', 'bs.accounts.view'],
+    permissions: [...READ_ALL, ...COST_BUNDLE, ...ACCOUNTING_BASE, 'payroll.view.summary', 'cashfund.view.all', 'ar.collect', 'ar.approve', ...approvals('AR_PAYMENT'), 'gl.voucher.edit', 'bank.entry', 'bs.accounts.view', 'ecom.view'],
   },
   {
     key: 'HR_STAFF',
@@ -252,6 +257,12 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
     name: 'Executive Assistant',
     description: 'Main office: records receipts and payments on the main bank accounts (chooses the bank account and the book: advances to, advances from, supplier payables, office expenses…), sees supplier payables and main office expenses, and the balance of each balance-sheet account. No branch reports, no supplier cost, no income statement.',
     permissions: ['dashboard.view', 'notification.view', 'bank.entry', 'bs.accounts.view', 'supplier.view.code', 'supplier.view.name'],
+  },
+  {
+    key: 'ECOMM_ASSOCIATE',
+    name: 'E-comm Associate',
+    description: 'E-commerce arm (TikTok, Shopee, Lazada, each kept separate): uploads the platform order / waybill files, which draft the warehouse pull-out automatically (the Warehouse In-Charge approves); records returned parcels; uploads payout (settlement) files for Accounting and the monthly ads. Sees selling prices, fees and the e-commerce report; never cost. No separate e-commerce stock: items come from the Warehouse.',
+    permissions: ['ecom.manage', 'ecom.view', 'product.view', 'price.view.RETAIL', 'dashboard.view', 'notification.view'],
   },
 ];
 
@@ -309,6 +320,10 @@ export const APPROVAL_ROUTING: Record<ApprovalType, { roles: RoleKey[]; anyOf?: 
   CONSIGNMENT_CHECK_BRANCH: { roles: ['HEAD_AUDITOR', 'ASST_AUDITOR'], anyOf: true },
   /** Cost typed directly on a product: the Head Auditor and the Owner, except the one who typed it. */
   COST_EDIT: { roles: ['HEAD_AUDITOR', 'ADMIN'] },
+  /** E-commerce pull-out drafted from the uploaded orders: the Warehouse In-Charge is the only approver. */
+  ECOM_PULLOUT: { roles: ['WAREHOUSE_IN_CHARGE'] },
+  /** E-commerce payout (settlement) file: the Accounting Head checks the fees and payout before the sale and fees are posted. */
+  ECOM_SETTLEMENT: { roles: ['ACCOUNTING_HEAD'] },
 };
 
 /** EDIT_REQUEST approvers depend on who asks (§6.1). */

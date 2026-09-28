@@ -20,6 +20,7 @@ import { TransferDetailPage, TransfersPage } from './pages/Transfers';
 import { CountDetailPage, CountsPage, DiscrepanciesPage, DiscrepancyDetailPage } from './pages/Counts';
 import { WriteoffsPage } from './pages/Writeoffs';
 import { ConsignmentPage, ConsigneesPage } from './pages/Consignment';
+import { EcommercePage } from './pages/Ecommerce';
 import { ProductDetailPage, ProductsPage, PriceChangesPage, SuppliersPage } from './pages/Products';
 import { ImportsPage } from './pages/Imports';
 import { DailySalesReportPage, InventoryReportsPage } from './pages/Reports';
@@ -78,6 +79,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
               <Route path="/writeoffs" element={<WriteoffsPage />} />
               <Route path="/consignment" element={<ConsignmentPage />} />
               <Route path="/consignees" element={<ConsigneesPage />} />
+              <Route path="/ecommerce" element={<EcommercePage />} />
               <Route path="/products" element={<ProductsPage />} />
               <Route path="/products/:id" element={<ProductDetailPage />} />
               <Route path="/price-changes" element={<PriceChangesPage />} />

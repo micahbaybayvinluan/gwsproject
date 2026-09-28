@@ -1,6 +1,6 @@
 # E-commerce arm (TikTok Shop first, then Shopee / Lazada): recommended process, entries, reports and guide
 
-**Status:** proposal for the Owner's approval. Nothing below is built yet. Once you approve it (and answer the questions in section 9), it can be added to GWS-ERP in the order shown in section 8.
+**Status:** built (2026-09-28), with **TikTok, Shopee and Lazada kept separate**: each platform has its own tab, holding place, SKU matches, orders, payouts, accounts and report column. The how-to is in the E-comm Associate guide (Help → My guide) and in `docs/ROLE-GUIDES.md`. The file readers accept each platform's usual export and the GWS templates; once real export files are sent (section 9, question 2), any column the platform names differently can be added. Overdue is set to 30 days (Settings: `ecom.overdue_days`).
 
 ## 1. The idea in one paragraph
 

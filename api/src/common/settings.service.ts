@@ -18,6 +18,9 @@ export const SETTING_DEFAULTS: Record<string, unknown> = {
   'fiscal.year_start': '2026-01-01',
   'discrepancy.window_days': 7,
   // customer re-order follow-ups (owner request 2026-09-27): messages the Owner can edit; {customer} {product} {store} {storePhone} are filled in
+  // e-commerce: shipped orders neither paid nor returned after this many days are overdue; the warehouse the pull-outs come from
+  'ecom.overdue_days': 30,
+  'ecom.warehouse_code': 'WH',
   'followup.auto_sms': false,
   'followup.auto_email': false,
   'followup.sms_template': 'Hi {customer}! This is {store}. Your {product} may be running out soon. Call or text us at {storePhone} to reserve your next one. Thank you!',

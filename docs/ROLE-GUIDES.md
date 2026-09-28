@@ -164,6 +164,15 @@ You are responsible for the warehouse stock. You check your associates' entries,
 - Write off expired or damaged stock; the Head Auditor approves.
 - Explain discrepancies within 7 days.
 
+**E-commerce (TikTok, Shopee, Lazada)**
+- **E-commerce pull-outs** come to you in Approvals. They were drafted automatically from the platform's order file.
+  1. Open the pull-out and print the picking list (oldest expiry first) with the orders and tracking numbers.
+  2. Pick and pack, count the items against the list, then **Approve**. You are the only approver.
+  3. The items leave the Warehouse and wait in "TikTok / Shopee / Lazada – with courier" until the platform pays.
+- **Returned parcels** (menu: E-commerce → Returned parcels to receive):
+  1. Open each parcel and type how many items are **good** and how many are **damaged or expired**.
+  2. Press **Receive**. Good items go back to Warehouse stock. Damaged items come in and a write-off goes to the Head Auditor.
+
 **Reports:** Stock on Hand, Inventory Reports & Movement (quantities only).
 
 ## Head Auditor
@@ -297,6 +306,12 @@ You keep the books.
 5. **Payroll:** close HR's finalized runs by choosing the paying bank account.
 6. **Main Bank & Office Entries:** record main bank transactions, with the bank or **Gcash (GWS)** account and the book they belong to.
 7. You are notified of supplier cost changes.
+8. **E-commerce payouts** (TikTok, Shopee, Lazada) come to you in Approvals.
+   1. Check that gross sales − seller discounts − fees − refunds − withholding tax = the payout. **Open full document** shows the order list and any orders left out.
+   2. Compare the payout with the platform wallet or the bank, then **Approve**.
+   3. The sale, each fee, the creditable withholding tax and the payout (to the platform's cash account) are posted, together with the cost of goods sold.
+   - When the money is withdrawn to the bank, record the transfer in Main Bank & Office Entries.
+   - E-commerce → **All platforms: profit report** compares TikTok, Shopee and Lazada.
 
 ## Accounting Associate
 <!-- role: ACCOUNTING_ASSOCIATE -->
@@ -376,6 +391,51 @@ You see and can do everything. You are the final approver.
    - **Monthly Sales Performance:** every branch's month-to-date running total in its own colour, the company total, and each month of the year.
    - **Sales Report:** any branch or all, any period, with gross profit.
    - Financial Statements, all branch reports with margin, and the Audit Log.
+10. **E-commerce** (menu: E-commerce):
+    - **All platforms: profit report** shows TikTok, Shopee and Lazada side by side: net sales, each fee, ads, cost of goods and the profit before overhead.
+    - Overdue orders (shipped but neither paid nor returned) reach you every Friday.
+    - The E-comm Associate's account is created in Users & Roles with the role **E-comm Associate** (no branch).
+
+## E-comm Associate
+<!-- role: ECOMM_ASSOCIATE -->
+You run the online shops: **TikTok Shop, Shopee and Lazada**, each on its own tab. E-commerce has no stock of its own: every item comes from the Warehouse, and the Warehouse In-Charge approves each pull-out. You see selling prices and platform fees, never cost.
+
+**Every morning: orders to ship → pull-out** (menu: E-commerce → choose the platform → 1. Orders → pull-out)
+1. In the platform's seller centre, open the orders **to ship** and **Export** them (Excel or CSV). A waybill list export works too.
+2. Press **Choose file and upload**.
+   - Every new order goes on one **draft pull-out** from the Warehouse. Items are totalled by SKU and the oldest expiry is picked first.
+   - Orders already uploaded and cancelled orders are skipped, so an order is never pulled out twice.
+3. **New SKUs:** when the platform's Seller SKU is not the GWS SKU, pick the matching GWS product once. The match is remembered (tab **SKU matches**). Then press **Upload the same file again**.
+4. **Not enough stock** in the Warehouse: those orders are listed and not added. Upload the file again when stock arrives.
+5. Open the draft:
+   - Remove an order that was cancelled (the items are re-totalled).
+   - **Print picking list**: items, batches, expiry, and the orders with their tracking numbers.
+   - Press **Submit to the Warehouse In-Charge**.
+6. When the In-Charge approves, you are notified. Hand the parcels to the courier with their waybills. The orders are now **Shipped, not yet paid**.
+
+**Each payout (usually weekly):** (tab: 2. Payouts)
+1. In the seller centre, open **Finance** (TikTok: Statements; Shopee: Income; Lazada: Transaction overview) and export the payout.
+2. Upload it. GWS-ERP reads the sale, each fee (commission, transaction or payment fee, shipping, affiliate commission, other fees), refunds, the withholding tax and the payout of every order.
+3. Check the summary:
+   - The payout must equal the money the platform released (**✓ Net sales − fees − refunds − tax = payout**).
+   - Orders not in GWS-ERP (for example shipped before you started using it), not shipped yet, or already paid are listed apart and left out. Tick **Also book orders not in GWS-ERP** before uploading if you want their money booked (no stock moves).
+4. Press **Send to Accounting**. The Accounting Head approves, and then the sale and the fees are posted.
+- If your file does not read well, download the **GWS payout template**, copy the amounts into it and upload that.
+
+**When a parcel comes back** (tab: 3. Returns)
+1. Scan or type the **order ID or tracking number** and choose the reason (failed delivery or buyer return), then **Record the return**.
+2. Give the parcel to the Warehouse In-Charge. The In-Charge marks each item good (back to stock) or damaged (write-off).
+
+**Every month: ads** (tab: 4. Ads)
+- Download the ads billing / invoice from the platform's ads centre and upload it. Amounts are added up per month.
+- Or type the month and amount.
+- Choose how the ads were paid: from the platform balance (deducted from sales) or by a bank or card account.
+
+**Every Friday: Order tracker**
+- Filter **Overdue**: orders shipped more than 30 days ago and neither paid nor returned. Follow each one up with the platform, or file a lost-parcel claim. You are reminded every Friday.
+
+**Report** (tab: All platforms: profit report)
+- Choose the dates. It shows TikTok, Shopee and Lazada side by side: net sales, each fee, ads, what is left after fees and ads, fees as % of sales, return on ad spend, returns and payouts.
 
 ## Other users (custom permissions)
 <!-- role: CUSTOM -->

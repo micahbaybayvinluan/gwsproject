@@ -495,6 +495,8 @@ enum TransferType {
   CONSIGNMENT_OUT
   CONSIGNMENT_RETURN
   INTERNAL
+  /// E-commerce pull-out: warehouse → the platform's "with courier" holding place (TikTok / Shopee / Lazada); the In-Charge approves
+  ECOMMERCE
 }
 
 enum TransferStatus {
@@ -1923,4 +1925,134 @@ model CustomerMessage {
 
   @@index([followUpId])
   @@map("customer_messages")
+}
+
+// ───────────────────────────── E-commerce (TikTok, Shopee, Lazada — kept separate) ─────────────────────────────
+
+/// Platform SKU → GWS product, remembered after the E-comm Associate matches it once.
+model EcomSkuMap {
+  id          String   @id @default(uuid())
+  platform    String // TIKTOK | SHOPEE | LAZADA
+  platformSku String   @map("platform_sku")
+  productId   String   @map("product_id")
+  createdBy   String?  @map("created_by")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@unique([platform, platformSku])
+  @@map("ecom_sku_maps")
+}
+
+/// One platform order from the uploaded order / waybill file. Drives the pull-out, then the sale when the platform pays.
+model EcomOrder {
+  id           String    @id @default(uuid())
+  platform     String
+  orderId      String    @map("order_id")
+  trackingNo   String?   @map("tracking_no")
+  /// PENDING (on a draft pull-out) → SHIPPED (pull-out approved) → SETTLED (paid) | RETURNED | CANCELLED | REJECTED
+  status       String    @default("PENDING")
+  pullOutId    String?   @map("pull_out_id")
+  settlementId String?   @map("settlement_id")
+  salesDocId   String?   @map("sales_doc_id")
+  sourceFile   String?   @map("source_file")
+  shippedAt    DateTime? @map("shipped_at")
+  settledAt    DateTime? @map("settled_at")
+  returnedAt   DateTime? @map("returned_at")
+  createdBy    String?   @map("created_by")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  lines EcomOrderLine[]
+
+  @@unique([platform, orderId])
+  @@index([platform, status])
+  @@index([pullOutId])
+  @@map("ecom_orders")
+}
+
+model EcomOrderLine {
+  id          String  @id @default(uuid())
+  orderId     String  @map("order_id")
+  productId   String  @map("product_id")
+  platformSku String  @map("platform_sku")
+  productName String? @map("product_name")
+  qty         Int
+
+  order EcomOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@map("ecom_order_lines")
+}
+
+/// One uploaded settlement (payout) file: the sale, each platform fee, refunds, withholding tax and the payout. Accounting approves before it posts.
+model EcomSettlement {
+  id                String    @id @default(uuid())
+  controlNo         String    @unique @map("control_no")
+  platform          String
+  docDate           DateTime  @map("doc_date") @db.Date
+  /// DRAFT → SUBMITTED → POSTED | REJECTED
+  status            String    @default("DRAFT")
+  sourceFile        String?   @map("source_file")
+  orders            Int       @default(0)
+  grossSales        Decimal   @default(0) @map("gross_sales") @db.Decimal(14, 2)
+  sellerDiscounts   Decimal   @default(0) @map("seller_discounts") @db.Decimal(14, 2)
+  commission        Decimal   @default(0) @db.Decimal(14, 2)
+  transactionFee    Decimal   @default(0) @map("transaction_fee") @db.Decimal(14, 2)
+  shippingFee       Decimal   @default(0) @map("shipping_fee") @db.Decimal(14, 2)
+  affiliateFee      Decimal   @default(0) @map("affiliate_fee") @db.Decimal(14, 2)
+  otherFees         Decimal   @default(0) @map("other_fees") @db.Decimal(14, 2)
+  refunds           Decimal   @default(0) @db.Decimal(14, 2)
+  withholdingTax    Decimal   @default(0) @map("withholding_tax") @db.Decimal(14, 2)
+  adjustments       Decimal   @default(0) @db.Decimal(14, 2)
+  payout            Decimal   @default(0) @db.Decimal(14, 2)
+  /// payout total of the whole file (including orders not in GWS-ERP) for the reconciliation
+  filePayout        Decimal   @default(0) @map("file_payout") @db.Decimal(14, 2)
+  costOfSales       Decimal   @default(0) @map("cost_of_sales") @db.Decimal(14, 2)
+  includeUnmatched  Boolean   @default(false) @map("include_unmatched")
+  details           Json // per order: amounts, match status
+  approvalRequestId String?   @map("approval_request_id")
+  postedAt          DateTime? @map("posted_at")
+  createdBy         String?   @map("created_by")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  @@index([platform, docDate])
+  @@map("ecom_settlements")
+}
+
+/// A parcel that came back (failed delivery / return to seller, or a buyer return). The In-Charge receives it and marks each item good or damaged.
+model EcomReturn {
+  id          String    @id @default(uuid())
+  controlNo   String    @unique @map("control_no")
+  platform    String
+  ecomOrderId String    @map("ecom_order_id")
+  reason      String? // FAILED_DELIVERY | BUYER_RETURN | OTHER
+  notes       String?
+  /// PENDING (waiting for the warehouse) → RECEIVED
+  status      String    @default("PENDING")
+  lines       Json // [{ productId, qty, goodQty?, damagedQty? }]
+  writeoffId  String?   @map("writeoff_id")
+  receivedBy  String?   @map("received_by")
+  receivedAt  DateTime? @map("received_at")
+  createdBy   String?   @map("created_by")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  @@index([platform, status])
+  @@map("ecom_returns")
+}
+
+/// Advertising spend per platform and month (TikTok Ads / Shopee Ads / Lazada Sponsored Solutions): an expense.
+model EcomAdSpend {
+  id                String   @id @default(uuid())
+  platform          String
+  month             String // YYYY-MM
+  amount            Decimal  @db.Decimal(14, 2)
+  /// null = deducted from the platform balance (e.g. TikTok GMV Pay); otherwise the bank / card account that paid
+  paidFromAccountId String?  @map("paid_from_account_id")
+  reference         String?
+  notes             String?
+  sourceFile        String?  @map("source_file")
+  createdBy         String?  @map("created_by")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  @@index([platform, month])
+  @@map("ecom_ad_spend")
 }

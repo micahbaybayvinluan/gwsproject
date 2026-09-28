@@ -66,7 +66,7 @@ It checks the settings file, Docker (database and Redis), the app server and the
 
 - `docs/USER-GUIDE.md`: the guide for everyone (Help page, "Guide for everyone" / "More topics").
 - `docs/ROLE-GUIDES.md`: one step-by-step guide per role (Help page, "My guide").
-- `docs/ECOMMERCE-PROPOSAL.md`: recommended e-commerce (TikTok / Shopee / Lazada) process, entries, reports and guide, for approval before building.
+- `docs/ECOMMERCE-PROPOSAL.md`: the e-commerce (TikTok / Shopee / Lazada) process, entries and reports, now built (menu: E-commerce).
 
 ## Help & Guide and the AI assistant
 
@@ -109,6 +109,7 @@ All seeded users share the password `ChangeMe!2026` (override with `SEED_PASSWOR
 | `hr.staff` | HR_STAFF | payroll only | |
 | `field.auditor` | FIELD_AUDITOR | All branches, franchises and warehouse (inventory only, no cost) | |
 | `exec.assistant` | EXECUTIVE_ASSISTANT | Main-office bank entries, supplier payables, office expenses, balance-sheet accounts (no cost, no reports) | |
+| `ecomm.assoc` | ECOMM_ASSOCIATE | E-commerce (TikTok, Shopee, Lazada separate): order uploads → Warehouse pull-outs, payouts, returns, ads, e-commerce report (no cost) | |
 
 ## Tests
 

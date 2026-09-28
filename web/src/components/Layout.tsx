@@ -14,7 +14,7 @@ interface NavItem { to: string; label: string; any?: string[]; hideFor?: string[
 const NAV: { group: string; items: NavItem[] }[] = [
   { group: 'Work', items: [
     { to: '/', label: 'Dashboard' },
-    { to: '/approvals', label: 'Approvals', any: ['approval.act.COST_ON_RECEIVING', 'approval.act.TRANSFER_INTERNAL', 'approval.act.SPECIAL_PRICE', 'approval.act.POST_CLOSE_EDIT', 'approval.act.POST_CLOSE_EDIT_FRANCHISE', 'approval.act.WRITEOFF', 'approval.act.PRICE_CHANGE', 'approval.act.DISCREPANCY_RESOLUTION', 'approval.act.PERIOD_LOCK', 'approval.act.WAREHOUSE_EDIT', 'approval.act.AUDIT_REVISION', 'approval.act.MASTER_DATA_NEW', 'approval.act.WAREHOUSE_IN', 'approval.act.WAREHOUSE_OUT', 'approval.act.TRANSFER_TO_FRANCHISE', 'approval.act.EDIT_REQUEST', 'approval.act.CONSIGNMENT_OUT', 'approval.act.AR_PAYMENT', 'approval.act.COUNT_REVISION', 'approval.act.DISCREPANCY_EXPLANATION', 'approval.act.WRITEOFF'] },
+    { to: '/approvals', label: 'Approvals', any: ['approval.act.COST_ON_RECEIVING', 'approval.act.TRANSFER_INTERNAL', 'approval.act.SPECIAL_PRICE', 'approval.act.POST_CLOSE_EDIT', 'approval.act.POST_CLOSE_EDIT_FRANCHISE', 'approval.act.WRITEOFF', 'approval.act.PRICE_CHANGE', 'approval.act.DISCREPANCY_RESOLUTION', 'approval.act.PERIOD_LOCK', 'approval.act.WAREHOUSE_EDIT', 'approval.act.AUDIT_REVISION', 'approval.act.MASTER_DATA_NEW', 'approval.act.WAREHOUSE_IN', 'approval.act.WAREHOUSE_OUT', 'approval.act.TRANSFER_TO_FRANCHISE', 'approval.act.EDIT_REQUEST', 'approval.act.CONSIGNMENT_OUT', 'approval.act.AR_PAYMENT', 'approval.act.COUNT_REVISION', 'approval.act.DISCREPANCY_EXPLANATION', 'approval.act.WRITEOFF', 'approval.act.ECOM_PULLOUT', 'approval.act.ECOM_SETTLEMENT'] },
     { to: '/sales/new', label: 'New Sale', any: ['sale.create'] },
     { to: '/sales', label: 'Sales', any: ['sale.create', 'report.sales.own', 'report.sales.all'] },
     { to: '/ar', label: 'AR / Credit', any: ['ar.view'] },
@@ -25,6 +25,9 @@ const NAV: { group: string; items: NavItem[] }[] = [
     { to: '/inspections', label: 'Store Inspections', any: ['inspection.create', 'inspection.view', 'inspection.review'] },
     { to: '/bank', label: 'Bank & Office', any: ['bank.entry'] },
     { to: '/my-hr', label: 'My Pay & Charges', hideFor: ['ADMIN', 'FRANCHISE_OWNER'] },
+  ] },
+  { group: 'E-commerce', items: [
+    { to: '/ecommerce', label: 'E-commerce', any: ['ecom.manage', 'ecom.view', 'ecom.receive'] },
   ] },
   { group: 'Inventory', items: [
     { to: '/stock', label: 'Stock on Hand', any: ['report.inventory.own', 'report.inventory.all'] },

@@ -18,6 +18,7 @@ export const PAGES: Record<string, PageInfo> = {
   '/inspections': { label: 'Store Inspection Reports', summary: 'Field Auditor checklists of each store visit (permits, cash, stock, cleanliness), sent to HR for review.' },
   '/bank': { label: 'Main Bank & Office Entries', summary: 'Main office bank transactions and their accounting book, supplier payables, office expenses and balance-sheet account balances.' },
   '/my-hr': { label: 'My Pay & Charges', summary: 'Your own payslips, charges and advances only. Acknowledge new charges here.' },
+  '/ecommerce': { label: 'E-commerce (TikTok · Shopee · Lazada)', summary: 'Each platform on its own tab. Upload the order / waybill file → a Warehouse pull-out is drafted for the In-Charge to approve; upload the payout file → sale, fees and payout go to Accounting; returned parcels, ads and the profit report per platform.' },
   '/stock': { label: 'Stock on Hand (Current Inventory)', summary: 'What is in stock right now per location, batch and expiry date.' },
   '/receiving': { label: 'Supplier Deliveries (Receiving)', summary: "Record goods delivered by suppliers (quantity, freebies, expiry, batch). The Head Auditor approves the cost; goods entered by a Warehouse Associate also need the In-Charge's approval before stock is added." },
   '/transfers': { label: 'Stock Transfers & Pull-outs', summary: 'Move stock between the warehouse, branches and franchises: prepare the pull-out, get it approved, and the receiver confirms what arrived.' },

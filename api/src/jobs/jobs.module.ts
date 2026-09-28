@@ -17,6 +17,8 @@ import { CountsModule } from '../counts/counts.module';
 import { SalesModule } from '../sales/sales.module';
 import { PricingModule } from '../pricing/pricing.module';
 import { PayrollModule } from '../payroll/payroll.module';
+import { EcommerceModule } from '../ecommerce/ecommerce.module';
+import { EcommerceService } from '../ecommerce/ecommerce.service';
 import { requestContext } from '../common/request-context';
 
 export const JOBS = {
@@ -32,6 +34,7 @@ export const JOBS = {
   SALES_REPORT_CUTOFF: { name: 'sales-report-cutoff', cron: '0 13 * * *' }, // 9:00 PM Manila: not submitted → submitted as it stands
   CUSTOMER_FOLLOW_UPS: { name: 'customer-follow-ups', cron: '0 1 * * *' }, // 9:00 AM Manila: customers who may have finished their supplements
   CASH_DEPOSIT_REMINDERS: { name: 'cash-deposit-reminders', cron: '0 2 * * *' }, // 10:00 Manila: cash on hand due / overdue
+  ECOM_OVERDUE: { name: 'ecom-overdue', cron: '0 1 * * 5' }, // Friday 9:00 AM Manila: e-commerce orders shipped long ago, not paid nor returned
   MONTH_END_DEPRECIATION: { name: 'month-end-depreciation', cron: '0 17 1 * *' }, // 1st 01:00 Manila for previous month
 } as const;
 
@@ -40,7 +43,7 @@ export const JOBS = {
 export class JobsService implements OnModuleInit {
   private log = new Logger('Jobs');
   private queue!: Queue; private worker!: Worker;
-  constructor(private followUps: CustomerFollowUpsService, private reportSubmission: ReportSubmissionService, private cashOnHand: CashOnHandService, private closing: ClosingService, private alerts: AlertsService, private approvals: ApprovalsService, private counts: CountsService, private sales: SalesService, private notifications: NotificationsService, private prices: PriceChangeService, private payroll: PayrollService) {}
+  constructor(private ecom: EcommerceService, private followUps: CustomerFollowUpsService, private reportSubmission: ReportSubmissionService, private cashOnHand: CashOnHandService, private closing: ClosingService, private alerts: AlertsService, private approvals: ApprovalsService, private counts: CountsService, private sales: SalesService, private notifications: NotificationsService, private prices: PriceChangeService, private payroll: PayrollService) {}
 
   async onModuleInit() {
     if (process.env.DISABLE_JOBS === 'true' || process.env.NODE_ENV === 'test') return;
@@ -65,11 +68,12 @@ export class JobsService implements OnModuleInit {
       case JOBS.SALES_REPORT_CUTOFF.name: return this.reportSubmission.autoSubmit();
       case JOBS.CUSTOMER_FOLLOW_UPS.name: return this.followUps.runDaily();
       case JOBS.CASH_DEPOSIT_REMINDERS.name: return this.cashOnHand.remind();
+      case JOBS.ECOM_OVERDUE.name: return this.ecom.remindOverdue();
       case JOBS.MONTH_END_DEPRECIATION.name: { const d = new Date(); d.setUTCMonth(d.getUTCMonth() - 1); return this.payroll.runDepreciation(d.getUTCFullYear(), d.getUTCMonth() + 1, null); }
       default: throw new Error(`Unknown job ${name}`);
     }
   }
 }
 
-@Module({ imports: [ClosingModule, CountsModule, SalesModule, PricingModule, PayrollModule], providers: [JobsService], exports: [JobsService] })
+@Module({ imports: [ClosingModule, CountsModule, SalesModule, PricingModule, PayrollModule, EcommerceModule], providers: [JobsService], exports: [JobsService] })
 export class JobsModule {}

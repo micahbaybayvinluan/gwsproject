@@ -19,7 +19,11 @@ export class SalesSummaryService {
 
   /** Company branches that sell, in a fixed order so each keeps its colour in every chart. */
   private async branches(user: SessionUser) {
-    const all = await this.prisma.db.location.findMany({ where: { isSelling: true, type: { in: ['BRANCH', 'WAREHOUSE'] } }, select: { id: true, name: true, code: true }, orderBy: { name: 'asc' } });
+    const shops = await this.prisma.db.location.findMany({ where: { isSelling: true, type: { in: ['BRANCH', 'WAREHOUSE'] } }, select: { id: true, name: true, code: true }, orderBy: { name: 'asc' } });
+    // e-commerce: each platform is its own line (TikTok, Shopee, Lazada), after the branches
+    const ecom = (await this.prisma.db.location.findMany({ where: { code: { in: ['ECOM-TIKTOK', 'ECOM-SHOPEE', 'ECOM-LAZADA'] } }, select: { id: true, name: true, code: true }, orderBy: { code: 'desc' } }))
+      .map((l) => ({ ...l, name: `E-commerce – ${l.name.split(' – ')[0]}` }));
+    const all = [...shops, ...ecom];
     return user.locationScoped ? all.filter((b) => user.locationIds.includes(b.id)) : all;
   }
 

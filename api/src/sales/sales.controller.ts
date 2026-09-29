@@ -4,6 +4,7 @@ import { ConsignmentService } from './consignment.service';
 import { PdfService } from '../reports/pdf.service';
 import { z } from 'zod';
 import { SalesService } from './sales.service';
+import { OpeningArService } from './opening-ar.service';
 import { CurrentUser, RequirePermission, RequireAnyPermission, Audited } from '../common/decorators';
 import { Z } from '../common/zod.pipe';
 import type { SessionUser } from '../common/request-context';
@@ -58,4 +59,19 @@ export class ConsignmentController {
   }
   @Get('out-summary') @RequireAnyPermission('consignment.manage', 'consignment.request') outSummary() { return this.svc.consignmentOutSummary(); }
   @Get('in-settlement') @RequirePermission('consignment.manage') inSettlement(@Query('from') from: string, @Query('to') to: string) { return this.svc.consignmentInSettlement({ from, to }); }
+}
+
+const OpeningAr = z.object({
+  locationId: z.string().uuid(), kind: z.enum(['DEALER', 'FRANCHISE', 'AGENT', 'OTHER']),
+  customerId: z.string().uuid().nullable().optional(), agentId: z.string().uuid().nullable().optional(), customerName: z.string().trim().max(160).nullable().optional(),
+  drSiNo: z.string().trim().min(1).max(60), docDate: z.string().min(8), dueDate: z.string().min(8), amount: z.number().positive(),
+  pdcBank: z.string().trim().max(80).nullable().optional(), pdcChequeNo: z.string().trim().max(60).nullable().optional(), pdcDate: z.string().nullable().optional(), notes: z.string().trim().max(500).nullable().optional(),
+});
+
+/** AR from before GWS-ERP, entered by Accounting for any branch and approved by the Owner (owner request 2026-09-29). */
+@Controller('api/ar/opening')
+export class OpeningArController {
+  constructor(private svc: OpeningArService) {}
+  @Get() @RequireAnyPermission('ar.opening', 'approval.act.OPENING_AR') list(@Query('status') status?: string, @Query('locationId') locationId?: string) { return this.svc.list({ status, locationId }); }
+  @Post() @RequirePermission('ar.opening') @Audited('OpeningArEntry', 'CREATE') create(@Body(Z(OpeningAr)) b: z.infer<typeof OpeningAr>, @CurrentUser() u: SessionUser) { return this.svc.create(b, u); }
 }

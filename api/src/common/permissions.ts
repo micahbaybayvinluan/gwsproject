@@ -41,6 +41,7 @@ export const APPROVAL_TYPES = [
   'TRANSFER_DIFF_SENDER',
   'TRANSFER_DIFF_ADMIN',
   'SALES_TARGET',
+  'OPENING_AR',
 ] as const;
 export type ApprovalType = (typeof APPROVAL_TYPES)[number];
 
@@ -52,7 +53,7 @@ const BASE_KEYS = [
   'receiving.create', 'receiving.approve_cost', 'warehouse.edit_others',
   'transfer.create', 'transfer.confirm', 'transfer.approve.internal', 'transfer.approve.franchise', 'transfer.resolve_discrepancy',
   'sale.create', 'sale.edit.sameday', 'sale.edit.postclose', 'sale.special_price.approve', 'sale.void',
-  'ar.view', 'ar.collect', 'ar.approve',
+  'ar.view', 'ar.collect', 'ar.approve', 'ar.opening',
   'expense.create.branch', 'expense.create.main', 'expense.view',
   'count.create', 'discrepancy.view', 'discrepancy.resolve', 'discrepancy.explain',
   'writeoff.create', 'writeoff.approve',
@@ -237,14 +238,14 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
     permissions: [
       ...READ_ALL, ...COST_BUNDLE, ...ACCOUNTING_BASE, 'gl.period.lock', 'gl.beginning_balance',
       'payroll.view.summary', 'payroll.view.detail', 'payroll.close', 'expense.view', 'cashfund.view.all', 'cashfund.manage', 'contribution.remit',
-      'ar.collect', 'ar.approve', ...approvals('AR_PAYMENT', 'ECOM_SETTLEMENT'), 'gl.voucher.edit', 'bank.entry', 'bs.accounts.view', 'ecom.view',
+      'ar.collect', 'ar.approve', 'ar.opening', ...approvals('AR_PAYMENT', 'ECOM_SETTLEMENT'), 'gl.voucher.edit', 'bank.entry', 'bs.accounts.view', 'ecom.view',
     ],
   },
   {
     key: 'ACCOUNTING_ASSOCIATE',
     name: 'Accounting Associate',
     description: 'Ledger, vouchers, main expenses. Payroll totals only.',
-    permissions: [...READ_ALL, ...COST_BUNDLE, ...ACCOUNTING_BASE, 'payroll.view.summary', 'cashfund.view.all', 'ar.collect', 'ar.approve', ...approvals('AR_PAYMENT'), 'gl.voucher.edit', 'bank.entry', 'bs.accounts.view', 'ecom.view'],
+    permissions: [...READ_ALL, ...COST_BUNDLE, ...ACCOUNTING_BASE, 'payroll.view.summary', 'cashfund.view.all', 'ar.collect', 'ar.approve', 'ar.opening', ...approvals('AR_PAYMENT'), 'gl.voucher.edit', 'bank.entry', 'bs.accounts.view', 'ecom.view'],
   },
   {
     key: 'HR_STAFF',
@@ -350,6 +351,7 @@ export const APPROVAL_ROUTING: Record<ApprovalType, { roles: RoleKey[]; anyOf?: 
   TRANSFER_DIFF_ADMIN: { roles: ['ADMIN'] },
   /** A monthly sales target (branch or agent) set by the Sales Manager: the Owner approves. */
   SALES_TARGET: { roles: ['ADMIN'] },
+  OPENING_AR: { roles: ['ADMIN'] },
 };
 
 /** EDIT_REQUEST approvers depend on who asks (§6.1). */

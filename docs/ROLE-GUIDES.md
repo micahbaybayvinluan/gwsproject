@@ -47,6 +47,7 @@ You run one branch: sales, expenses, stock received and sent, the weekly count, 
 - **Selling on credit (New Sale → payment "AR / PDC"):** choose whether the customer is a **Dealer**, **Franchisee**, **Agent** or **Other customer**; only that kind is listed. Type the due date. Tick **There is a PDC** only when the customer gave a post-dated cheque, then type the bank, cheque no. and cheque date.
 - Every morning you are reminded of your branch's receivables that are overdue or due within 7 days, nearest due first. The dashboard lists them the same way.
 - If Accounting rejects a payment you entered, the notification gives the reason (for example "Wrong amount"). Fix it and send the payment again.
+- **Credit from before GWS-ERP:** Accounting enters it and the Owner approves it. It then appears in your AR & Collections (you are notified) and is collected like any credit sale.
 
 **Stock**
 1. **Asking for stock:** in Transfers & Pull-outs, press **Request stock from the warehouse**, add the items and send.
@@ -56,6 +57,7 @@ You run one branch: sales, expenses, stock received and sent, the weekly count, 
    3. An item that arrived but is **not on the form**: press **+ An item arrived that is not on the form**, pick it and type the quantity.
    4. Press **Confirm receipt**. Only what you received goes into your stock.
    5. If there is a difference, the steps start by themselves (see **When the received quantity is different** below). You are told of each step.
+   - **Finding a transfer:** use **View** (Outgoing pull-outs or Incoming transfer-ins) and **Branches** (tick the branches to see; none ticked = all). Franchises are marked "(franchise)" in every list.
 3. **Returning stock:** prepare a pull-out to the warehouse. The "From" is always your branch.
 4. **Expired or damaged items:** keep them apart and tell the auditors (or return them to the warehouse on a pull-out). Write-offs are decided by the auditors, not the branch.
 
@@ -196,6 +198,8 @@ You are responsible for the warehouse stock. You check your associates' entries,
   1. Open each parcel and type how many items are **good** and how many are **damaged or expired**.
   2. Press **Receive**. Good items go back to Warehouse stock. Damaged items come in and a write-off goes to the Head Auditor.
 
+**Finding transfers:** Transfers & Pull-outs → **View** (pull-outs or transfer-ins) and **Branches**: tick the branches to see, for example only the franchises you send to. Franchises show "(franchise)" beside the name.
+
 **Reports:** Stock on Hand, Inventory Reports (quantities only).
 
 ## Head Auditor
@@ -329,10 +333,17 @@ You keep the books.
 4. **AR payments** entered by branches wait for you or the Accounting Associate in **My Approvals**. Each one shows the customer, the amount, how it was paid, the **account it was deposited to**, the invoices and the **proof of payment** (click the picture to enlarge it).
    - **Approve** when the money is in the account.
    - **Reject** asks for the reason: wrong amount, wrong proof, proof unclear, money not received, wrong account, wrong customer or invoice, duplicate, wrong date, cheque bounced or not cleared, or another reason you type. The branch sees it.
-5. **Payroll:** close HR's finalized runs by choosing the paying bank account.
-6. **Bank & Office:** record main bank transactions, with the bank or **Gcash (GWS)** account and the book they belong to.
-7. You are notified of supplier cost changes.
-8. **E-commerce payouts** (TikTok, Shopee, Lazada) come to you in Approvals.
+5. **Opening AR (credit from before GWS-ERP)** (menu: AR & Collections → Opening AR):
+   1. Press **+ Enter opening AR**. Choose the branch, the customer type (Dealer, Franchisee, Agent or Other) and the customer.
+   2. Type the DR / SI no., the invoice date, the due date and the balance still owed. Tick **There is a PDC** only if there is a cheque, then type the bank, cheque no. and date.
+   3. Press **Send for the Owner's approval**. Enter the next one; the branch, type and date stay filled in.
+   4. After the Owner approves, it appears in that branch's AR & Collections and the branch is notified. Rejected entries show the Owner's reason.
+   - Many invoices at once: Imports → **Open AR** (same approval).
+   - It is not posted to the books again: the AR beginning balance is already in Periods & Opening.
+6. **Payroll:** close HR's finalized runs by choosing the paying bank account.
+7. **Bank & Office:** record main bank transactions, with the bank or **Gcash (GWS)** account and the book they belong to.
+8. You are notified of supplier cost changes.
+9. **E-commerce payouts** (TikTok, Shopee, Lazada) come to you in Approvals.
    1. Check that gross sales − seller discounts − fees − refunds − withholding tax = the payout. **Open full document** shows the order list and any orders left out.
    2. Compare the payout with the platform wallet or the bank, then **Approve**.
    3. The sale, each fee, the creditable withholding tax and the payout (to the platform's cash account) are posted, together with the cost of goods sold.
@@ -342,9 +353,10 @@ You keep the books.
 ## Accounting Associate
 <!-- role: ACCOUNTING_ASSOCIATE -->
 1. **AR payments** entered by branches: approve or reject them in My Approvals.
-2. **Journal Vouchers:** view entries and correct them with **Edit entry** (balanced, no negatives, open period). The people involved and the Owner are notified.
-3. **Bank & Office:** record bank transactions and see balance-sheet account balances.
-4. **Payroll:** you see totals only. Record government contribution payments.
+2. **Opening AR (credit from before GWS-ERP):** AR & Collections → Opening AR → **+ Enter opening AR** for any branch (branch, customer, DR / SI, invoice date, due date, balance, PDC if any) → **Send for the Owner's approval**. Once approved it shows in the branch's AR.
+3. **Journal Vouchers:** view entries and correct them with **Edit entry** (balanced, no negatives, open period). The people involved and the Owner are notified.
+4. **Bank & Office:** record bank transactions and see balance-sheet account balances.
+5. **Payroll:** you see totals only. Record government contribution payments.
 
 ## HR Staff
 <!-- role: HR_STAFF -->
@@ -405,7 +417,8 @@ You see and can do everything. You are the final approver.
    - **Consignments** (final approval after the manager's check) and **cost changes** typed by the Head Auditor.
    - **Transfer differences** the sending branch disagrees with or did not answer in 2 days: open the transfer and choose: the difference stands (-002 form back to the sender), received after all, lost as a company expense, or lost and charged to staff.
    - **Sales targets** set by the Sales Manager.
-   - Use **Approve selected** for many at once.
+   - **Opening AR** (credit from before GWS-ERP) entered by Accounting: check branch, customer, DR / SI, dates and amount, then approve. It then appears in that branch's AR and the branch is notified.
+   - **Faster approvals:** every group has **Tick all** and **Approve all**; **Select all** at the top ticks everything, then **Approve selected**. Each item still shows its own result (for example a delivery whose new product needs a cost stays in the list).
 2. **Users & Roles:** create accounts (one per person), change roles and branches, tick extra permissions, reset passwords. Your own new records are created at once.
 3. **Deleting:** only you delete products and back-office data. A record already used is archived instead.
 4. **Consignees** (Catalogue → Consignees):

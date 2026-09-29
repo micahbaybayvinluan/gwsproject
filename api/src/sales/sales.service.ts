@@ -207,7 +207,7 @@ export class SalesService implements OnModuleInit {
   // ── AR / payments / credit notes (§8.3) ──
   async arList(user: SessionUser, q: { locationId?: string; customerId?: string; overdueOnly?: boolean }) {
     const where: Prisma.SalesDocWhereInput = { paymentMode: 'AR_PDC', voidedAt: null, locationId: this.scope.locationFilter(user, q.locationId) as never, customerId: q.customerId };
-    const docs = await this.prisma.db.salesDoc.findMany({ where, include: { customer: true, agent: true, location: { select: { id: true, code: true, name: true } } }, orderBy: { dueDate: 'asc' } });
+    const docs = await this.prisma.db.salesDoc.findMany({ where, include: { customer: true, agent: true, location: { select: { id: true, code: true, name: true, type: true } } }, orderBy: { dueDate: 'asc' } });
     const today = todayManila();
     return docs.map((d) => ({ id: d.id, location: d.location, customer: d.customer?.name ?? d.agent?.name ?? d.customerName, customerId: d.customerId, agentId: d.agentId, drSiNo: d.drSiNo, docDate: dateStr(d.docDate), amount: d.grandTotal, paid: d.amountPaid, balance: d.grandTotal.minus(d.amountPaid), dueDate: d.dueDate ? dateStr(d.dueDate) : null, daysOverdue: d.dueDate && d.grandTotal.gt(d.amountPaid) ? Math.max(0, daysBetween(d.dueDate, today)) : 0, pdc: d.pdcChequeNo ? { bank: d.pdcBank, chequeNo: d.pdcChequeNo, date: d.pdcDate } : null }))
       .filter((r) => r.balance.gt(0) && (!q.overdueOnly || r.daysOverdue > 0));

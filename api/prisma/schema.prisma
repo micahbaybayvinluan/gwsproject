@@ -2109,3 +2109,32 @@ model SalesTarget {
   @@index([month, kind, status])
   @@map("sales_targets")
 }
+
+/// AR from before GWS-ERP (owner request 2026-09-29): entered by Accounting for any branch, approved by the Owner; on approval it becomes
+/// an AR/PDC sales document (no stock lines) in that branch's AR & Collections. No journal entry: the AR beginning balance is in Periods & Opening.
+model OpeningArEntry {
+  id                String    @id @default(uuid())
+  locationId        String    @map("location_id")
+  kind              String // DEALER | FRANCHISE | AGENT | OTHER
+  customerId        String?   @map("customer_id")
+  agentId           String?   @map("agent_id")
+  customerName      String?   @map("customer_name")
+  drSiNo            String    @map("dr_si_no")
+  docDate           DateTime  @map("doc_date") @db.Date
+  dueDate           DateTime  @map("due_date") @db.Date
+  amount            Decimal   @db.Decimal(14, 2)
+  pdcBank           String?   @map("pdc_bank")
+  pdcChequeNo       String?   @map("pdc_cheque_no")
+  pdcDate           DateTime? @map("pdc_date") @db.Date
+  notes             String?
+  status            String    @default("PENDING") // PENDING | APPROVED | REJECTED
+  salesDocId        String?   @map("sales_doc_id")
+  approvalRequestId String?   @map("approval_request_id")
+  decisionNote      String?   @map("decision_note")
+  createdBy         String    @map("created_by")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  decidedAt         DateTime? @map("decided_at")
+
+  @@index([status, locationId])
+  @@map("opening_ar_entries")
+}

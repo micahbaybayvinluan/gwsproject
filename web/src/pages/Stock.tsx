@@ -1,3 +1,4 @@
+import { locLabel } from '@/lib/utils';
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
@@ -10,7 +11,7 @@ function useLocationPicker(defaultAll = true) {
   const { me } = useAuth(); const [sp] = useSearchParams();
   const [locationId, setLocationId] = useState(sp.get('locationId') ?? (me!.locationScoped ? me!.locations[0]?.id ?? '' : defaultAll ? '' : ''));
   const locations = useQuery({ queryKey: ['locations'], queryFn: () => api.get<{ id: string; name: string; type: string }[]>('/api/locations') });
-  const picker = <Field label="Location"><Select value={locationId} onChange={(e) => setLocationId(e.target.value)}>{!me!.locationScoped && <option value="">All</option>}{locations.data?.filter((l) => !me!.locationScoped || me!.locations.some((x) => x.id === l.id)).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</Select></Field>;
+  const picker = <Field label="Location"><Select value={locationId} onChange={(e) => setLocationId(e.target.value)}>{!me!.locationScoped && <option value="">All</option>}{locations.data?.filter((l) => !me!.locationScoped || me!.locations.some((x) => x.id === l.id)).map((l) => <option key={l.id} value={l.id}>{locLabel(l)}</option>)}</Select></Field>;
   return { locationId, picker };
 }
 

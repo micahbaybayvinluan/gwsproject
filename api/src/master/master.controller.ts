@@ -51,7 +51,7 @@ export class MasterController {
 
   @Get('customers') @RequireAnyPermission('sale.create', 'ar.view') customers(@Query('type') type?: string) { return this.m.listCustomers(type); }
   @Post('customers') @RequireAnyPermission('sale.create', 'ar.view') @Audited('Customer', 'CREATE') createCustomer(@Body(Z(CustomerDto)) dto: z.infer<typeof CustomerDto>, @CurrentUser() u: SessionUser) { return this.md.submit('Customer', dto, u, { name: dto.name, customerType: dto.type, contact: dto.contact }, () => this.m.createCustomer(dto, u.id)); }
-  @Get('agents') @RequireAnyPermission('sale.create', 'report.sales.all') agents(@CurrentUser() u: SessionUser) { return this.m.listAgents(u); }
+  @Get('agents') @RequireAnyPermission('sale.create', 'report.sales.all', 'ar.opening') agents(@CurrentUser() u: SessionUser) { return this.m.listAgents(u); }
   @Post('agents') @RequireAnyPermission('product.edit', 'user.manage') @Audited('Agent', 'CREATE') createAgent(@Body(Z(AgentDto)) dto: z.infer<typeof AgentDto>, @CurrentUser() u: SessionUser) { return this.md.submit('Agent', dto, u, { name: dto.name }, () => this.m.createAgent(dto)); }
   @Get('riders') @RequireAnyPermission('sale.create', 'report.sales.all') riders(@CurrentUser() u: SessionUser, @Query('locationId') locationId?: string) { return this.m.listRiders(u, locationId); }
   @Post('riders') @RequireAnyPermission('sale.create', 'user.manage') @Audited('Rider', 'CREATE') createRider(@Body(Z(RiderDto)) dto: z.infer<typeof RiderDto>, @CurrentUser() u: SessionUser) { return this.md.submit('Rider', dto, u, { name: dto.name }, () => this.m.createRider(dto)); }

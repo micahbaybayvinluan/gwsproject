@@ -1,3 +1,4 @@
+import { OpeningArService } from '../sales/opening-ar.service';
 import { loadWorkbook } from './workbook-readers';
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { PrismaService } from '../common/prisma.service';
@@ -17,7 +18,7 @@ import { AccountClass } from '@prisma/client';
 /** §13 / §15 bulk uploads: products (seed workbook + template), price lists, min stock, opening stock, actual count, chart of accounts, beginning balances, employees. */
 @Injectable()
 export class ImportsService {
-  constructor(private prisma: PrismaService, private xlsx: XlsxService, private master: MasterService, private stock: StockService, private accounts: AccountsService, private audit: AuditService, md: MasterDataApprovals) {
+  constructor(private prisma: PrismaService, private xlsx: XlsxService, private master: MasterService, private stock: StockService, private accounts: AccountsService, private audit: AuditService, md: MasterDataApprovals, private openingAr: OpeningArService) {
     // bulk loads of new products / employees wait for the Owner like single entries; the file is kept with the request
     const run = (fn: (buf: Buffer, u: SessionUser, p: Record<string, unknown>) => Promise<object>) => async (p: Record<string, unknown>, by: string) => ({ id: 'import', ...(await fn(Buffer.from(String(p.file), 'base64'), await md.sessionUserOf(by), p)) });
     md.registerKind('ProductImport', { label: 'Product import', apply: run((b, u) => this.products(b, u)), link: () => '/products' });
@@ -178,18 +179,19 @@ export class ImportsService {
     for (const [i, r] of rows.entries()) { try { const loc = r.LocationCode ? await this.prisma.db.location.findUnique({ where: { code: String(r.LocationCode) } }) : null; await this.prisma.db.employee.upsert({ where: { employeeNo: String(r.EmployeeNo) }, create: { employeeNo: String(r.EmployeeNo), fullName: String(r.FullName), locationId: loc?.id, position: r.Position ? String(r.Position) : null, basicRate: D(r.BasicRate as number).toFixed(2), payFrequency: r.PayFrequency ? String(r.PayFrequency) : 'SEMI_MONTHLY', sssNo: r.SSS ? String(r.SSS) : null, phicNo: r.PHIC ? String(r.PHIC) : null, hdmfNo: r.HDMF ? String(r.HDMF) : null, bankAccount: r.BankAccount ? String(r.BankAccount) : null, createdBy: user.id }, update: { fullName: String(r.FullName), locationId: loc?.id, position: r.Position ? String(r.Position) : undefined, basicRate: D(r.BasicRate as number).toFixed(2) } }); n++; } catch (e) { errors.push(`Row ${i + 2}: ${(e as Error).message}`); } }
     return { imported: n, errors };
   }
-  /** §15.4 Open AR as opening AR docs (no stock lines, channel OTHER, AR_PDC). */
+  /** §15.4 Open AR: each row becomes an opening AR entry for the Owner's approval (owner request 2026-09-29), like the form on AR & Collections. */
   async openAr(buf: Buffer, user: SessionUser) {
     const { rows } = await this.xlsx.read(buf); let n = 0; const errors: string[] = [];
+    const day = (v: unknown) => (v instanceof Date ? v.toISOString().slice(0, 10) : String(v));
     for (const [i, r] of rows.entries()) {
       try {
         const loc = await this.prisma.db.location.findUniqueOrThrow({ where: { code: String(r.LocationCode) } }); const cust = await this.prisma.db.customer.findUniqueOrThrow({ where: { code: String(r.CustomerCode) } });
-        const amt = D(r.Amount as number); const date = toDateOnly(r.Date instanceof Date ? r.Date : String(r.Date));
-        await this.prisma.db.salesDoc.create({ data: { controlNo: `OPEN-AR-${String(r.DRNo)}`, docDate: date, locationId: loc.id, channel: cust.type === 'DEALER' ? 'DEALER' : cust.type === 'FRANCHISE' ? 'FRANCHISE' : 'OTHER', customerId: cust.id, drSiNo: String(r.DRNo), paymentMode: 'AR_PDC', productTotal: amt.toFixed(2), grandTotal: amt.toFixed(2), dueDate: r.DueDate ? toDateOnly(r.DueDate instanceof Date ? r.DueDate : String(r.DueDate)) : date, preparedBy: user.id, createdBy: user.id, notes: 'Opening AR (migrated)' } });
+        const kind = cust.type === 'DEALER' ? 'DEALER' : cust.type === 'FRANCHISE' ? 'FRANCHISE' : 'OTHER';
+        await this.openingAr.create({ locationId: loc.id, kind, customerId: cust.id, drSiNo: String(r.DRNo), docDate: day(r.Date), dueDate: day(r.DueDate ?? r.Date), amount: Number(r.Amount) }, user);
         n++;
       } catch (e) { errors.push(`Row ${i + 2}: ${(e as Error).message}`); }
     }
-    return { imported: n, errors };
+    return { imported: n, errors, note: user.roleKey === 'ADMIN' ? undefined : `${n} opening AR entr${n === 1 ? 'y' : 'ies'} sent for the Owner's approval` };
   }
   /** §16 parallel-run reconciliation: system totals per day/branch vs an Excel sheet (LocationCode, Date, ExcelSales, ExcelExpenses). */
   async reconcile(buf: Buffer) {

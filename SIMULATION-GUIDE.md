@@ -201,6 +201,12 @@ Expenses → Paid from **Cash on hand** → type an amount bigger than the cash 
 **50. Sales targets** — `sales.manager`, `admin`, `agent.jerick`
 As `sales.manager`: Sales Targets → set a target for West Ave and for Jerick Quinto → Send. As `admin`: approve both in My Approvals. As `sales.manager`: the bars show % achieved against the days gone. As `agent.jerick`: My Sales shows his sales at every branch, his target and his customers' unpaid balances.
 
+**51. Opening AR from before GWS-ERP** — `acct.assoc`, `admin`, `sales.csr`
+As `acct.assoc`: AR & Collections → Opening AR → **+ Enter opening AR** → CSR, Dealer, a dealer, DR/SI "OLD-001", invoice date last June, due date last July, ₱12,500 → Send. Add a second one with a PDC. As `admin`: My Approvals → Opening AR → **Tick all** → **Approve all**. As `sales.csr`: the bell shows the new AR; AR & Collections lists both, overdue in red.
+
+**52. Transfers per branch** — `admin`, `wh.incharge`
+Transfers & Pull-outs → **Branches** → tick Mayon (franchise) → Done: only Mayon's transfers remain; View → Incoming shows only what Mayon received. Every branch list marks franchises "(franchise)".
+
 ## Where the files come out
 
 All exports download through the browser: Daily Sales Report (xlsx/PDF), Daily Inventory Report (xlsx, one sheet per day plus Summary and Per-day sheets), every paper form (Pull-Out, Transfer-In, DR-Sales, Supplier's Form, Count sheet, Discrepancy Report, Charge Form, Credit Note, Journal Voucher), every list (Export xlsx / CSV buttons), Trial Balance and the financial statements.

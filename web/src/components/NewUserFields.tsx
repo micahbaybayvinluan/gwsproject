@@ -1,3 +1,4 @@
+import { locLabel } from '@/lib/utils';
 import { Button, Field, Input, Select } from '@/components/ui/primitives';
 
 /** Roles that work at exactly one branch, and roles limited to the branches ticked (same lists as the API). */
@@ -43,7 +44,7 @@ export function AccountFields({ f, setF, roles, locations }: { f: AccountDraft; 
     <Field label="Username" hint="Used to sign in. No spaces, e.g. juan.cruz"><Input autoComplete="off" value={f.username} onChange={(e) => setF({ ...f, username: e.target.value.replace(/\s/g, '') })} /></Field>
     <Field label="Email (optional)" hint="Leave empty if the person has none"><Input type="email" autoComplete="off" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></Field>
     <Field label="Role"><Select value={f.roleKey} onChange={(e) => setRole(e.target.value)}>{[...roles].sort((a, b) => a.name.localeCompare(b.name)).map((r) => <option key={r.key} value={r.key}>{r.name}</option>)}</Select></Field>
-    {single && <Field label="Branch"><Select value={f.locationIds[0] ?? ''} onChange={(e) => setF({ ...f, locationIds: e.target.value ? [e.target.value] : [] })}><option value="">— choose the branch —</option>{branches.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</Select></Field>}
+    {single && <Field label="Branch"><Select value={f.locationIds[0] ?? ''} onChange={(e) => setF({ ...f, locationIds: e.target.value ? [e.target.value] : [] })}><option value="">— choose the branch —</option>{branches.map((l) => <option key={l.id} value={l.id}>{locLabel(l)}</option>)}</Select></Field>}
     {multi && <Field label="Branches" hint="Tick where this person works"><div className="flex flex-wrap gap-x-4 gap-y-1 rounded-xl border border-slate-200 p-2.5">{branches.map((l) => <label key={l.id} className="flex items-center gap-1.5 text-sm"><input type="checkbox" checked={f.locationIds.includes(l.id)} onChange={(e) => setF({ ...f, locationIds: e.target.checked ? [...f.locationIds, l.id] : f.locationIds.filter((x) => x !== l.id) })} />{l.name}</label>)}</div></Field>}
     {!single && !multi && <Field label="Branch"><div className="rounded-xl border border-dashed border-slate-200 px-3 py-2.5 text-sm text-slate-500">Not needed: this role works for the whole company.</div></Field>}
     <Field label="Temporary password" hint={f.password.length >= 10 ? 'Give this to the person; they choose their own at first sign-in.' : `At least 10 characters (now ${f.password.length})`}>

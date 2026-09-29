@@ -11,7 +11,7 @@ const KINDS: { kind: string; label: string; endpoint: string; perm: string; quer
   { kind: 'opening-stock', label: 'Opening stock per location (cost: Admin)', endpoint: '/api/imports/opening-stock', perm: 'cost.edit', query: (v) => `?date=${v}`, extra: 'Cut-over date' },
   { kind: 'beginning-balances', label: 'Beginning balances', endpoint: '/api/imports/beginning-balances', perm: 'gl.beginning_balance', query: (v) => `?year=${v}`, extra: 'Fiscal year' },
   { kind: 'employees', label: 'Employees', endpoint: '/api/imports/employees', perm: 'employee.manage' },
-  { kind: 'open-ar', label: 'Open AR (migration)', endpoint: '/api/imports/open-ar', perm: 'ar.collect' },
+  { kind: 'open-ar', label: 'Open AR (before GWS-ERP; the Owner approves)', endpoint: '/api/imports/open-ar', perm: 'ar.opening' },
 ];
 
 /** §13 bulk upload templates + §7.1 seed workbook import + §10.1 COA import review. */

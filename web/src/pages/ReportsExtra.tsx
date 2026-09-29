@@ -1,3 +1,4 @@
+import { locLabel } from '@/lib/utils';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import { useState } from 'react';
@@ -25,7 +26,7 @@ export function InventoryCostPage() {
         <Field label="From"><Input type="date" value={f.from} onChange={(e) => setF({ ...f, from: e.target.value })} /></Field>
         <Field label="To"><Input type="date" value={f.to} onChange={(e) => setF({ ...f, to: e.target.value })} /></Field>
         <Field label="Per"><Select value={f.groupBy} onChange={(e) => setF({ ...f, groupBy: e.target.value })}><option value="day">Day</option><option value="month">Month</option></Select></Field>
-        <Field label="Branch"><Select value={f.locationId} onChange={(e) => setF({ ...f, locationId: e.target.value })}><option value="">All branches</option>{locations.data?.filter((l) => l.type !== 'VIRTUAL').map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</Select></Field>
+        <Field label="Branch"><Select value={f.locationId} onChange={(e) => setF({ ...f, locationId: e.target.value })}><option value="">All branches</option>{locations.data?.filter((l) => l.type !== 'VIRTUAL').map((l) => <option key={l.id} value={l.id}>{locLabel(l)}</option>)}</Select></Field>
         <Button variant="outline" onClick={() => api.download(`/api/reports/inventory-cost.xlsx?${qs}`, `InventoryCost_${f.groupBy}_${f.from}_${f.to}.xlsx`)}>Generate xlsx</Button>
       </div>
       <DataTable data={q.data?.rows ?? []} columns={cols.map(([k, h]) => ({ header: h, accessorKey: k, ...(k === 'period' || k === 'branch' ? {} : { cell: (c: { getValue: () => unknown }) => money(c.getValue()) }) }))} />
@@ -59,7 +60,7 @@ export function CustomersReportPage() {
   const canSend = can('sale.create') || can('report.sales.all');
   return <div className="space-y-4">
     <div className="flex flex-wrap items-end gap-2"><h1 className="mr-auto text-2xl font-bold tracking-tight text-navy">Customers &amp; Follow-ups</h1>
-      {!me?.locationScoped && <Field label="Branch"><Select value={f.locationId} onChange={(e) => setF({ ...f, locationId: e.target.value })}><option value="">All</option>{locations.data?.filter((l) => l.isSelling).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</Select></Field>}
+      {!me?.locationScoped && <Field label="Branch"><Select value={f.locationId} onChange={(e) => setF({ ...f, locationId: e.target.value })}><option value="">All</option>{locations.data?.filter((l) => l.isSelling).map((l) => <option key={l.id} value={l.id}>{locLabel(l)}</option>)}</Select></Field>}
       {tab === 'list' && <><Field label="From"><Input type="date" value={f.from} onChange={(e) => setF({ ...f, from: e.target.value })} /></Field><Field label="To"><Input type="date" value={f.to} onChange={(e) => setF({ ...f, to: e.target.value })} /></Field>
       <Button variant="outline" onClick={() => api.download(`/api/reports/customers.xlsx?${qs}`, 'CustomerContacts.xlsx')}>Generate xlsx</Button></>}</div>
     <div className="inline-flex rounded-xl bg-white p-1 shadow-sm ring-1 ring-slate-200">{([['list', 'Customers & items ordered'], ['followups', 'Re-order follow-ups']] as const).map(([k, l]) => <button key={k} onClick={() => setTab(k)} className={`rounded-lg px-3.5 py-1.5 text-sm font-semibold ${tab === k ? 'bg-navy text-white shadow' : 'text-slate-600 hover:text-navy'}`}>{l}</button>)}</div>

@@ -1,3 +1,4 @@
+import { locLabel } from '@/lib/utils';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
@@ -43,7 +44,7 @@ export function InspectionFormPage() {
     <h1 className="text-2xl font-bold tracking-tight text-navy">Store inspection report {existing.data?.controlNo ?? '(new)'}</h1>
     <Card>
       <div className="grid gap-3 md:grid-cols-2">
-        <Field label="Branch"><Select value={h.locationId} onChange={(e) => setH({ ...h, locationId: e.target.value, staffOnDutyEmployeeId: '' })}><option value="">—</option>{locations.data?.filter((l) => ['BRANCH', 'WAREHOUSE', 'FRANCHISE'].includes(l.type)).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</Select></Field>
+        <Field label="Branch"><Select value={h.locationId} onChange={(e) => setH({ ...h, locationId: e.target.value, staffOnDutyEmployeeId: '' })}><option value="">—</option>{locations.data?.filter((l) => ['BRANCH', 'WAREHOUSE', 'FRANCHISE'].includes(l.type)).map((l) => <option key={l.id} value={l.id}>{locLabel(l)}</option>)}</Select></Field>
         <Field label="Date"><Input type="date" value={h.inspectionDate} onChange={(e) => setH({ ...h, inspectionDate: e.target.value })} /></Field>
         <Field label="Name of inspector"><Input value={me?.fullName ?? ''} disabled /></Field>
         <Field label="Name of staff on duty"><Select value={h.staffOnDutyEmployeeId} onChange={(e) => setH({ ...h, staffOnDutyEmployeeId: e.target.value })}><option value="">— pick or type below —</option>{staff.data?.map((s) => <option key={s.id} value={s.id}>{s.fullName}</option>)}</Select>{!h.staffOnDutyEmployeeId && <Input className="mt-1" placeholder="Name (if not in the list)" value={h.staffOnDutyName} onChange={(e) => setH({ ...h, staffOnDutyName: e.target.value })} />}</Field>

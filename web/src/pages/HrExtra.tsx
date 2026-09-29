@@ -1,3 +1,4 @@
+import { locLabel } from '@/lib/utils';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AccountFields, missingFor, type AccountDraft } from '@/components/NewUserFields';
 import { useState } from 'react';
@@ -148,7 +149,7 @@ export function NewChargeFormCard() {
   return <Card title="New charge form">
     <div className="grid gap-3 md:grid-cols-3">
       <Field label="Kind"><Select value={f.kind} onChange={(e) => setF({ ...f, kind: e.target.value })}><option value="DAMAGED">Damaged items</option><option value="EXPIRED">Expired items</option><option value="CASH_SHORTAGE">Cash shortage</option><option value="OTHER">Other</option></Select></Field>
-      <Field label="Branch"><Select value={f.locationId} onChange={(e) => { setF({ ...f, locationId: e.target.value }); setEmp(new Set()); }}><option value="">—</option>{locations.data?.filter((l) => ['BRANCH', 'WAREHOUSE', 'OFFICE', 'FRANCHISE'].includes(l.type)).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</Select></Field>
+      <Field label="Branch"><Select value={f.locationId} onChange={(e) => { setF({ ...f, locationId: e.target.value }); setEmp(new Set()); }}><option value="">—</option>{locations.data?.filter((l) => ['BRANCH', 'WAREHOUSE', 'OFFICE', 'FRANCHISE'].includes(l.type)).map((l) => <option key={l.id} value={l.id}>{locLabel(l)}</option>)}</Select></Field>
       <Field label="Reason"><Input value={f.reason} onChange={(e) => setF({ ...f, reason: e.target.value })} placeholder="e.g. 2 tubs dropped on 25 Sep" /></Field>
     </div>
     <table className="mt-3 w-full text-sm"><thead className="text-left text-xs text-slate-500"><tr><th>What is charged</th><th>Qty</th><th>Amount each (₱)</th><th className="num">Total</th><th /></tr></thead><tbody>{lines.map((l, i) => <tr key={i} className="border-t"><td><Input value={l.description} onChange={(e) => setLines(lines.map((x, k) => (k === i ? { ...x, description: e.target.value } : x)))} /></td><td><Input type="number" min={1} className="w-20" value={l.qty} onChange={(e) => setLines(lines.map((x, k) => (k === i ? { ...x, qty: e.target.value } : x)))} /></td><td><Input type="number" step="0.01" className="w-28" value={l.unitCharge} onChange={(e) => setLines(lines.map((x, k) => (k === i ? { ...x, unitCharge: e.target.value } : x)))} /></td><td className="num">{peso(Number(l.qty || 0) * Number(l.unitCharge || 0))}</td><td>{lines.length > 1 && <button className="text-red-600" onClick={() => setLines(lines.filter((_, k) => k !== i))}>✕</button>}</td></tr>)}</tbody></table>

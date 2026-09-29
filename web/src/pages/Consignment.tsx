@@ -1,3 +1,4 @@
+import { locLabel } from '@/lib/utils';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -58,7 +59,7 @@ export function ConsignmentPage() {
     {tab !== 'stock' && <Card>
       <div className="grid gap-3 md:grid-cols-3">
         <Field label="Consignee"><Select value={cn} onChange={(e) => { setCn(e.target.value); reset(); }}><option value="">— choose —</option>{consignees.data?.filter((x) => x.active).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</Select></Field>
-        {tab !== 'sales' && <Field label={tab === 'send' ? 'Send from' : 'Returned to'}><Select value={loc} onChange={(e) => { setLoc(e.target.value); setDraftId(null); }}><option value="">— choose —</option>{mine.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</Select></Field>}
+        {tab !== 'sales' && <Field label={tab === 'send' ? 'Send from' : 'Returned to'}><Select value={loc} onChange={(e) => { setLoc(e.target.value); setDraftId(null); }}><option value="">— choose —</option>{mine.map((l) => <option key={l.id} value={l.id}>{locLabel(l)}</option>)}</Select></Field>}
         {tab === 'sales' && <><Field label="Sold from"><Input type="date" value={period.from} onChange={(e) => setPeriod({ ...period, from: e.target.value })} /></Field><Field label="Sold until"><Input type="date" value={period.to} onChange={(e) => setPeriod({ ...period, to: e.target.value })} /></Field></>}
       </div>
       {c && <p className="mt-2 text-xs text-slate-500">{c.name}{c.priceBasis ? ` · pays at ${BASIS[c.priceBasis] ?? c.priceBasis}` : ''}{c.settlementTerms ? ` · ${c.settlementTerms}` : ''}</p>}

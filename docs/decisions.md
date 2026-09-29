@@ -83,9 +83,12 @@ Things the build had to decide that the spec does not cover, or where the spec l
 | D75 | Cash fund | Warehouse In-Charge and Warehouse Associate have no cash fund access (warehouse staff hold no petty cash). | Owner request 2026-09-29 |
 
 | D76 | Count sheet columns | Each count line shows the count date's movements from the stock ledger (`StockService.dayMovements`): received, transfer in, customer returns, sales, transfer out, other; Beginning + in − out ± other = Expected (screen and Excel/PDF sheet). | Owner request 2026-09-29 |
+| D77 | Transfer list branch filter | `GET /api/transfers?branchIds=a,b`: an unscoped user reads direction (out/in) from the ticked branches' side; a scoped user keeps their own side and the ticks filter the other side. None ticked = all. | Owner request 2026-09-29 |
+| D78 | Franchise label in option lists | One helper (`locLabel`) adds "(franchise)" / "(consignee)" after the location name in every location dropdown and in the transfer and AR tables. | Owner request 2026-09-29 |
+| D79 | Opening AR | `OpeningArEntry` (Accounting Head / Associate, permission `ar.opening`) → approval `OPENING_AR` (Owner) → an AR/PDC `SalesDoc` without stock lines at that branch (`OPEN-AR-<branch>-<DR>`), branch notified. No journal: the AR beginning balance is in Periods & Opening. The Open AR Excel import now creates the same pending entries and needs `ar.opening` (was `ar.collect`, which branches hold). | Owner request 2026-09-29 |
+| D80 | Tick all per approval group | My Approvals: each group has Tick all and Approve all (bulk endpoint with that group's ids), besides Select all / Approve selected. | Owner request 2026-09-29 |
 ## Proposals not implemented (out of scope / for later)
 
 - AP payments module (AP ageing currently derives from unpaid receiving docs).
 - Barcode label printing.
 - Per-branch rider incentive rules (incentive is entered per delivery sale today).
-

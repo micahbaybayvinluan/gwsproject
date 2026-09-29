@@ -1,3 +1,4 @@
+import { locLabel } from '@/lib/utils';
 import { ApprovalTimeline } from '@/components/ApprovalTimeline';
 import { History, CorrectionRequest } from '@/components/DocEdits';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -45,7 +46,7 @@ export function NewSalePage() {
     <h1 className="text-2xl font-bold tracking-tight text-navy">New Sale</h1>
     <Card>
       <div className="grid gap-3 md:grid-cols-3">
-        {!me!.locationScoped && <Field label="Branch"><Select value={locationId} onChange={(e) => setLocationId(e.target.value)}><option value="">—</option>{locations.data?.filter((l) => l.isSelling).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</Select></Field>}
+        {!me!.locationScoped && <Field label="Branch"><Select value={locationId} onChange={(e) => setLocationId(e.target.value)}><option value="">—</option>{locations.data?.filter((l) => l.isSelling).map((l) => <option key={l.id} value={l.id}>{locLabel(l)}</option>)}</Select></Field>}
         <Field label="DR / SI number (paper)"><Input value={drSiNo} onChange={(e) => setDrSiNo(e.target.value)} placeholder="e.g. 10234" required data-testid="dr" /></Field>
         <Field label="Channel"><Select value={channel} onChange={(e) => setChannel(e.target.value)}>{CHANNELS.map((c) => <option key={c} value={c}>{c.replace(/_/g, ' ')}</option>)}</Select></Field>
         <Field label="Payment mode"><Select value={paymentMode} onChange={(e) => setPaymentMode(e.target.value)}><option value="CASH">Cash</option><option value="ONLINE">Online (bank / GCash)</option><option value="CREDIT_CARD">Credit card</option><option value="AR_PDC">AR / PDC (credit)</option></Select></Field>
@@ -108,7 +109,7 @@ export function SalesListPage() {
   const locations = useQuery({ queryKey: ['locations'], queryFn: () => api.get<{ id: string; name: string }[]>('/api/locations') });
   const q = useQuery({ queryKey: ['sales', from, to, locationId], queryFn: () => api.get<Sale[]>(`/api/sales?from=${from}&to=${to}${locationId ? `&locationId=${locationId}` : ''}`) });
   return <div className="space-y-4">
-    <div className="flex flex-wrap items-end gap-2"><h1 className="mr-auto text-2xl font-bold tracking-tight text-navy">Sales List</h1>{!me!.locationScoped && <Field label="Branch"><Select value={locationId} onChange={(e) => setLocationId(e.target.value)}><option value="">All</option>{locations.data?.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</Select></Field>}<Field label="From"><Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></Field><Field label="To"><Input type="date" value={to} onChange={(e) => setTo(e.target.value)} /></Field><Link to="/sales/new"><Button>New sale</Button></Link></div>
+    <div className="flex flex-wrap items-end gap-2"><h1 className="mr-auto text-2xl font-bold tracking-tight text-navy">Sales List</h1>{!me!.locationScoped && <Field label="Branch"><Select value={locationId} onChange={(e) => setLocationId(e.target.value)}><option value="">All</option>{locations.data?.map((l) => <option key={l.id} value={l.id}>{locLabel(l)}</option>)}</Select></Field>}<Field label="From"><Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></Field><Field label="To"><Input type="date" value={to} onChange={(e) => setTo(e.target.value)} /></Field><Link to="/sales/new"><Button>New sale</Button></Link></div>
     <DataTable exportName="Sales" data={q.data ?? []} onRowClick={(r) => nav(`/sales/${r.id}`)} columns={[
       { header: 'Date', accessorKey: 'docDate', cell: (c) => fmtDate(c.getValue()) }, { header: 'DR/SI', accessorKey: 'drSiNo' }, { header: 'Branch', accessorFn: (r) => r.location.name }, { header: 'Channel', accessorFn: (r) => r.channel.replace(/_/g, ' ') }, { header: 'Customer', accessorFn: (r) => r.customer?.name ?? r.agent?.name ?? r.customerName ?? '' }, { header: 'Payment', accessorKey: 'paymentMode' },
       { header: 'Total', accessorKey: 'grandTotal', cell: (c) => <span className="num block">{peso(c.getValue())}</span> }, { header: 'Status', cell: (c) => <Badge tone={statusTone(c.row.original.status)}>{c.row.original.status}{c.row.original.specialPriceStatus === 'PENDING' ? ' · special price' : ''}</Badge> },

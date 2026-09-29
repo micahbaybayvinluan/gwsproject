@@ -472,6 +472,26 @@ Each platform has its own tab, reports and accounts; nothing is mixed. E-commerc
 - **My Sales (Agents):** own sales at every branch, own target and achievement, and customers who have not paid yet, nearest due first.
 - The Sales Manager and Agents never see cost, margin or supplier data.
 
+## Opening AR: customer credit from before GWS-ERP
+<!-- for: ar.opening, approval.act.OPENING_AR, ar.view -->
+Invoices that customers had not paid before GWS-ERP started are entered once, per branch, so every branch can follow them up and collect them in the system.
+
+1. **Accounting Head or Accounting Associate:** AR & Collections → **Opening AR** → **+ Enter opening AR**. Choose the branch, the customer type (Dealer, Franchisee, Agent or Other) and the customer; type the DR / SI no., invoice date, due date and the balance still owed. Tick **There is a PDC** only when there is a cheque. Press **Send for the Owner's approval**. For many invoices use Imports → **Open AR**.
+2. **Owner:** My Approvals → **Opening AR** → check them, then **Tick all** and **Approve all** (or reject with a reason).
+3. **The branch:** once approved, the invoice appears in its AR & Collections with the due date, reminders start, and the branch is notified. Collect it like any credit sale.
+
+An invoice date in the future, a DR / SI already recorded at that branch, or a PDC without cheque no. and date is refused. Opening AR is not posted to the books again: the AR beginning balance is in Periods & Opening.
+
+## Faster approvals: tick all
+<!-- for: all -->
+In **My Approvals**, every group (for example "Opening AR" or "Special price") has **Tick all** and **Approve all**. **Select all** at the top ticks every item on the page; then press **Approve selected** or **Reject selected** (a reason is asked where one is required). After a bulk approval, the page lists any item that could not be approved and why.
+
+## Finding transfers, and franchises in every list
+<!-- for: transfer.create, transfer.confirm, report.inventory.all, report.inventory.own -->
+On **Transfers & Pull-outs**, **View** shows all, only pull-outs (sent) or only transfer-ins (received). **Branches** lets you tick the branches to see (none ticked = all). For the Owner and auditors, pull-out and transfer-in apply to the ticked branches; for branch and warehouse staff they apply to their own location, and the ticks choose the other side.
+
+In every list of branches, a franchise shows **(franchise)** beside its name (and a consignee **(consignee)**).
+
 ## Page names and what each page is for
 <!-- for: all -->
 - Every menu item has a descriptive name (for example **Supplier Deliveries** or **Transfers & Pull-outs**).

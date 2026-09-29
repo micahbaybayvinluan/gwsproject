@@ -1,3 +1,4 @@
+import { locLabel } from '@/lib/utils';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { api, fmtDate, peso, today } from '@/lib/api';
@@ -23,7 +24,7 @@ export function ExpensesPage() {
   const fund = useQuery({ queryKey: ['cash-fund', locationId], queryFn: () => api.get<{ balance: string }>(`/api/cash-funds/${locationId}`).catch(() => null), enabled: !!locationId && f.paidFrom === 'PETTY_CASH' });
   const m = useMutation({ mutationFn: () => api.post<{ id: string }>('/api/expenses', { locationId: main ? undefined : locationId, docDate: f.docDate, accountId: f.accountId, payee: f.payee, amount: Number(f.amount), paidFrom: f.paidFrom, paidFromAccountId: f.paidFromAccountId || null, notes: f.notes }), onError: (e) => { if (e instanceof ApiError && (e.body as { code?: string })?.code === 'NO_CASH_ON_HAND') setNoCash((e.body as { message: string }).message); }, onSuccess: (r) => { setCreated(r.id); setF({ ...f, amount: '', payee: '', notes: '' }); void qc.invalidateQueries({ queryKey: ['expenses'] }); void qc.invalidateQueries({ queryKey: ['cash-fund', locationId] }); } });
   return <div className="space-y-4">
-    <div className="flex flex-wrap items-end gap-2"><h1 className="mr-auto text-2xl font-bold tracking-tight text-navy">Expenses</h1>{!me!.locationScoped && <Field label="Branch"><Select value={locationId} onChange={(e) => { setLocationId(e.target.value); setMain(false); }}><option value="">—</option>{locations.data?.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</Select></Field>}{can('expense.create.main') && <label className="flex items-center gap-1 text-sm"><input type="checkbox" checked={main} onChange={(e) => setMain(e.target.checked)} /> Main / office expenses</label>}</div>
+    <div className="flex flex-wrap items-end gap-2"><h1 className="mr-auto text-2xl font-bold tracking-tight text-navy">Expenses</h1>{!me!.locationScoped && <Field label="Branch"><Select value={locationId} onChange={(e) => { setLocationId(e.target.value); setMain(false); }}><option value="">—</option>{locations.data?.map((l) => <option key={l.id} value={l.id}>{locLabel(l)}</option>)}</Select></Field>}{can('expense.create.main') && <label className="flex items-center gap-1 text-sm"><input type="checkbox" checked={main} onChange={(e) => setMain(e.target.checked)} /> Main / office expenses</label>}</div>
     <Card title="New expense">
       <div className="grid gap-3 md:grid-cols-3">
         <Field label="Account" className="md:col-span-2"><Select value={f.accountId} onChange={(e) => setF({ ...f, accountId: e.target.value })}><option value="">—</option>{accounts.data?.map((a) => <option key={a.id} value={a.id}>{a.title}</option>)}</Select></Field>

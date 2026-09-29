@@ -1,3 +1,4 @@
+import { locLabel } from '@/lib/utils';
 import { useQuery } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { api, fmtDate, peso, today } from '@/lib/api';
@@ -32,7 +33,7 @@ export function SalesReportPage() {
   const lastMonthStart = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - 1, 1)); const lastMonthEnd = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 0));
   return <div className="space-y-4">
     <div className="flex flex-wrap items-end gap-2"><h1 className="mr-auto text-2xl font-bold tracking-tight text-navy">Sales Report</h1>
-      {!me!.locationScoped && <Field label="Branch"><Select value={f.locationId} onChange={(e) => setF({ ...f, locationId: e.target.value })}><option value="">All branches</option>{locations.data?.filter((l) => l.isSelling && l.type !== 'FRANCHISE').map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</Select></Field>}
+      {!me!.locationScoped && <Field label="Branch"><Select value={f.locationId} onChange={(e) => setF({ ...f, locationId: e.target.value })}><option value="">All branches</option>{locations.data?.filter((l) => l.isSelling && l.type !== 'FRANCHISE').map((l) => <option key={l.id} value={l.id}>{locLabel(l)}</option>)}</Select></Field>}
       <Field label="From"><Input type="date" value={f.from} onChange={(e) => setF({ ...f, from: e.target.value })} /></Field>
       <Field label="To"><Input type="date" value={f.to} onChange={(e) => setF({ ...f, to: e.target.value })} /></Field>
       <Button variant="outline" disabled={!r} onClick={() => api.download(`/api/reports/sales-summary.xlsx?${qs}`, `SalesReport_${f.from}_${f.to}.xlsx`)}>Excel</Button>

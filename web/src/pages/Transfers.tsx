@@ -1,3 +1,4 @@
+import { locLabel } from '@/lib/utils';
 import { ApprovalTimeline } from '@/components/ApprovalTimeline';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
@@ -11,11 +12,36 @@ import { CorrectionRequest, EditRequests, History, TransferEditor, useEditRights
 
 interface Tr { pendingReceipt?: unknown; id: string; controlNo: string; docDate: string; status: string; transferType: string; notes: string | null; preparedBy?: string; preparedByName?: string | null; receivedByName?: string | null; fromLocation: { id: string; name: string; type: string }; toLocation: { id: string; name: string; type: string }; lines: { id: string; qtySent: number; qtyReceived: number | null; discrepancyNote: string | null; checkerRemarks: string | null; product: { name: string; sku: string }; batch: { batchNo: string | null; expiryDate: string | null } }[] }
 
+const TYPE_ORDER: Record<string, number> = { WAREHOUSE: 0, BRANCH: 1, FRANCHISE: 2, CONSIGNEE: 3, OFFICE: 4 };
+
+/** Tick which branches to see on the transfer list (owner request 2026-09-29). None ticked = all. */
+function BranchTicks({ locations, value, onChange }: { locations: { id: string; name: string; type: string }[]; value: string[]; onChange: (v: string[]) => void }) {
+  const [open, setOpen] = useState(false);
+  if (locations.length < 2) return null;
+  const sorted = [...locations].sort((a, b) => (TYPE_ORDER[a.type] ?? 9) - (TYPE_ORDER[b.type] ?? 9) || a.name.localeCompare(b.name));
+  const names = sorted.filter((l) => value.includes(l.id)).map(locLabel);
+  const flip = (id: string) => onChange(value.includes(id) ? value.filter((x) => x !== id) : [...value, id]);
+  return <Field label="Branches">
+    <div className="relative">
+      <button type="button" data-testid="branch-ticks" className="flex min-h-9 max-w-72 items-center gap-2 truncate rounded-md border border-slate-300 bg-white px-3 text-left text-sm" onClick={() => setOpen(!open)}>
+        <span className="truncate">{names.length === 0 ? 'All branches' : names.length <= 2 ? names.join(', ') : `${names.length} branches ticked`}</span><span className="text-slate-400">▾</span>
+      </button>
+      {open && <div className="absolute right-0 z-20 mt-1 w-72 rounded-lg border border-slate-200 bg-white p-2 shadow-lg">
+        <div className="mb-1 flex items-center justify-between px-1 text-xs text-slate-500"><span>Tick the branches to see</span>{value.length > 0 && <button type="button" className="text-brand hover:underline" onClick={() => onChange([])}>Clear (all)</button>}</div>
+        <div className="max-h-72 overflow-auto">{sorted.map((l) => <label key={l.id} className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-sm hover:bg-slate-50"><input type="checkbox" checked={value.includes(l.id)} onChange={() => flip(l.id)} />{locLabel(l)}</label>)}</div>
+        <div className="mt-1 text-right"><button type="button" className="rounded-md bg-navy px-3 py-1 text-xs font-semibold text-white" onClick={() => setOpen(false)}>Done</button></div>
+      </div>}
+    </div>
+  </Field>;
+}
+
 /** §7.3 Pull-Out (sender) / Transfer-In (receiver): one document, two views. */
 export function TransfersPage() {
   const nav = useNavigate(); const { me, can } = useAuth(); const qc = useQueryClient(); const [sp] = useSearchParams();
   const [direction, setDirection] = useState(sp.get('direction') ?? '');
-  const q = useQuery({ queryKey: ['transfers', direction], queryFn: () => api.get<Tr[]>(`/api/transfers${direction ? `?direction=${direction}` : ''}`) });
+  const [ticked, setTicked] = useState<string[]>([]);
+  const listQs = new URLSearchParams({ ...(direction ? { direction } : {}), ...(ticked.length ? { branchIds: ticked.join(',') } : {}) }).toString();
+  const q = useQuery({ queryKey: ['transfers', direction, ticked.join()], queryFn: () => api.get<Tr[]>(`/api/transfers${listQs ? `?${listQs}` : ''}`) });
   const locations = useQuery({ queryKey: ['locations'], queryFn: () => api.get<{ id: string; name: string; type: string; code: string }[]>('/api/locations') });
   const own = me!.locations[0];
   const [f, setF] = useState({ fromLocationId: '', toLocationId: '', transferType: 'RESTOCK', returnReason: '', notes: '' });
@@ -28,12 +54,12 @@ export function TransfersPage() {
   const avail = useQuery({ queryKey: ['wh-avail', lines.map((l) => l.productId).join()], queryFn: () => api.get<{ productId: string; qty: number }[]>(`/api/stock/warehouse-availability?productIds=${lines.map((l) => l.productId).join(',')}`), enabled: lines.length > 0 });
   const m = useMutation({ mutationFn: () => api.post<{ id: string }>('/api/transfers', { fromLocationId: from, toLocationId: to, transferType: f.transferType, returnReason: f.returnReason || undefined, notes: f.notes, lines: lines.map((l) => ({ productId: l.productId, qty: l.qty })) }), onSuccess: (r) => { void qc.invalidateQueries({ queryKey: ['transfers'] }); nav(`/transfers/${r.id}`); } });
   return <div className="space-y-4">
-    <div className="flex flex-wrap items-end gap-2"><h1 className="mr-auto text-2xl font-bold tracking-tight text-navy">Transfers & Pull-outs</h1><Field label="View"><Select value={direction} onChange={(e) => setDirection(e.target.value)}><option value="">All</option><option value="out">Outgoing (Pull-Out)</option><option value="in">Incoming (Transfer-In)</option></Select></Field></div>
+    <div className="flex flex-wrap items-end gap-2"><h1 className="mr-auto text-2xl font-bold tracking-tight text-navy">Transfers & Pull-outs</h1><Field label="View"><Select value={direction} onChange={(e) => setDirection(e.target.value)}><option value="">All</option><option value="out">Outgoing (Pull-Out)</option><option value="in">Incoming (Transfer-In)</option></Select></Field><BranchTicks locations={(locations.data ?? []).filter((l) => l.type !== 'VIRTUAL' && !(me!.locationScoped && me!.locations.length === 1 && me!.locations[0].id === l.id))} value={ticked} onChange={setTicked} /></div>
     {me!.locationScoped && !warehouseUser && (can('transfer.confirm') || can('transfer.create')) && <StockRequestCard />}
     {can('transfer.create') && <Card title={warehouseUser ? 'Send stock from the warehouse (to a branch, franchise or consignee)' : me!.locationScoped ? `Pull-out from ${own?.name ?? 'my branch'} (return to warehouse or send to another branch)` : 'New transfer'}>
       <div className="grid gap-3 md:grid-cols-4">
-        <Field label="From">{me!.locationScoped ? <div className="flex min-h-9 items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm font-medium" data-testid="from-fixed">{own?.name ?? '—'}</div> : <Select value={from} onChange={(e) => setF({ ...f, fromLocationId: e.target.value })}><option value="">—</option>{locations.data?.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</Select>}</Field>
-        <Field label="To"><Select value={to} onChange={(e) => setF({ ...f, toLocationId: e.target.value })}><option value="">—</option>{locations.data?.filter((l) => (l.type !== 'VIRTUAL' || l.code === 'V-CUSTRET') && l.id !== from).map((l) => <option key={l.id} value={l.id}>{l.name}{l.type === 'FRANCHISE' ? ' (franchise)' : l.type === 'CONSIGNEE' ? ' (consignee)' : ''}</option>)}</Select></Field>
+        <Field label="From">{me!.locationScoped ? <div className="flex min-h-9 items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm font-medium" data-testid="from-fixed">{own?.name ?? '—'}</div> : <Select value={from} onChange={(e) => setF({ ...f, fromLocationId: e.target.value })}><option value="">—</option>{locations.data?.map((l) => <option key={l.id} value={l.id}>{locLabel(l)}</option>)}</Select>}</Field>
+        <Field label="To"><Select value={to} onChange={(e) => setF({ ...f, toLocationId: e.target.value })}><option value="">—</option>{locations.data?.filter((l) => (l.type !== 'VIRTUAL' || l.code === 'V-CUSTRET') && l.id !== from).map((l) => <option key={l.id} value={l.id}>{locLabel(l)}</option>)}</Select></Field>
         <Field label="Type"><Select value={f.transferType} onChange={(e) => setF({ ...f, transferType: e.target.value })}>{['RESTOCK', 'RETURN', 'REPLACEMENT', 'INTERNAL', 'CONSIGNMENT_OUT', 'CONSIGNMENT_RETURN'].map((t) => <option key={t}>{t}</option>)}</Select></Field>
         {f.transferType === 'RETURN' && <Field label="Return reason"><Select value={f.returnReason} onChange={(e) => setF({ ...f, returnReason: e.target.value })}><option value="">—</option>{['clumped', 'damaged', 'wrong item', 'expired', 'other'].map((r) => <option key={r}>{r}</option>)}</Select></Field>}
         <Field label="Notes" className="md:col-span-4"><Input value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} /></Field>
@@ -43,7 +69,7 @@ export function TransfersPage() {
       <p className="mt-2 text-xs text-slate-500">Batches are assigned first-expiry-first-out; the receiver sees batch and expiry.</p>
       <Button className="mt-3" disabled={!from || !to || !lines.length || m.isPending} onClick={() => m.mutate()}>Create draft</Button><ErrorBox error={m.error} />
     </Card>}
-    <DataTable exportName="TransferRegister" data={q.data ?? []} onRowClick={(r) => nav(`/transfers/${r.id}`)} columns={[{ header: 'Date', accessorKey: 'docDate', cell: (c) => fmtDate(c.getValue()) }, { header: 'Control #', accessorKey: 'controlNo' }, { header: 'From', accessorFn: (r) => r.fromLocation.name }, { header: 'To', accessorFn: (r) => r.toLocation.name }, { header: 'Type', accessorKey: 'transferType' }, { header: 'Lines', accessorFn: (r) => r.lines.length }, { header: 'Status', accessorKey: 'status', cell: (c) => <Badge tone={statusTone(String(c.getValue()))}>{String(c.getValue())}</Badge> }]} />
+    <DataTable exportName="TransferRegister" data={q.data ?? []} onRowClick={(r) => nav(`/transfers/${r.id}`)} columns={[{ header: 'Date', accessorKey: 'docDate', cell: (c) => fmtDate(c.getValue()) }, { header: 'Control #', accessorKey: 'controlNo' }, { header: 'From', accessorFn: (r) => locLabel(r.fromLocation) }, { header: 'To', accessorFn: (r) => locLabel(r.toLocation) }, { header: 'Type', accessorKey: 'transferType' }, { header: 'Lines', accessorFn: (r) => r.lines.length }, { header: 'Status', accessorKey: 'status', cell: (c) => <Badge tone={statusTone(String(c.getValue()))}>{String(c.getValue())}</Badge> }]} />
   </div>;
 }
 

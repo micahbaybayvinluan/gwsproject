@@ -59,7 +59,7 @@ async function resetTransactionalData() {
   if (process.env.NODE_ENV !== 'test') throw new Error('refusing to reset data outside NODE_ENV=test');
   await prisma.$executeRawUnsafe(`TRUNCATE stock_ledger, stock_balances, receiving_lines, receiving_docs, transfer_lines, transfer_docs, sales_lines, payment_allocations, payments, sales_docs, expense_docs, count_lines, count_docs, discrepancy_cases, charge_form_allocations, charge_form_lines, charge_forms, expiry_writeoff_lines, expiry_writeoff_docs, approval_decisions, approval_requests, notifications, audit_log, batches, daily_closes, post_close_edits, journal_lines, journal_vouchers, beginning_balances, accounting_periods, voucher_sequences, control_sequences, alert_states, attachments, employee_loans, payroll_lines, payroll_runs, employees, min_stock_levels, revaluation_lines, revaluation_entries, cash_deposits, login_session_records, cash_fund_txns, cash_fund_checks, store_inspections, contribution_remittances, document_revisions, price_change_lines, price_change_docs, price_update_logs, franchise_salaries, franchise_charges, franchise_expenses CASCADE`);
   await prisma.$executeRawUnsafe(`TRUNCATE cash_deposits, cash_deposit_extensions, hr_notices, sales_report_submissions`);
-  await prisma.$executeRawUnsafe(`TRUNCATE ecom_orders, ecom_order_lines, ecom_settlements, ecom_returns, ecom_ad_spend, ecom_sku_maps, transfer_discrepancies, sales_targets`);
+  await prisma.$executeRawUnsafe(`TRUNCATE ecom_orders, ecom_order_lines, ecom_settlements, ecom_returns, ecom_ad_spend, ecom_sku_maps, transfer_discrepancies, sales_targets, opening_ar_entries`);
   await prisma.$executeRawUnsafe(`UPDATE locations SET franchise_associate_receives = false, cash_deposit_max_days = 1`);
   await prisma.$executeRawUnsafe(`UPDATE cash_funds SET balance = imprest_amount`);
   await prisma.priceList.deleteMany({ where: { product: { name: { startsWith: 'E2E ' } } } });
@@ -1482,5 +1482,78 @@ describe('Sales Manager and Agent accounts: targets and achievement, never cost 
     await as('sales.manager').get('/api/accounts').expect(403);
     const dash = ok(await as('sales.manager').get('/api/dashboard')).body; expect(dash.targets.target).toBeGreaterThan(0);
     expect(ok(await as('agent.jerick').get('/api/dashboard')).body.agentMonth.target).toBe(5000);
+  });
+});
+
+describe('Transfers & Pull-outs: tick which branches to see (owner request 2026-09-29)', () => {
+  it('the Owner sees only transfers to or from the ticked branches, and Pull-out / Transfer-in apply to them; the warehouse picks the other branch', async () => {
+    const id = async (code: string) => (await prisma.location.findUniqueOrThrow({ where: { code } })).id;
+    const wh = await id('WH'); const west = await id('WESTAVE'); const csr = await id('CSR');
+    const cats = ok(await as('admin').get('/api/categories')).body as { id: string; accountingClass: string }[];
+    const p = ok(await as('admin').post('/api/products').send({ name: `TICK Whey ${run}`, categoryId: cats.find((c) => c.accountingClass === 'SUPPLEMENT')!.id, prices: { RETAIL: 1000, FRANCHISE: 700 }, cost: 500 })).body.id;
+    const batch = await prisma.batch.create({ data: { productId: p, batchNo: `TICK-${run}`, receivedRef: 'TEST', unitCost: '500.00' } });
+    await prisma.stockBalance.create({ data: { locationId: wh, productId: p, batchId: batch.id, qty: 10 } });
+    const toWest = ok(await as('wh.incharge').post('/api/transfers').send({ fromLocationId: wh, toLocationId: west, transferType: 'RESTOCK', lines: [{ productId: p, qty: 1 }] })).body;
+    const toCsr = ok(await as('wh.incharge').post('/api/transfers').send({ fromLocationId: wh, toLocationId: csr, transferType: 'RESTOCK', lines: [{ productId: p, qty: 1 }] })).body;
+    type T = { id: string; fromLocation: { id: string }; toLocation: { id: string } };
+    const ids = (rows: T[]) => rows.map((r) => r.id);
+
+    const westOnly = ok(await as('admin').get(`/api/transfers?branchIds=${west}`)).body as T[];
+    expect(ids(westOnly)).toContain(toWest.id); expect(ids(westOnly)).not.toContain(toCsr.id);
+    expect(westOnly.every((r) => r.fromLocation.id === west || r.toLocation.id === west)).toBe(true);
+    const both = ids(ok(await as('admin').get(`/api/transfers?branchIds=${west},${csr}`)).body);
+    expect(both).toEqual(expect.arrayContaining([toWest.id, toCsr.id]));
+    const westIn = ok(await as('admin').get(`/api/transfers?direction=in&branchIds=${west}`)).body as T[];
+    expect(ids(westIn)).toContain(toWest.id); expect(westIn.every((r) => r.toLocation.id === west)).toBe(true);
+    expect(ids(ok(await as('admin').get(`/api/transfers?direction=out&branchIds=${west}`)).body)).not.toContain(toWest.id);
+
+    // the warehouse keeps its own side; the tick picks the receiving branch
+    const whToCsr = ok(await as('wh.incharge').get(`/api/transfers?direction=out&branchIds=${csr}`)).body as T[];
+    expect(ids(whToCsr)).toContain(toCsr.id); expect(ids(whToCsr)).not.toContain(toWest.id);
+    expect(whToCsr.every((r) => r.fromLocation.id === wh && r.toLocation.id === csr)).toBe(true);
+  });
+});
+
+describe('Opening AR from before GWS-ERP, entered by Accounting and approved by the Owner (owner request 2026-09-29)', () => {
+  it('Accounting enters AR for any branch; it shows in the branch AR only after the Owner approves (tick all); duplicates, PDC checks, rejections and permissions', async () => {
+    const csr = (await prisma.location.findUniqueOrThrow({ where: { code: 'CSR' } })).id;
+    const dealer = (ok(await as('acct.head').get('/api/customers')).body as { id: string; type: string; name: string }[]).find((c) => c.type === 'DEALER')!;
+    const entry = (dr: string, extra: Record<string, unknown> = {}) => ({ locationId: csr, kind: 'DEALER', customerId: dealer.id, drSiNo: dr, docDate: '2026-06-15', dueDate: '2026-07-15', amount: 12500, ...extra });
+    const dr1 = `OPEN-${run}-1`, dr2 = `OPEN-${run}-2`, dr3 = `OPEN-${run}-3`;
+
+    await as('sales.csr').post('/api/ar/opening').send(entry(dr1)).expect(403); // branches cannot make opening AR
+    await as('sales.csr').get('/api/ar/opening').expect(403);
+    await as('acct.head').post('/api/ar/opening').send(entry(`${dr1}x`, { docDate: '2099-01-01', dueDate: '2099-02-01' })).expect(400); // not in the future
+    await as('acct.head').post('/api/ar/opening').send(entry(`${dr1}y`, { pdcChequeNo: '000123' })).expect(400); // a PDC needs its date
+    const e1 = ok(await as('acct.head').post('/api/ar/opening').send(entry(dr1))).body;
+    const e2 = ok(await as('acct.assoc').post('/api/ar/opening').send(entry(dr2, { amount: 3000, pdcBank: 'BDO', pdcChequeNo: '000777', pdcDate: '2026-10-05' }))).body;
+    const e3 = ok(await as('acct.assoc').post('/api/ar/opening').send(entry(dr3, { amount: 50 }))).body;
+    expect(e1.status).toBe('PENDING');
+    await as('acct.head').post('/api/ar/opening').send(entry(dr1)).expect(400); // same DR/SI at the same branch
+
+    const csrAr = async () => (ok(await as('sales.csr').get('/api/ar')).body as { drSiNo: string; balance: string; dueDate: string; pdc: unknown }[]).filter((r) => r.drSiNo.startsWith(`OPEN-${run}`));
+    expect(await csrAr()).toHaveLength(0); // nothing reaches the branch before the Owner approves
+
+    const inbox = ok(await as('admin').get('/api/approvals/inbox')).body.items as { id: string; type: string; documentId: string }[];
+    const mine = inbox.filter((i) => i.type === 'OPENING_AR' && [e1.id, e2.id].includes(i.documentId));
+    expect(mine).toHaveLength(2);
+    const bulk = ok(await as('admin').post('/api/approvals/bulk').send({ ids: mine.map((i) => i.id), decision: 'APPROVE' })).body as { ok: boolean }[];
+    expect(bulk.every((r) => r.ok)).toBe(true);
+    const r3 = inbox.find((i) => i.documentId === e3.id)!;
+    await as('admin').post(`/api/approvals/${r3.id}/decide`).send({ decision: 'REJECT', note: 'Already paid in 2025' }).expect((res) => expect(res.status).toBeLessThan(300));
+
+    const ar = await csrAr();
+    expect(ar.map((r) => r.drSiNo).sort()).toEqual([dr1, dr2]);
+    expect(Number(ar.find((r) => r.drSiNo === dr1)!.balance)).toBe(12500);
+    expect(ar.find((r) => r.drSiNo === dr2)!.pdc).toBeTruthy();
+    const notes = JSON.stringify(ok(await as('sales.csr').get('/api/notifications')).body);
+    expect(notes).toContain('OPENING_AR'); expect(notes).toContain(dr1);
+    const list = ok(await as('acct.assoc').get('/api/ar/opening')).body as { drSiNo: string; status: string; decisionNote: string | null }[];
+    expect(list.find((r) => r.drSiNo === dr3)).toMatchObject({ status: 'REJECTED', decisionNote: 'Already paid in 2025' });
+    expect(list.find((r) => r.drSiNo === dr1)!.status).toBe('APPROVED');
+    // the Owner's own entry applies at once
+    expect(ok(await as('admin').post('/api/ar/opening').send(entry(`OPEN-${run}-4`, { amount: 100 }))).body.status).toBe('APPROVED');
+    // the Excel import is for Accounting too, and goes through the same approval
+    await as('sales.csr').post('/api/imports/open-ar').expect(403);
   });
 });

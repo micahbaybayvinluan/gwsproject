@@ -47,14 +47,20 @@ export class TransfersService implements OnModuleInit {
 
   static readonly INCLUDE = { fromLocation: { select: { id: true, code: true, name: true, type: true } }, toLocation: { select: { id: true, code: true, name: true, type: true } }, lines: { include: { product: { select: { id: true, sku: true, name: true, category: { select: { accountingClass: true } } } }, batch: { select: { id: true, batchNo: true, expiryDate: true, unitCost: true, isConsignmentIn: true } } } } } as const;
 
-  async list(user: SessionUser, q: { direction?: 'out' | 'in'; status?: string; locationId?: string; from?: string; to?: string }) {
+  async list(user: SessionUser, q: { direction?: 'out' | 'in'; status?: string; locationId?: string; branchIds?: string[]; from?: string; to?: string }) {
     const scope = user.locationScoped ? user.locationIds : null;
     const where: Prisma.TransferDocWhereInput = { status: q.status as never, docDate: q.from || q.to ? { gte: q.from ? toDateOnly(q.from) : undefined, lte: q.to ? toDateOnly(q.to) : undefined } : undefined };
     if (q.locationId && user.locationScoped && !user.locationIds.includes(q.locationId)) throw new ForbiddenException('Location outside your assignment');
-    const loc = q.locationId ? [q.locationId] : scope;
-    if (q.direction === 'out') where.fromLocationId = loc ? { in: loc } : { not: '' };
-    else if (q.direction === 'in') where.toLocationId = loc ? { in: loc } : { not: '' };
-    else where.OR = loc ? [{ fromLocationId: { in: loc } }, { toLocationId: { in: loc } }] : [{ fromLocationId: { not: '' } }];
+    const ticked = q.branchIds?.length ? q.branchIds : null;
+    // Branches ticked on the list (owner request 2026-09-29): an unscoped user reads "out"/"in" from the ticked branches' side;
+    // a branch user keeps their own side and the ticks pick the other branch.
+    const loc = q.locationId ? [q.locationId] : scope ?? ticked;
+    const and: Prisma.TransferDocWhereInput[] = [];
+    if (q.direction === 'out') and.push({ fromLocationId: loc ? { in: loc } : { not: '' } });
+    else if (q.direction === 'in') and.push({ toLocationId: loc ? { in: loc } : { not: '' } });
+    else if (loc) and.push({ OR: [{ fromLocationId: { in: loc } }, { toLocationId: { in: loc } }] });
+    if (ticked && loc !== ticked) and.push({ OR: [{ fromLocationId: { in: ticked } }, { toLocationId: { in: ticked } }] });
+    if (and.length) where.AND = and;
     const rows = await this.prisma.db.transferDoc.findMany({ where, include: TransfersService.INCLUDE, orderBy: { createdAt: 'desc' }, take: 300 });
     // a draft belongs to the sending side; the receiving location gets its copy once it is submitted
     return rows.filter((d) => d.status !== 'DRAFT' || TransfersService.isSenderSide(user, d));

@@ -12,7 +12,7 @@ export const PAGES: Record<string, PageInfo> = {
   '/targets': { label: 'Sales Targets', summary: 'Monthly sales targets per branch and per agent, and how much is achieved so far. The Sales Manager sets them; the Owner approves.' },
   '/sales/new': { label: 'New Sale', summary: 'Record a sale from the paper DR/SI: channel, payment, items and, if allowed, an incentive paid from the sale. Stock is deducted at once.' },
   '/sales': { label: 'Sales List', summary: 'All recorded sales for the chosen dates and branch. Open a sale to print the DR, void it or request a correction.' },
-  '/ar': { label: 'AR & Collections', summary: 'Sales on credit or post-dated cheque, what each customer still owes, overdue accounts, and payments received.' },
+  '/ar': { label: 'AR & Collections', summary: 'Sales on credit or post-dated cheque, what each customer still owes, overdue accounts, and payments received. Accounting also enters credit from before GWS-ERP here (Opening AR), which the Owner approves.' },
   '/expenses': { label: 'Expenses', summary: 'Record expenses paid by the branch (from the cash on hand or the cash fund) with their receipts. Cash on hand cannot pay more than the branch has.' },
   '/closing': { label: 'Daily Close & Deposit', summary: "End of day: the day's cash summary, the money count, the bank deposit of the day's cash and post-close correction requests." },
   '/cash-on-hand': { label: 'Cash on Hand', summary: 'Cash from sales that is not yet in the bank, the deadline for each day, and requests for more days to deposit.' },

@@ -1,3 +1,4 @@
+import { locLabel } from '@/lib/utils';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { api, fmtDate } from '@/lib/api';
@@ -101,7 +102,7 @@ export function TransferEditor({ doc, own, preparedByName, onClose }: { doc: TrD
   return <Card title={own ? 'Edit draft' : `Propose an edit (${preparedByName ?? 'the preparer'} must accept it)`}>
     {doc.status === 'SUBMITTED' && <p className="mb-2 text-xs text-amber-700">This transfer is waiting for approval. Saving sends it back through approval with the new figures.</p>}
     <div className="grid gap-3 md:grid-cols-4">
-      <Field label="Trans. to"><Select value={h.toLocationId} onChange={(e) => setH({ ...h, toLocationId: e.target.value })}>{locations.data?.filter((l) => (l.type !== 'VIRTUAL' || l.code === 'V-CUSTRET') && l.id !== doc.fromLocation.id).map((l) => <option key={l.id} value={l.id}>{l.name}{l.type === 'FRANCHISE' ? ' (franchise)' : ''}</option>)}</Select></Field>
+      <Field label="Trans. to"><Select value={h.toLocationId} onChange={(e) => setH({ ...h, toLocationId: e.target.value })}>{locations.data?.filter((l) => (l.type !== 'VIRTUAL' || l.code === 'V-CUSTRET') && l.id !== doc.fromLocation.id).map((l) => <option key={l.id} value={l.id}>{locLabel(l)}</option>)}</Select></Field>
       <Field label="Type"><Select value={h.transferType} onChange={(e) => setH({ ...h, transferType: e.target.value })}>{['RESTOCK', 'RETURN', 'REPLACEMENT', 'INTERNAL', 'CONSIGNMENT_OUT', 'CONSIGNMENT_RETURN'].map((t) => <option key={t}>{t}</option>)}</Select></Field>
       <Field label="Date"><Input type="date" value={h.docDate} onChange={(e) => setH({ ...h, docDate: e.target.value })} /></Field>
       <Field label="Notes"><Input value={h.notes} onChange={(e) => setH({ ...h, notes: e.target.value })} /></Field>

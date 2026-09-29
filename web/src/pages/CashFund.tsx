@@ -1,3 +1,4 @@
+import { locLabel } from '@/lib/utils';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { api, fmtDate, peso } from '@/lib/api';
@@ -55,7 +56,7 @@ export function CashFundPage() {
         <tbody>{d.txns.map((t) => <tr key={t.id} className="border-t"><td className="py-1">{fmtDate(t.businessDate)}</td><td>{KIND[t.kind] ?? t.kind}{t.notes ? <span className="text-xs text-slate-500"> — {t.notes}</span> : null}</td><td>{t.controlNo ? <button className="text-brand underline" onClick={() => api.download(`/api/reports/forms/fund-replenishment/${t.id}.pdf`, `${t.controlNo}.pdf`)}>{t.controlNo}</button> : ''}</td><td className={`num ${Number(t.amount) < 0 ? 'text-red-700' : 'text-emerald-700'}`}>{peso(t.amount)}</td><td className="num">{peso(t.balanceAfter)}</td><td className="text-xs">{t.by ?? 'system'}</td></tr>)}</tbody></table></Card>
     </>}
     {can('cashfund.manage') && <Card title="Set up or change a branch fund">
-      <div className="flex flex-wrap items-end gap-2"><Field label="Branch"><Select value={setup.locationId} onChange={(e) => setSetup({ ...setup, locationId: e.target.value })}><option value="">—</option>{locations.data?.filter((l) => ['BRANCH', 'WAREHOUSE', 'OFFICE'].includes(l.type)).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</Select></Field><Field label="Fund amount (₱)"><Input type="number" value={setup.imprestAmount} onChange={(e) => setSetup({ ...setup, imprestAmount: e.target.value })} /></Field><Button disabled={!setup.locationId || !setup.imprestAmount} onClick={() => doSetup.mutate()}>Save</Button><Badge>the balance moves by the change</Badge></div>
+      <div className="flex flex-wrap items-end gap-2"><Field label="Branch"><Select value={setup.locationId} onChange={(e) => setSetup({ ...setup, locationId: e.target.value })}><option value="">—</option>{locations.data?.filter((l) => ['BRANCH', 'WAREHOUSE', 'OFFICE'].includes(l.type)).map((l) => <option key={l.id} value={l.id}>{locLabel(l)}</option>)}</Select></Field><Field label="Fund amount (₱)"><Input type="number" value={setup.imprestAmount} onChange={(e) => setSetup({ ...setup, imprestAmount: e.target.value })} /></Field><Button disabled={!setup.locationId || !setup.imprestAmount} onClick={() => doSetup.mutate()}>Save</Button><Badge>the balance moves by the change</Badge></div>
       <ErrorBox error={doSetup.error} />
     </Card>}
   </div>;

@@ -21,3 +21,10 @@ input, select, textarea { font-size: 16px; } /* prevents iOS zoom */
 
 /* receiving lines: room between Qty, Free and Expiry so the numbers never touch the dates */
 .rcv-lines th, .rcv-lines td { padding: 0.5rem 0.75rem; vertical-align: middle; }
+
+/* every table (ledgers, reports, lists): room between columns so values never touch (owner request 2026-09-29).
+   In the base layer, so a table that sets its own padding (px-4 …) keeps it. */
+@layer base {
+  th, td { padding-left: 0.625rem; padding-right: 0.625rem; }
+  th { white-space: nowrap; }
+}

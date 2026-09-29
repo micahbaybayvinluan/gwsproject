@@ -37,6 +37,10 @@ export const APPROVAL_TYPES = [
   'COST_EDIT',
   'ECOM_PULLOUT',
   'ECOM_SETTLEMENT',
+  'TRANSFER_DIFF_REVIEW',
+  'TRANSFER_DIFF_SENDER',
+  'TRANSFER_DIFF_ADMIN',
+  'SALES_TARGET',
 ] as const;
 export type ApprovalType = (typeof APPROVAL_TYPES)[number];
 
@@ -83,6 +87,8 @@ const BASE_KEYS = [
   'consignment.request',
   // e-commerce (TikTok, Shopee, Lazada): upload orders / payouts / ads (E-comm Associate), see the reports, receive returned parcels (Warehouse)
   'ecom.manage', 'ecom.view', 'ecom.receive',
+  // sales targets per branch and per agent: set (Sales Manager; the Owner approves) and follow; an agent's own sales at every branch
+  'target.manage', 'target.view', 'agent.self',
 ] as const;
 
 export const PERMISSION_KEYS: readonly string[] = [
@@ -95,7 +101,7 @@ export const ROLE_KEYS = [
   'ADMIN', 'EXTERNAL_AUDITOR', 'HEAD_AUDITOR', 'ASST_AUDITOR', 'AUDIT_ASSOCIATE',
   'WAREHOUSE_IN_CHARGE', 'WAREHOUSE_ASSOCIATE', 'SALES_ASSOCIATE', 'FRANCHISE_SALES_ASSOCIATE',
   'FRANCHISE_OWNER', 'CUSTOM', 'ACCOUNTING_HEAD', 'ACCOUNTING_ASSOCIATE', 'HR_STAFF', 'FIELD_AUDITOR', 'EXECUTIVE_ASSISTANT',
-  'ECOMM_ASSOCIATE',
+  'ECOMM_ASSOCIATE', 'SALES_MANAGER', 'AGENT',
 ] as const;
 export type RoleKey = (typeof ROLE_KEYS)[number];
 
@@ -155,8 +161,8 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
       'sale.create', 'sale.edit.sameday', 'sale.edit.postclose', 'sale.void', 'ar.collect', 'expense.create.branch',
       'count.create', 'discrepancy.resolve', 'writeoff.create', 'writeoff.approve', 'consignment.manage', 'gl.view', 'audit_log.view',
       'cashfund.view.all', 'cashfund.check', 'inspection.view', 'inspection.create', 'charge.assign',
-      ...approvals('COST_ON_RECEIVING', 'TRANSFER_INTERNAL', 'POST_CLOSE_EDIT', 'WRITEOFF', 'DISCREPANCY_RESOLUTION', 'EDIT_REQUEST', 'COUNT_REVISION', 'DISCREPANCY_EXPLANATION', 'AUDIT_REVISION', 'CASH_DEPOSIT_EXTENSION', 'CONSIGNMENT_CHECK_BRANCH', 'COST_EDIT'),
-      'revision.view', 'sale.incentive', 'cashdeposit.view.all', 'cashdeposit.settings', 'ecom.view',
+      ...approvals('COST_ON_RECEIVING', 'TRANSFER_INTERNAL', 'POST_CLOSE_EDIT', 'WRITEOFF', 'DISCREPANCY_RESOLUTION', 'EDIT_REQUEST', 'COUNT_REVISION', 'DISCREPANCY_EXPLANATION', 'AUDIT_REVISION', 'CASH_DEPOSIT_EXTENSION', 'CONSIGNMENT_CHECK_BRANCH', 'COST_EDIT', 'TRANSFER_DIFF_REVIEW'),
+      'revision.view', 'sale.incentive', 'cashdeposit.view.all', 'cashdeposit.settings', 'ecom.view', 'target.view',
     ],
   },
   {
@@ -181,8 +187,8 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
     name: 'Warehouse In-Charge',
     description: 'Inputs warehouse receiving, transfers (to any branch or franchise), counts and write-offs; costs are entered and approved by the Head Auditor. Approves every warehouse associate\'s goods in and out before stock moves (own entries need no second approval). Can edit an associate\'s entry, which takes effect only after that associate accepts it. No cost.',
     permissions: [
-      'product.view', 'supplier.view.code', 'location.view.own', 'receiving.create', 'transfer.create', 'transfer.confirm', 'warehouse.edit_others', 'approval.act.CONSIGNMENT_CHECK_WH', 'consignment.request', 'approval.act.WAREHOUSE_EDIT', 'approval.act.WAREHOUSE_IN', 'approval.act.WAREHOUSE_OUT', 'approval.act.ECOM_PULLOUT', 'ecom.receive',
-      'count.create', 'writeoff.create', 'report.inventory.own', 'dashboard.view', 'notification.view', 'price.view.RETAIL', 'cashfund.use', 'discrepancy.explain',
+      'product.view', 'supplier.view.code', 'location.view.own', 'receiving.create', 'transfer.create', 'transfer.confirm', 'warehouse.edit_others', 'approval.act.CONSIGNMENT_CHECK_WH', 'consignment.request', 'approval.act.WAREHOUSE_EDIT', 'approval.act.WAREHOUSE_IN', 'approval.act.WAREHOUSE_OUT', 'approval.act.ECOM_PULLOUT', 'ecom.receive', 'approval.act.TRANSFER_DIFF_SENDER',
+      'count.create', 'writeoff.create', 'report.inventory.own', 'dashboard.view', 'notification.view', 'price.view.RETAIL', 'discrepancy.explain',
     ],
   },
   {
@@ -198,8 +204,8 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
     permissions: [
       'product.view', 'location.view.own', 'price.view.RETAIL', 'price.view.DEALER', 'price.view.AGENT',
       'transfer.create', 'transfer.confirm', 'sale.create', 'sale.edit.sameday', 'ar.view', 'ar.collect',
-      'expense.create.branch', 'expense.view', 'count.create', 'report.sales.own', 'report.inventory.own', 'dashboard.view', 'notification.view', 'writeoff.create', 'cashfund.use', 'discrepancy.explain',
-      'sale.incentive', 'consignment.request',
+      'expense.create.branch', 'expense.view', 'count.create', 'report.sales.own', 'report.inventory.own', 'dashboard.view', 'notification.view', 'cashfund.use', 'discrepancy.explain',
+      'sale.incentive', 'consignment.request', 'approval.act.TRANSFER_DIFF_SENDER',
     ],
   },
   {
@@ -215,7 +221,7 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
     permissions: [
       'product.view', 'location.view.own', 'price.view.RETAIL', 'price.view.FRANCHISE', 'transfer.confirm', 'sale.create', 'sale.edit.sameday', 'sale.edit.postclose',
       'ar.view', 'ar.collect', 'count.create', 'report.sales.own', 'report.inventory.own', 'franchise.portal', 'franchise.expense', 'franchise.pnl',
-      'dashboard.view', 'notification.view', ...approvals('POST_CLOSE_EDIT_FRANCHISE'),
+      'dashboard.view', 'notification.view', ...approvals('POST_CLOSE_EDIT_FRANCHISE', 'TRANSFER_DIFF_SENDER'),
     ],
   },
   {
@@ -263,6 +269,18 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
     name: 'E-comm Associate',
     description: 'E-commerce arm (TikTok, Shopee, Lazada, each kept separate): uploads the platform order / waybill files, which draft the warehouse pull-out automatically (the Warehouse In-Charge approves); records returned parcels; uploads payout (settlement) files for Accounting and the monthly ads. Sees selling prices, fees and the e-commerce report; never cost. No separate e-commerce stock: items come from the Warehouse.',
     permissions: ['ecom.manage', 'ecom.view', 'product.view', 'price.view.RETAIL', 'dashboard.view', 'notification.view'],
+  },
+  {
+    key: 'SALES_MANAGER',
+    name: 'Sales Manager',
+    description: 'Monitors sales targets and their achievement. Sees the sales of every branch, agent and e-commerce platform (amounts, channels, payment types, top products), the Daily Sales Reports, customer contacts and the receivables of dealers, franchises and agents. Sets monthly targets per branch and per agent (the Owner approves) and links agents to their accounts. Never sees cost, margin, supplier data, cash counts, payroll or the books; records no sales or money.',
+    permissions: ['target.manage', 'target.view', 'report.sales.all', 'ar.view', 'product.view', 'location.view.all', 'price.view.RETAIL', 'price.view.DEALER', 'price.view.AGENT', 'price.view.FRANCHISE', 'dashboard.view', 'notification.view'],
+  },
+  {
+    key: 'AGENT',
+    name: 'Agent',
+    description: 'A sales agent: sees only their own sales, at whichever branch the items came from, their monthly target and how much of it is achieved, and their own receivables (customers who have not paid yet) with due dates. Retail and agent prices only; no cost, no other agent\'s or branch\'s data.',
+    permissions: ['agent.self', 'product.view', 'price.view.RETAIL', 'price.view.AGENT', 'dashboard.view', 'notification.view'],
   },
 ];
 
@@ -324,6 +342,14 @@ export const APPROVAL_ROUTING: Record<ApprovalType, { roles: RoleKey[]; anyOf?: 
   ECOM_PULLOUT: { roles: ['WAREHOUSE_IN_CHARGE'] },
   /** E-commerce payout (settlement) file: the Accounting Head checks the fees and payout before the sale and fees are posted. */
   ECOM_SETTLEMENT: { roles: ['ACCOUNTING_HEAD'] },
+  /** Received quantity differs from the transfer form: the Head Auditor reviews first. */
+  TRANSFER_DIFF_REVIEW: { roles: ['HEAD_AUDITOR'] },
+  /** Then the sending branch confirms (any one of its staff) within 2 days. */
+  TRANSFER_DIFF_SENDER: { roles: [], dynamic: true, anyOf: true },
+  /** The sending branch disagrees or does not answer: the Owner decides. */
+  TRANSFER_DIFF_ADMIN: { roles: ['ADMIN'] },
+  /** A monthly sales target (branch or agent) set by the Sales Manager: the Owner approves. */
+  SALES_TARGET: { roles: ['ADMIN'] },
 };
 
 /** EDIT_REQUEST approvers depend on who asks (§6.1). */

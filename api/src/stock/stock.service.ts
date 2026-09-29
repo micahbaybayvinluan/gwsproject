@@ -4,6 +4,7 @@ import { MovementType, Prisma } from '@prisma/client';
 import { PrismaService, Tx } from '../common/prisma.service';
 import { manilaDateStr, toDateOnly, todayManila, dateStr } from '../common/manila';
 import type { SessionUser } from '../common/request-context';
+import { requestContext } from '../common/request-context';
 
 export const VIRTUAL_CODES = { IN_TRANSIT: 'V-TRANSIT', OPENING: 'V-OPENING', CUSTOMER_RETURNS: 'V-CUSTRET', OFFICE: 'OFFICE', PULLOUT1: 'V-PULLOUT1', PULLOUT2: 'V-PULLOUT2', PULLOUT3: 'V-PULLOUT3', FOR_REPLACEMENT: 'V-REPLACE' } as const;
 
@@ -65,6 +66,22 @@ export class StockService {
     return picks;
   }
 
+  /**
+   * The day's movements per product at a location, for the count sheet (owner request 2026-09-29): from the beginning count, what
+   * came in (supplier deliveries, transfers in, customer returns), what went out (sales, transfers / pull-outs out) and anything else
+   * (write-offs, tasting, adjustments). Beginning + in − out ± other = expected.
+   */
+  async dayMovements(locationId: string, date: Date, productIds?: string[]) {
+    const rows = await this.prisma.db.stockLedger.groupBy({ by: ['productId', 'movementType'], where: { locationId, businessDate: date, productId: productIds ? { in: productIds } : undefined, qtyDelta: { gt: 0 } }, _sum: { qtyDelta: true } });
+    const neg = await this.prisma.db.stockLedger.groupBy({ by: ['productId', 'movementType'], where: { locationId, businessDate: date, productId: productIds ? { in: productIds } : undefined, qtyDelta: { lt: 0 } }, _sum: { qtyDelta: true } });
+    const out = new Map<string, { received: number; transferIn: number; returns: number; sales: number; transferOut: number; other: number }>();
+    const get = (id: string) => { let m = out.get(id); if (!m) { m = { received: 0, transferIn: 0, returns: 0, sales: 0, transferOut: 0, other: 0 }; out.set(id, m); } return m; };
+    const TRANSFERS = ['TRANSFER_IN', 'TRANSFER_OUT', 'RETURN_TO_WAREHOUSE', 'RETURN_TO_SUPPLIER', 'CONSIGN_OUT', 'CONSIGN_RETURN'];
+    for (const r of rows) { const q = r._sum.qtyDelta ?? 0; const m = get(r.productId); if (r.movementType === 'RECEIVE') m.received += q; else if (r.movementType === 'SALE_RETURN') m.returns += q; else if (TRANSFERS.includes(r.movementType)) m.transferIn += q; else m.other += q; }
+    for (const r of neg) { const q = -(r._sum.qtyDelta ?? 0); const m = get(r.productId); if (r.movementType === 'SALE' || r.movementType === 'CONSIGN_SALE') m.sales += q; else if (TRANSFERS.includes(r.movementType)) m.transferOut += q; else m.other -= q; }
+    return out;
+  }
+
   async onHand(locationId: string, productId: string, tx: Tx | null = null): Promise<number> {
     const db = (tx ?? this.prisma.db);
     const r = await db.stockBalance.aggregate({ where: { locationId, productId }, _sum: { qty: true } });
@@ -99,7 +116,39 @@ export class StockService {
       productId: q.productId, locationId: q.locationId ?? (user.locationScoped ? { in: user.locationIds } : { not: '' }),
       businessDate: q.from || q.to ? { gte: q.from ? toDateOnly(q.from) : undefined, lte: q.to ? toDateOnly(q.to) : undefined } : undefined,
     };
-    return this.prisma.db.stockLedger.findMany({ where, include: { batch: { select: { batchNo: true, expiryDate: true } }, product: { select: { sku: true, name: true } }, location: { select: { code: true, name: true } } }, orderBy: { postedAt: 'desc' }, take: q.take ?? 500 });
+    return this.prisma.db.stockLedger.findMany({ where, include: { batch: { select: { batchNo: true, expiryDate: true } }, product: { select: { sku: true, name: true } }, location: { select: { code: true, name: true } } }, orderBy: { postedAt: 'desc' }, take: q.take ?? 500 }).then((rows) => this.withDocuments(rows));
+  }
+
+  /**
+   * Each movement with the number and page of the document behind it (DR, pull-out / transfer-in, receiving, count, write-off…),
+   * so a click on the ledger opens it (owner request 2026-09-29). The rows are already limited to the user's locations.
+   */
+  async withDocuments<T extends { documentType: string; documentId: string; locationId: string }>(rows: T[]) {
+    const ids = (t: string) => [...new Set(rows.filter((r) => r.documentType === t).map((r) => r.documentId))];
+    const docs = await requestContext.runSystem(async () => ({
+      sales: await this.prisma.db.salesDoc.findMany({ where: { id: { in: ids('SalesDoc') } }, select: { id: true, controlNo: true, drSiNo: true } }),
+      transfers: await this.prisma.db.transferDoc.findMany({ where: { id: { in: ids('TransferDoc') } }, select: { id: true, controlNo: true, transferInNo: true, fromLocationId: true, transferType: true } }),
+      receiving: await this.prisma.db.receivingDoc.findMany({ where: { id: { in: ids('ReceivingDoc') } }, select: { id: true, controlNo: true } }),
+      counts: await this.prisma.db.countDoc.findMany({ where: { id: { in: ids('CountDoc') } }, select: { id: true, controlNo: true } }),
+      writeoffs: await this.prisma.db.expiryWriteoffDoc.findMany({ where: { id: { in: ids('ExpiryWriteoffDoc') } }, select: { id: true, controlNo: true } }),
+      cases: await this.prisma.db.discrepancyCase.findMany({ where: { id: { in: ids('DiscrepancyCase') } }, select: { id: true, caseNo: true } }),
+      ecomReturns: await this.prisma.db.ecomReturn.findMany({ where: { id: { in: ids('EcomReturn') } }, select: { id: true, controlNo: true } }),
+    }));
+    return rows.map((r) => {
+      let documentNo: string | null = null; let documentLink: string | null = null; let documentLabel = r.documentType;
+      switch (r.documentType) {
+        case 'SalesDoc': { const d = docs.sales.find((x) => x.id === r.documentId); documentLabel = 'Sale (DR)'; documentNo = d ? `${d.controlNo} · DR/SI ${d.drSiNo}` : null; documentLink = `/sales/${r.documentId}`; break; }
+        case 'TransferDoc': { const d = docs.transfers.find((x) => x.id === r.documentId); const out = d?.fromLocationId === r.locationId; documentLabel = d?.transferType === 'ECOMMERCE' ? 'E-commerce pull-out' : out ? 'Pull-out' : 'Transfer-in'; documentNo = d ? (out || !d.transferInNo ? d.controlNo : `${d.transferInNo} (${d.controlNo})`) : null; documentLink = `/transfers/${r.documentId}`; break; }
+        case 'ReceivingDoc': { documentLabel = 'Supplier delivery'; documentNo = docs.receiving.find((x) => x.id === r.documentId)?.controlNo ?? null; documentLink = `/receiving/${r.documentId}`; break; }
+        case 'CountDoc': { documentLabel = 'Count sheet'; documentNo = docs.counts.find((x) => x.id === r.documentId)?.controlNo ?? null; documentLink = `/counts/${r.documentId}`; break; }
+        case 'ExpiryWriteoffDoc': { documentLabel = 'Write-off'; documentNo = docs.writeoffs.find((x) => x.id === r.documentId)?.controlNo ?? null; documentLink = '/writeoffs'; break; }
+        case 'DiscrepancyCase': { documentLabel = 'Discrepancy case'; documentNo = docs.cases.find((x) => x.id === r.documentId)?.caseNo ?? null; documentLink = `/discrepancies/${r.documentId}`; break; }
+        case 'EcomReturn': { documentLabel = 'E-commerce return'; documentNo = docs.ecomReturns.find((x) => x.id === r.documentId)?.controlNo ?? null; documentLink = '/ecommerce'; break; }
+        case 'OpeningStock': documentLabel = 'Opening stock'; break;
+        case 'ConsignmentSaleReport': documentLabel = 'Consignee sale'; documentLink = '/consignment'; break;
+      }
+      return { ...r, documentLabel, documentNo, documentLink };
+    });
   }
 
   /** Daily Inventory Movement per location (§7.8) — Beg, IN-P, IN-T, OUT-P, OUT-S, Bal, Act, Var, Loss, End per day of month. */

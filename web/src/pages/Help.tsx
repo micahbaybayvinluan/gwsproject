@@ -62,7 +62,7 @@ export function HelpPage() {
   const openSection = (id: string) => { setOpen((o) => new Set(o).add(id)); setTimeout(() => document.getElementById(`help-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50); };
   const d = q.data;
   return <div className="mx-auto max-w-4xl space-y-4">
-    <div className="flex flex-wrap items-end gap-2"><h1 className="mr-auto text-2xl font-bold tracking-tight text-navy">Help & User Guide</h1>{d && <span className="text-sm text-slate-500">Showing the guide for: <b>{d.role}</b></span>}</div>
+    <div className="flex flex-wrap items-end gap-2"><h1 className="mr-auto text-2xl font-bold tracking-tight text-navy">Help & Guide</h1>{d && <span className="text-sm text-slate-500">Showing the guide for: <b>{d.role}</b></span>}</div>
     <Card title={<>Ask a question {d && (d.aiEnabled ? <Badge tone="green">AI assistant on</Badge> : <Badge>answers from the guide</Badge>)}</>}>
       <form className="flex flex-wrap gap-2" onSubmit={(e) => { e.preventDefault(); if (question.trim().length >= 3) ask.mutate(question.trim()); }}>
         <Input className="min-w-0 flex-1" placeholder="e.g. How do I record a delivery sale? / Paano mag-request ng stock?" value={question} onChange={(e) => setQuestion(e.target.value)} maxLength={1000} />

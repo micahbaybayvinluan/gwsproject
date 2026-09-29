@@ -37,7 +37,7 @@ export class SalesService implements OnModuleInit {
 
   onModuleInit() {
     this.approvals.register('SPECIAL_PRICE', (req, outcome) => this.onSpecialPriceDecision(req.documentId, outcome));
-    this.approvals.register('AR_PAYMENT', (req, outcome, actor) => this.onPaymentDecision(req.documentId, outcome, actor?.id ?? null));
+    this.approvals.register('AR_PAYMENT', (req, outcome, actor) => this.onPaymentDecision(req.documentId, outcome, actor?.id ?? null, actor?.note));
   }
 
   private include = { location: { select: { id: true, code: true, name: true, type: true } }, customer: { select: { id: true, code: true, name: true, type: true } }, agent: { select: { id: true, name: true } }, rider: { select: { id: true, name: true } }, paymentAccount: { select: { id: true, title: true, paymentAccountType: true } }, lines: { include: { product: { select: { id: true, sku: true, name: true, category: { select: { accountingClass: true, name: true } } } }, batch: { select: { id: true, batchNo: true, expiryDate: true, isConsignmentIn: true } } } }, payments: { include: { payment: true } } } as const;
@@ -170,7 +170,7 @@ export class SalesService implements OnModuleInit {
     if ((input.paymentMode === 'ONLINE' || input.paymentMode === 'CREDIT_CARD') && !input.paymentAccountId) throw new BadRequestException('payment account is required for ONLINE / CREDIT_CARD');
     if ((input.paymentMode === 'ONLINE' || input.paymentMode === 'CREDIT_CARD') && !input.proofOfPaymentAttachmentId) throw new BadRequestException({ message: 'Proof of payment upload is required for ONLINE / CREDIT_CARD', code: 'PROOF_REQUIRED' });
     if (input.paymentMode === 'CREDIT_CARD' && !(input.cardMid && input.cardSlipNo && input.cardApprovalCode && input.cardBatchNo)) throw new BadRequestException('Credit card sales need MID, slip no., approval code and batch no.');
-    if (input.paymentMode === 'AR_PDC') { if (!input.customerId && !input.agentId) throw new BadRequestException('AR/PDC requires a customer or agent'); if (!input.dueDate) throw new BadRequestException('AR/PDC requires a due date'); }
+    if (input.paymentMode === 'AR_PDC') { if (!input.customerId && !input.agentId) throw new BadRequestException('AR/PDC requires a customer or agent'); if ((input.pdcBank || input.pdcChequeNo || input.pdcDate) && !(input.pdcChequeNo && input.pdcDate)) throw new BadRequestException('With a PDC, type the cheque number and the cheque date'); if (!input.dueDate) throw new BadRequestException('AR/PDC requires a due date'); }
     if (input.channel === 'DELIVERY' && !input.riderId) throw new BadRequestException('Delivery sales need a rider');
   }
 
@@ -207,10 +207,27 @@ export class SalesService implements OnModuleInit {
   // ── AR / payments / credit notes (§8.3) ──
   async arList(user: SessionUser, q: { locationId?: string; customerId?: string; overdueOnly?: boolean }) {
     const where: Prisma.SalesDocWhereInput = { paymentMode: 'AR_PDC', voidedAt: null, locationId: this.scope.locationFilter(user, q.locationId) as never, customerId: q.customerId };
-    const docs = await this.prisma.db.salesDoc.findMany({ where, include: { customer: true, agent: true, location: { select: { code: true, name: true } } }, orderBy: { dueDate: 'asc' } });
+    const docs = await this.prisma.db.salesDoc.findMany({ where, include: { customer: true, agent: true, location: { select: { id: true, code: true, name: true } } }, orderBy: { dueDate: 'asc' } });
     const today = todayManila();
     return docs.map((d) => ({ id: d.id, location: d.location, customer: d.customer?.name ?? d.agent?.name ?? d.customerName, customerId: d.customerId, agentId: d.agentId, drSiNo: d.drSiNo, docDate: dateStr(d.docDate), amount: d.grandTotal, paid: d.amountPaid, balance: d.grandTotal.minus(d.amountPaid), dueDate: d.dueDate ? dateStr(d.dueDate) : null, daysOverdue: d.dueDate && d.grandTotal.gt(d.amountPaid) ? Math.max(0, daysBetween(d.dueDate, today)) : 0, pdc: d.pdcChequeNo ? { bank: d.pdcBank, chequeNo: d.pdcChequeNo, date: d.pdcDate } : null }))
       .filter((r) => r.balance.gt(0) && (!q.overdueOnly || r.daysOverdue > 0));
+  }
+
+  /** Everything Accounting needs to approve a branch's AR payment in one look: proof, account deposited to, invoices (owner request 2026-09-29). */
+  async paymentReview(id: string) {
+    return requestContext.runSystem(async () => {
+      const p = await this.prisma.db.payment.findUnique({ where: { id }, include: { paymentAccount: { select: { code: true, title: true } }, customer: { select: { name: true, type: true } }, allocations: { include: { salesDoc: { select: { id: true, drSiNo: true, docDate: true, dueDate: true, grandTotal: true, amountPaid: true, pdcChequeNo: true, customerName: true, agent: { select: { name: true } } } } } } } });
+      if (!p) throw new NotFoundException();
+      const docs = await this.prisma.db.salesDoc.findMany({ where: { id: { in: p.requestedSalesDocIds } }, select: { id: true, drSiNo: true, docDate: true, dueDate: true, grandTotal: true, amountPaid: true, pdcChequeNo: true, customerName: true, customer: { select: { name: true } }, agent: { select: { name: true } } } });
+      const proof = p.proofAttachmentId ? await this.prisma.db.attachment.findUnique({ where: { id: p.proofAttachmentId }, select: { id: true, fileName: true, contentType: true } }) : null;
+      const loc = p.locationId ? await this.prisma.db.location.findUnique({ where: { id: p.locationId }, select: { name: true } }) : null;
+      const by = p.createdBy ? await this.prisma.db.user.findUnique({ where: { id: p.createdBy }, select: { fullName: true } }) : null;
+      return {
+        id: p.id, creditNoteNo: p.creditNoteNo, status: p.status, amount: p.amount, discount: p.discount, paymentMode: p.paymentMode, receivedAt: p.receivedAt, notes: p.notes,
+        account: p.paymentAccount, branch: loc?.name ?? null, enteredBy: by?.fullName ?? null, customer: p.customer?.name ?? docs[0]?.customer?.name ?? docs[0]?.agent?.name ?? docs[0]?.customerName ?? null, proof,
+        invoices: (docs.length ? docs : p.allocations.map((a) => a.salesDoc)).map((d) => ({ id: d.id, drSiNo: d.drSiNo, date: dateStr(d.docDate), dueDate: d.dueDate ? dateStr(d.dueDate) : null, total: d.grandTotal, balance: d.grandTotal.minus(d.amountPaid), pdcChequeNo: d.pdcChequeNo })),
+      };
+    });
   }
 
   /**
@@ -276,7 +293,7 @@ export class SalesService implements OnModuleInit {
       await this.posting.post(tx, { type: 'Payment', id: p.id, date: toDateOnly(p.receivedAt), name: docs[0].customer?.name, createdBy: actorId }, (r) => r4Collection(r, { locationId: docs[0].locationId, counterparty: cp, amount: p.amount, discount: p.discount, paymentAccountId: p.paymentAccountId ?? r.branch('CASH_ON_HAND', docs[0].locationId), creditNoteNo: p.creditNoteNo }));
     }
   }
-  private async onPaymentDecision(paymentId: string, outcome: 'APPROVED' | 'REJECTED', actorId: string | null) {
+  private async onPaymentDecision(paymentId: string, outcome: 'APPROVED' | 'REJECTED', actorId: string | null, note?: string) {
     await requestContext.runSystem(async () => {
       const p = await this.prisma.db.payment.findUniqueOrThrow({ where: { id: paymentId } });
       if (p.status !== 'PENDING') return;
@@ -285,7 +302,7 @@ export class SalesService implements OnModuleInit {
         const docs = await this.openInvoices(p.requestedSalesDocIds, null);
         await this.prisma.db.$transaction(async (tx) => { await this.applyPayment(tx, p, docs, actorId); await tx.payment.update({ where: { id: paymentId }, data: { status: 'POSTED' } }); });
       }
-      if (p.locationId) await this.notify.toLocation(p.locationId, { type: 'AR_PAYMENT_DECIDED', title: `AR payment ${p.creditNoteNo} (₱${p.amount}) ${outcome === 'APPROVED' ? 'approved and applied' : 'rejected'} by Accounting`, link: '/ar' });
+      if (p.locationId) await this.notify.toLocation(p.locationId, { type: 'AR_PAYMENT_DECIDED', title: `AR payment ${p.creditNoteNo} (₱${p.amount}) ${outcome === 'APPROVED' ? 'approved and applied' : 'rejected'} by Accounting`, body: outcome === 'REJECTED' && note ? `Reason: ${note}. Check it, then record the payment again.` : undefined, link: '/ar' });
     });
   }
 
@@ -309,22 +326,35 @@ export class SalesService implements OnModuleInit {
     return [...byAgent.entries()].map(([agentId, v]) => ({ agentId, ...v }));
   }
 
-  /** Overdue AR job (§8.3): notify branch users, franchise owner, Head Auditor, Admin (daily digest handles email). */
+  /**
+   * Daily AR reminder (owner request 2026-09-29): every branch's open receivables that are overdue or due within 7 days, listed by
+   * due date with the nearest first, to the branch staff and the sales associate who made each sale, the auditors and the Owner.
+   */
   async notifyOverdue() {
     const today = todayManila();
-    const overdue = await this.prisma.db.salesDoc.findMany({ where: { paymentMode: 'AR_PDC', voidedAt: null, dueDate: { lt: today } }, include: { customer: true, location: true } });
-    const open = overdue.filter((d) => d.grandTotal.gt(d.amountPaid));
+    const soon = addDays(today, 7);
+    const rows = await this.prisma.db.salesDoc.findMany({ where: { paymentMode: 'AR_PDC', voidedAt: null, dueDate: { lte: soon } }, include: { customer: true, agent: true, location: true }, orderBy: { dueDate: 'asc' } });
+    const open = rows.filter((d) => d.grandTotal.gt(d.amountPaid));
     const byLoc = new Map<string, typeof open>();
     for (const d of open) byLoc.set(d.locationId, [...(byLoc.get(d.locationId) ?? []), d]);
+    let sent = 0;
     for (const [locationId, docs] of byLoc) {
-      const total = sum(docs.map((d) => d.grandTotal.minus(d.amountPaid)));
-      const n = { type: 'AR_OVERDUE', title: `${docs.length} overdue receivable(s) at ${docs[0].location.name} — ₱${total.toFixed(2)}`, link: `/ar?locationId=${locationId}&overdue=1` };
       const state = await this.prisma.db.alertState.findUnique({ where: { kind_refKey: { kind: 'AR_OVERDUE', refKey: locationId } } });
       if (state && daysBetween(state.lastSentAt, new Date()) < 1) continue;
-      await this.notify.toLocation(locationId, n, ['HEAD_AUDITOR', 'ADMIN']);
+      const total = sum(docs.map((d) => d.grandTotal.minus(d.amountPaid)));
+      const overdue = docs.filter((d) => d.dueDate! < today).length;
+      const line = (d: (typeof docs)[number]) => { const days = daysBetween(today, d.dueDate!); return `${dateStr(d.dueDate!)} (${days < 0 ? `${-days}d overdue` : days === 0 ? 'today' : `in ${days}d`}) ${d.customer?.name ?? d.agent?.name ?? d.customerName ?? ''} DR ${d.drSiNo} ₱${d.grandTotal.minus(d.amountPaid).toFixed(2)}${d.pdcChequeNo ? ' PDC' : ''}`; };
+      const n = { type: 'AR_OVERDUE', title: `AR at ${docs[0].location.name}: ${docs.length} due${overdue ? ` (${overdue} overdue)` : ' within 7 days'} — ₱${total.toFixed(2)}`, body: docs.slice(0, 10).map(line).join('\n') + (docs.length > 10 ? `\n… and ${docs.length - 10} more` : ''), link: `/ar?locationId=${locationId}` };
+      await this.notify.toLocation(locationId, n, ['HEAD_AUDITOR', 'ASST_AUDITOR', 'AUDIT_ASSOCIATE', 'ADMIN']);
+      // the sales associates who made these sales, if they are not (or no longer) at this branch
+      const makers = [...new Set(docs.map((d) => d.preparedBy))];
+      const atBranch = new Set((await this.prisma.db.userLocationAssignment.findMany({ where: { locationId }, select: { userId: true } })).map((a) => a.userId));
+      const others = makers.filter((m) => !atBranch.has(m));
+      if (others.length) await this.notify.toUsers(others, n);
       await this.prisma.db.alertState.upsert({ where: { kind_refKey: { kind: 'AR_OVERDUE', refKey: locationId } }, create: { kind: 'AR_OVERDUE', refKey: locationId, lastSentAt: new Date() }, update: { lastSentAt: new Date() } });
+      sent++;
     }
-    return { locations: byLoc.size, invoices: open.length };
+    return { locations: sent, invoices: open.length };
   }
 
   // ── Consignment sale report (§7.4 OUT) ──

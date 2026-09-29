@@ -446,6 +446,9 @@ model ReceivingDoc {
   supplierId        String    @map("supplier_id")
   supplierRef       String?   @map("supplier_ref")
   isConsignmentIn   Boolean   @default(false) @map("is_consignment_in")
+  /// Warehouse Associate's delivery: the In-Charge checked the goods (first step; the Head Auditor then approves the cost)
+  goodsCheckedBy    String?   @map("goods_checked_by")
+  goodsCheckedAt    DateTime? @map("goods_checked_at")
   paidOnReceipt     Boolean   @default(false) @map("paid_on_receipt")
   paymentAccountId  String?   @map("payment_account_id")
   notes             String?
@@ -620,6 +623,8 @@ model Customer {
 model Agent {
   id          String   @id @default(uuid())
   name        String
+  /// the Agent's own user account (role Agent): sees this agent's sales at every branch
+  userId      String?  @map("user_id")
   locationId  String   @map("location_id")
   onPayroll   Boolean  @default(false) @map("on_payroll")
   defaultTier String   @default("AGENT") @map("default_tier")
@@ -2055,4 +2060,52 @@ model EcomAdSpend {
 
   @@index([platform, month])
   @@map("ecom_ad_spend")
+}
+
+/// A difference between a transfer form and what the receiving branch actually got (owner request 2026-09-29).
+/// Steps: HEAD_AUDITOR review → SENDER confirms (2 days) → ADMIN when the sender disagrees or does not answer → RESOLVED.
+/// A confirmed difference creates adjustment forms numbered after the original (WA-PO-000012-002, -003…).
+model TransferDiscrepancy {
+  id                String    @id @default(uuid())
+  transferId        String    @unique @map("transfer_id")
+  controlNo         String    @map("control_no")
+  status            String    @default("HEAD_AUDITOR") // HEAD_AUDITOR | SENDER | ADMIN | RESOLVED
+  /// [{ productId, name, onForm, received, short, extra, note }]
+  lines             Json
+  receivedBy        String?   @map("received_by")
+  senderUserIds     String[]  @default([]) @map("sender_user_ids")
+  senderDueAt       DateTime? @map("sender_due_at")
+  senderRemindedAt  DateTime? @map("sender_reminded_at")
+  /// [{ step, by, byName, decision, note, at }]
+  history           Json      @default("[]")
+  outcome           String? // RETURN_TO_SENDER | RECEIVED_AS_SENT | LOST_COMPANY | LOST_CHARGE
+  adjustmentDocIds  String[]  @default([]) @map("adjustment_doc_ids")
+  chargeFormId      String?   @map("charge_form_id")
+  hrNoticeId        String?   @map("hr_notice_id")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  resolvedAt        DateTime? @map("resolved_at")
+
+  @@index([status])
+  @@map("transfer_discrepancies")
+}
+
+/// Monthly sales target per branch or per agent, set by the Sales Manager and approved by the Owner (owner request 2026-09-29).
+model SalesTarget {
+  id                String   @id @default(uuid())
+  month             String // YYYY-MM
+  kind              String // BRANCH | AGENT
+  locationId        String?  @map("location_id")
+  /// an agent is one person even when listed at several branches: the linked user, or the agent's name
+  agentKey          String?  @map("agent_key")
+  agentName         String?  @map("agent_name")
+  amount            Decimal  @db.Decimal(14, 2)
+  notes             String?
+  status            String   @default("PENDING") // PENDING | APPROVED | REJECTED | SUPERSEDED
+  approvalRequestId String?  @map("approval_request_id")
+  createdBy         String?  @map("created_by")
+  createdAt         DateTime @default(now()) @map("created_at")
+  decidedAt         DateTime? @map("decided_at")
+
+  @@index([month, kind, status])
+  @@map("sales_targets")
 }

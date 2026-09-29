@@ -20,7 +20,7 @@ export function FranchisePage() {
   const setting = useMutation({ mutationFn: (v: boolean) => api.put('/api/franchise/settings', { associateReceives: v }), onSuccess: () => void qc.invalidateQueries({ queryKey: ['portal'] }) });
   const [msg, setMsg] = useState(''); const request = useMutation({ mutationFn: () => api.put('/api/franchise/request-product', { message: msg }), onSuccess: () => setMsg('') });
   const d = p.data;
-  if (p.error) return <div className="space-y-2"><h1 className="text-2xl font-bold text-navy">Franchise Portal (Your Branch)</h1><ErrorBox error={p.error} /><p className="text-sm text-slate-500">The franchise portal is for Franchise Owner / Franchise Sales Associate accounts assigned to a franchise location.</p></div>;
+  if (p.error) return <div className="space-y-2"><h1 className="text-2xl font-bold text-navy">Franchise Portal</h1><ErrorBox error={p.error} /><p className="text-sm text-slate-500">The franchise portal is for Franchise Owner / Franchise Sales Associate accounts assigned to a franchise location.</p></div>;
   if (!d) return <p className="text-sm text-slate-500">Loading…</p>;
   const tabs = d.isOwner ? [['overview', 'Overview'], ['staff', 'Staff pay & charges'], ['books', 'Income statement & balance sheet']] as const : [['overview', 'Overview']] as const;
   return <div className="space-y-5">

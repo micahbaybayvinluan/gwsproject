@@ -19,7 +19,7 @@ export function InventoryCostPage() {
   const money = (v: unknown) => <span className="num block">{peso(v)}</span>;
   const cols = [['period', f.groupBy === 'month' ? 'Month' : 'Date'], ['branch', 'Branch'], ['beginning', 'Beginning'], ['receiving', 'Receiving'], ['transferIn', 'Transfer-in'], ['returns', 'Returns'], ['pullOut', 'Pull-out'], ['directCostOfSales', 'Direct cost of sales'], ['freebiesTasting', 'Freebies / tasting'], ['adjustments', 'Adjustments'], ['ending', 'Ending']] as const;
   return <div className="space-y-4">
-    <h1 className="text-2xl font-bold tracking-tight text-navy">Inventory & Direct Cost</h1>
+    <h1 className="text-2xl font-bold tracking-tight text-navy">Inventory Cost</h1>
     <Card title="Inventory cost movements (at batch cost)">
       <div className="mb-3 flex flex-wrap items-end gap-2">
         <Field label="From"><Input type="date" value={f.from} onChange={(e) => setF({ ...f, from: e.target.value })} /></Field>
@@ -58,7 +58,7 @@ export function CustomersReportPage() {
   const [sent, setSent] = useState('');
   const canSend = can('sale.create') || can('report.sales.all');
   return <div className="space-y-4">
-    <div className="flex flex-wrap items-end gap-2"><h1 className="mr-auto text-2xl font-bold tracking-tight text-navy">Customer Contact List</h1>
+    <div className="flex flex-wrap items-end gap-2"><h1 className="mr-auto text-2xl font-bold tracking-tight text-navy">Customers &amp; Follow-ups</h1>
       {!me?.locationScoped && <Field label="Branch"><Select value={f.locationId} onChange={(e) => setF({ ...f, locationId: e.target.value })}><option value="">All</option>{locations.data?.filter((l) => l.isSelling).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</Select></Field>}
       {tab === 'list' && <><Field label="From"><Input type="date" value={f.from} onChange={(e) => setF({ ...f, from: e.target.value })} /></Field><Field label="To"><Input type="date" value={f.to} onChange={(e) => setF({ ...f, to: e.target.value })} /></Field>
       <Button variant="outline" onClick={() => api.download(`/api/reports/customers.xlsx?${qs}`, 'CustomerContacts.xlsx')}>Generate xlsx</Button></>}</div>

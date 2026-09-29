@@ -6,10 +6,10 @@ One data model, one codebase, two phases:
 
 | Phase | Scope | Status in this build |
 |---|---|---|
-| **1 — Operations** | Users/roles/overrides, approval engine, audit log, notifications; products, tiers, suppliers, locations; batches with expiry, receiving + cost approval, pull-out/transfer-in with in-transit and receiver confirmation, returns, consignment in/out; sales (all channels/modes), agents, AR/PDC + credit notes, midnight close + post-close edits, cash count; branch expenses; min-stock & expiry alerts; actual count → 7-day discrepancy case → final report + charge form; Daily Branch Sales Report, inventory reports, forms to xlsx/PDF; Excel imports | Implemented end to end and covered by the test suite |
+| **1 — Operations** | Users/roles/overrides, approval engine, audit log, notifications; products, tiers, suppliers, locations; batches with expiry, receiving + cost approval, pull-out/transfer-in with in-transit and receiver confirmation, returns, consignment in/out; sales (all channels/modes), agents, AR/PDC + credit notes, midnight close + post-close edits, cash count; branch expenses; min-stock & expiry alerts; actual count → 7-day discrepancy case → final report + charge form; Daily Sales Report, inventory reports, forms to xlsx/PDF; Excel imports | Implemented end to end and covered by the test suite |
 | **2 — Finance** | Chart of accounts import + branch templating, beginning balances, automatic journal entries R1–R14, manual vouchers, period lock, TB / IS / BS / NI-per-branch / Cash Flow / schedules, depreciation, payroll (HR + Accounting Head close), franchise P&L | Implemented; auto-posting is behind the `gl.auto_posting_enabled` setting (off by default) so Phase 1 can go live first |
 
-The three source workbooks are in `/seed/` and are loaded by the seed step: **1,120 products** with brands, FRANCHISEE/DEALER/RETAILER prices and the Warehouse opening quantities from `inventory.xlsm`; the **full chart of accounts (601 accounts) with FY2026 beginning balances** (balanced to the peso) from `ACCTG PROGRAM - FORMAT.xlsm`. The Daily Branch Sales Report export fills a copy of `SAles Report Sample.xlsx` (`api/templates/daily-sales-report.xlsx`), so the FRONT sheet is produced by the sample's own formulas and matches it cell for cell. See `seed/README.md`.
+The three source workbooks are in `/seed/` and are loaded by the seed step: **1,120 products** with brands, FRANCHISEE/DEALER/RETAILER prices and the Warehouse opening quantities from `inventory.xlsm`; the **full chart of accounts (601 accounts) with FY2026 beginning balances** (balanced to the peso) from `ACCTG PROGRAM - FORMAT.xlsm`. The Daily Sales Report export fills a copy of `SAles Report Sample.xlsx` (`api/templates/daily-sales-report.xlsx`), so the FRONT sheet is produced by the sample's own formulas and matches it cell for cell. See `seed/README.md`.
 
 ## Repository layout
 
@@ -109,6 +109,8 @@ All seeded users share the password `ChangeMe!2026` (override with `SEED_PASSWOR
 | `hr.staff` | HR_STAFF | payroll only | |
 | `field.auditor` | FIELD_AUDITOR | All branches, franchises and warehouse (inventory only, no cost) | |
 | `exec.assistant` | EXECUTIVE_ASSISTANT | Main-office bank entries, supplier payables, office expenses, balance-sheet accounts (no cost, no reports) | |
+| `sales.manager` | SALES_MANAGER | Sales of all branches, agents and platforms; targets per branch and agent (Owner approves); AR of dealers, franchises and agents (no cost) | |
+| `agent.jerick` | AGENT | Own sales at every branch, own target, own customers' unpaid balances (no cost) | |
 | `ecomm.assoc` | ECOMM_ASSOCIATE | E-commerce (TikTok, Shopee, Lazada separate): order uploads → Warehouse pull-outs, payouts, returns, ads, e-commerce report (no cost) | |
 
 ## Tests

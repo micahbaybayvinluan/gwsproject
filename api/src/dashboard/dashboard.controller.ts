@@ -1,3 +1,4 @@
+import { TargetsService } from '../targets/targets.service';
 import { ReportSubmissionService } from '../reports/report-submission.service';
 import { CashOnHandService } from '../closing/cash-on-hand.service';
 import { requestContext } from '../common/request-context';
@@ -20,7 +21,7 @@ import { D, ZERO } from '../common/money';
 /** Role dashboards (§20.14), franchise portal (§8.7), Admin settings (§6.1 thresholds etc.). */
 @Controller('api')
 export class DashboardController {
-  constructor(private prisma: PrismaService, private approvals: ApprovalsService, private alerts: AlertsService, private notify: NotificationsService, private settings: SettingsService, private master: MasterService, private fin: FinReportsService, private cashFund: CashFundService, private counts: CountsService, private priceUpdates: PriceUpdatesService, private cashOnHand: CashOnHandService, private reportSubmission: ReportSubmissionService) {}
+  constructor(private targets: TargetsService, private prisma: PrismaService, private approvals: ApprovalsService, private alerts: AlertsService, private notify: NotificationsService, private settings: SettingsService, private master: MasterService, private fin: FinReportsService, private cashFund: CashFundService, private counts: CountsService, private priceUpdates: PriceUpdatesService, private cashOnHand: CashOnHandService, private reportSubmission: ReportSubmissionService) {}
 
   @Get('dashboard') @RequirePermission('dashboard.view')
   async dashboard(@CurrentUser() u: SessionUser) {
@@ -35,6 +36,9 @@ export class DashboardController {
         const ar = await this.prisma.db.salesDoc.findMany({ where: { locationId: locWhere, paymentMode: 'AR_PDC', voidedAt: null }, select: { grandTotal: true, amountPaid: true, dueDate: true } });
         const open = ar.filter((a) => a.grandTotal.gt(a.amountPaid));
         out.ar = { open: open.reduce((s, a) => s.plus(a.grandTotal.minus(a.amountPaid)), ZERO), overdue: open.filter((a) => a.dueDate && a.dueDate < today).reduce((s, a) => s.plus(a.grandTotal.minus(a.amountPaid)), ZERO) };
+        // receivables by due date, the nearest first (owner request 2026-09-29)
+        const due = await this.prisma.db.salesDoc.findMany({ where: { locationId: locWhere, paymentMode: 'AR_PDC', voidedAt: null, dueDate: { not: null } }, select: { id: true, drSiNo: true, grandTotal: true, amountPaid: true, dueDate: true, pdcChequeNo: true, customerName: true, customer: { select: { name: true } }, agent: { select: { name: true } }, location: { select: { name: true } } }, orderBy: { dueDate: 'asc' }, take: 300 });
+        out.arDue = due.filter((a) => a.grandTotal.gt(a.amountPaid)).slice(0, 12).map((a) => ({ id: a.id, drSiNo: a.drSiNo, customer: a.customer?.name ?? a.agent?.name ?? a.customerName, branch: a.location.name, balance: a.grandTotal.minus(a.amountPaid), dueDate: dateStr(a.dueDate!), daysToDue: Math.round((a.dueDate!.getTime() - today.getTime()) / 86400000), pdc: !!a.pdcChequeNo }));
       }
       if (u.permissions.has('report.inventory.own') || u.permissions.has('report.inventory.all')) {
         out.criticalStock = (await this.alerts.criticalStock(u)).slice(0, 50);
@@ -76,6 +80,9 @@ export class DashboardController {
       const loc = await this.prisma.db.location.findUnique({ where: { id: u.locationIds[0] }, select: { type: true } });
       if (loc && loc.type !== 'FRANCHISE') { const b = await this.cashOnHand.forBranch(u.locationIds[0]); out.cashOnHand = { ...b, days: b.days.filter((d) => d.status !== 'DEPOSITED') }; }
     }
+    // targets: the month's achievement (Sales Manager, Owner, auditors) and the Agent's own
+    if (u.permissions.has('target.view') || u.permissions.has('target.manage')) { const p = await this.targets.progress(dateStr(today).slice(0, 7), u); out.targets = { ...p.totals, pacePct: p.pacePct, belowPace: p.branches.filter((b) => b.achievedPct != null && b.achievedPct < p.pacePct).map((b) => b.name), pendingApproval: [...p.branches, ...p.agents].filter((r) => r.pendingTarget != null).length }; }
+    if (u.permissions.has('agent.self')) { const m = await this.targets.mine(u, dateStr(today).slice(0, 7)); out.agentMonth = { linked: m.linked, total: m.total, count: m.sales.length, target: m.target, achievedPct: m.achievedPct, pacePct: 'pacePct' in m ? m.pacePct : null, arOpen: m.ar.reduce((t, a) => t + a.balance, 0), arDue: m.ar.slice(0, 5) }; }
     return out;
   }
 

@@ -78,6 +78,8 @@ const TEST_USERS: { username: string; role: string; fullName: string; locations?
   { username: 'field.auditor', role: 'FIELD_AUDITOR', fullName: 'Field Auditor', locations: [] }, // inventory of every location
   { username: 'exec.assistant', role: 'EXECUTIVE_ASSISTANT', fullName: 'Executive Assistant' },
   { username: 'ecomm.assoc', role: 'ECOMM_ASSOCIATE', fullName: 'E-comm Associate' },
+  { username: 'sales.manager', role: 'SALES_MANAGER', fullName: 'Sales Manager' },
+  { username: 'agent.jerick', role: 'AGENT', fullName: 'Jerick Quinto (Agent)' },
 ];
 
 async function main() {
@@ -152,6 +154,9 @@ async function main() {
     const loc = await prisma.location.findUniqueOrThrow({ where: { code } });
     if (!(await prisma.agent.findFirst({ where: { name } }))) await prisma.agent.create({ data: { name, locationId: loc.id, onPayroll } });
   }
+  // the demo Agent account sees Jerick Quinto's sales at every branch
+  const jerickUser = await prisma.user.findUnique({ where: { username: 'agent.jerick' } });
+  if (jerickUser) await prisma.agent.updateMany({ where: { name: 'Jerick Quinto', userId: null }, data: { userId: jerickUser.id } });
   for (const [i, d] of ['Topform', 'Level Up', 'Good Stuff', 'Juan Whey', 'Whey Avenue'].entries()) {
     await prisma.customer.upsert({ where: { code: `DLR-${String(i + 1).padStart(3, '0')}` }, create: { code: `DLR-${String(i + 1).padStart(3, '0')}`, name: d, type: 'DEALER' }, update: { name: d } });
   }

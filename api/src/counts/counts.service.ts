@@ -81,7 +81,10 @@ export class CountsService implements OnModuleInit {
     const d = await this.prisma.db.countDoc.findUnique({ where: { id }, include: this.include }); if (!d) throw new NotFoundException(); if (user.locationScoped && !user.locationIds.includes(d.locationId)) throw new ForbiddenException();
     // expiries on hand per item (same item, different expiry dates) shown on the sheet for reference
     const exp = await this.stock.expiriesAt(d.locationId, d.lines.map((l) => l.productId));
-    return { ...d, lines: sortCountLines(d.lines).map((l) => ({ ...l, expiries: exp.get(l.productId) ?? [] })) };
+    // the count day's movements from the beginning count: in, out, other → expected (owner request 2026-09-29)
+    const moves = await this.stock.dayMovements(d.locationId, d.countDate);
+    const zero = { received: 0, transferIn: 0, returns: 0, sales: 0, transferOut: 0, other: 0 };
+    return { ...d, lines: sortCountLines(d.lines).map((l) => { const m = moves.get(l.productId) ?? zero; return { ...l, expiries: exp.get(l.productId) ?? [], moves: m, expectedFromDay: l.beginQty + m.received + m.transferIn + m.returns - m.sales - m.transferOut + m.other }; }) };
   }
 
   /**

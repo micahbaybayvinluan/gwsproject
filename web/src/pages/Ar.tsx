@@ -7,7 +7,7 @@ import { Badge, Button, Card, ErrorBox, Field, Input, Select } from '@/component
 import { DataTable } from '@/components/ui/table';
 import { Attachments } from '@/components/Attachments';
 
-interface ArRow { id: string; location: { name: string }; customer: string; customerId: string | null; agentId: string | null; drSiNo: string; docDate: string; amount: string; paid: string; balance: string; dueDate: string | null; daysOverdue: number; pdc: { bank: string; chequeNo: string } | null }
+interface ArRow { id: string; location: { id: string; name: string }; customer: string; customerId: string | null; agentId: string | null; drSiNo: string; docDate: string; amount: string; paid: string; balance: string; dueDate: string | null; daysOverdue: number; pdc: { bank: string; chequeNo: string } | null }
 
 /** §8.3 Branch AR list + Record payment (partial ok) → credit note. */
 export function ArPage() {
@@ -16,12 +16,23 @@ export function ArPage() {
   const [pay, setPay] = useState({ amount: '', discount: '', paymentMode: 'CASH', paymentAccountId: '', notes: '' }); const [draftId] = useState(() => crypto.randomUUID()); const [proofId, setProofId] = useState<string | null>(null);
   const q = useQuery({ queryKey: ['ar', overdue], queryFn: () => api.get<ArRow[]>(`/api/ar${overdue ? '?overdue=1' : ''}`) });
   const cn = useQuery({ queryKey: ['credit-notes'], queryFn: () => api.get<{ id: string; creditNoteNo: string; amount: string; paymentMode: string; receivedAt: string; status: string; enteredBy: string | null; customer: { name: string } | null }[]>('/api/ar/credit-notes') });
-  const accts = useQuery({ queryKey: ['payment-accounts'], queryFn: () => api.get<{ id: string; title: string }[]>('/api/accounts/payment') });
+  const accts = useQuery({ queryKey: ['payment-accounts'], queryFn: () => api.get<{ id: string; title: string }[]>('/api/accounts/payment'), enabled: can('ar.collect') });
   const m = useMutation({ mutationFn: () => api.post<{ creditNoteNo: string; status: string }>('/api/ar/payments', { salesDocIds: [...selected], amount: Number(pay.amount), discount: Number(pay.discount || 0), paymentMode: pay.paymentMode, paymentAccountId: pay.paymentAccountId || null, proofAttachmentId: proofId, notes: pay.notes }), onSuccess: () => { setSelected(new Set()); setPay({ amount: '', discount: '', paymentMode: 'CASH', paymentAccountId: '', notes: '' }); void qc.invalidateQueries({ queryKey: ['ar'] }); void qc.invalidateQueries({ queryKey: ['credit-notes'] }); } });
+  // AR per branch (owner request 2026-09-29): a total per branch, and one branch or all in the list
+  const [branch, setBranch] = useState(sp.get('locationId') ?? '');
+  const all = q.data ?? [];
+  const perBranch = [...all.reduce((m, r) => { const k = r.location.id; const cur = m.get(k) ?? { name: r.location.name, id: k, open: 0, overdue: 0, invoices: 0 }; cur.open += Number(r.balance); cur.invoices++; if (r.daysOverdue > 0) cur.overdue += Number(r.balance); m.set(k, cur); return m; }, new Map<string, { name: string; id: string; open: number; overdue: number; invoices: number }>()).values()].sort((a, b) => b.open - a.open);
+  const rows = branch ? all.filter((r) => r.location.id === branch) : all;
   const selRows = (q.data ?? []).filter((r) => selected.has(r.id)); const selBal = selRows.reduce((s, r) => s + Number(r.balance), 0);
   return <div className="space-y-4">
-    <div className="flex flex-wrap items-center gap-3"><h1 className="text-2xl font-bold tracking-tight text-navy">Customer Credit (AR / PDC & Collections)</h1><label className="flex items-center gap-1 text-sm"><input type="checkbox" checked={overdue} onChange={(e) => setOverdue(e.target.checked)} /> Overdue only</label></div>
-    <DataTable exportName="AR" data={q.data ?? []} selectable selected={selected} onSelectedChange={setSelected} columns={[
+    <div className="flex flex-wrap items-center gap-3"><h1 className="text-2xl font-bold tracking-tight text-navy">AR & Collections</h1><label className="flex items-center gap-1 text-sm"><input type="checkbox" checked={overdue} onChange={(e) => setOverdue(e.target.checked)} /> Overdue only</label>{perBranch.length > 1 && <Field label="Branch"><Select value={branch} onChange={(e) => setBranch(e.target.value)}><option value="">All branches</option>{perBranch.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</Select></Field>}</div>
+    {perBranch.length > 0 && <Card title="AR per branch">
+      <table className="w-full text-sm"><thead className="text-left text-xs uppercase tracking-wide text-slate-500"><tr><th className="py-1">Branch</th><th className="num">Invoices</th><th className="num">Open balance</th><th className="num">Overdue</th><th /></tr></thead><tbody>
+        {perBranch.map((b) => <tr key={b.id} className={`border-t ${branch === b.id ? 'bg-brand-soft' : ''}`}><td className="py-1.5 font-medium">{b.name}</td><td className="num">{b.invoices}</td><td className="num">{peso(b.open)}</td><td className={`num ${b.overdue > 0 ? 'font-semibold text-red-700' : ''}`}>{peso(b.overdue)}</td><td className="text-right"><button className="text-xs text-brand underline" onClick={() => setBranch(branch === b.id ? '' : b.id)}>{branch === b.id ? 'Show all' : 'Show this branch'}</button></td></tr>)}
+        {perBranch.length > 1 && <tr className="border-t font-semibold"><td className="py-1.5">All branches</td><td className="num">{all.length}</td><td className="num">{peso(perBranch.reduce((t, b) => t + b.open, 0))}</td><td className="num">{peso(perBranch.reduce((t, b) => t + b.overdue, 0))}</td><td /></tr>}
+      </tbody></table>
+    </Card>}
+    <DataTable exportName="AR" data={rows} selectable selected={selected} onSelectedChange={setSelected} columns={[
       { header: 'Branch', accessorFn: (r) => r.location.name }, { header: 'Customer', accessorKey: 'customer' }, { header: 'DR/SI', accessorKey: 'drSiNo' }, { header: 'Date', accessorKey: 'docDate' }, { header: 'Amount', accessorKey: 'amount', cell: (c) => <span className="num block">{peso(c.getValue())}</span> }, { header: 'Paid', accessorKey: 'paid', cell: (c) => <span className="num block">{peso(c.getValue())}</span> }, { header: 'Balance', accessorKey: 'balance', cell: (c) => <span className="num block font-medium">{peso(c.getValue())}</span> }, { header: 'Due', accessorKey: 'dueDate' }, { header: 'Overdue', accessorKey: 'daysOverdue', cell: (c) => (Number(c.getValue()) > 0 ? <Badge tone="red">{String(c.getValue())} d</Badge> : <Badge tone="green">current</Badge>) }, { header: 'PDC', accessorFn: (r) => (r.pdc ? `${r.pdc.bank} ${r.pdc.chequeNo}` : '') },
     ]} />
     {can('ar.collect') && <Card title={`Record payment (${selRows.length} invoice(s), balance ${peso(selBal)})`}>

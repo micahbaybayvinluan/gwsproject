@@ -16,7 +16,7 @@ export function InspectionsPage() {
   const nav = useNavigate(); const { can } = useAuth(); const [sp] = useSearchParams();
   const q = useQuery({ queryKey: ['inspections', sp.get('status')], queryFn: () => api.get<Insp[]>(`/api/inspections${sp.get('status') ? `?status=${sp.get('status')}` : ''}`) });
   return <div className="space-y-4">
-    <div className="flex flex-wrap items-center gap-2"><h1 className="mr-auto text-2xl font-bold tracking-tight text-navy">Store Inspection Reports</h1>{can('inspection.create') && <Button onClick={() => nav('/inspections/new')}>New inspection</Button>}</div>
+    <div className="flex flex-wrap items-center gap-2"><h1 className="mr-auto text-2xl font-bold tracking-tight text-navy">Store Inspections</h1>{can('inspection.create') && <Button onClick={() => nav('/inspections/new')}>New inspection</Button>}</div>
     <DataTable exportName="StoreInspections" data={q.data ?? []} onRowClick={(r) => nav(`/inspections/${r.id}`)} columns={[{ header: 'No.', accessorKey: 'controlNo' }, { header: 'Date', accessorKey: 'inspectionDate', cell: (c) => fmtDate(c.getValue()) }, { header: 'Branch', accessorFn: (r) => r.location.name }, { header: 'Inspector', accessorKey: 'inspectorName' }, { header: 'Staff on duty', accessorFn: (r) => r.staffOnDuty?.fullName ?? r.staffOnDutyName ?? '' }, { header: 'Not complied', accessorKey: 'nonCompliant', cell: (c) => <span className={Number(c.getValue()) ? 'font-semibold text-red-700' : ''}>{String(c.getValue() ?? 0)}</span> }, { header: 'Status', accessorKey: 'status', cell: (c) => <Badge tone={statusTone(String(c.getValue()))}>{String(c.getValue())}</Badge> }]} />
   </div>;
 }

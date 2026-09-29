@@ -39,6 +39,7 @@ export class ArController {
   constructor(private svc: SalesService) {}
   @Get() @RequirePermission('ar.view') list(@CurrentUser() u: SessionUser, @Query('locationId') locationId?: string, @Query('customerId') customerId?: string, @Query('overdue') overdue?: string) { return this.svc.arList(u, { locationId, customerId, overdueOnly: overdue === '1' }); }
   @Get('credit-notes') @RequirePermission('ar.view') creditNotes(@CurrentUser() u: SessionUser, @Query('from') from?: string, @Query('to') to?: string) { return this.svc.creditNotes(u, { from, to }); }
+  @Get('payments/:id/review') @RequireAnyPermission('ar.approve', 'ar.collect', 'approval.act.AR_PAYMENT') review(@Param('id') id: string) { return this.svc.paymentReview(id); }
   @Post('payments') @RequirePermission('ar.collect') @Audited('Payment', 'CREATE') pay(@Body(Z(Payment)) dto: z.infer<typeof Payment>, @CurrentUser() u: SessionUser) { return this.svc.recordPayment(dto, u); }
 }
 

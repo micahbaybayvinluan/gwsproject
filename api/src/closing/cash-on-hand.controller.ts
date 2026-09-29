@@ -8,7 +8,7 @@ import type { SessionUser } from '../common/request-context';
 const Day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const Extension = z.object({ locationId: z.string().uuid(), businessDate: Day, requestedUntil: Day, reason: z.string().trim().min(5, 'Say why the cash cannot be deposited on time') });
 const MaxDays = z.object({ maxDays: z.number().int().min(0).max(30) });
-const Notice = z.object({ status: z.enum(['OPEN', 'NTE_ISSUED', 'CLOSED']), note: z.string().max(2000).optional() });
+const Notice = z.object({ status: z.enum(['OPEN', 'NTE_ISSUED', 'REFERRED', 'CLOSED']), note: z.string().max(2000).optional() });
 
 /** Cash on hand: sales cash not yet deposited, days allowed per branch, extensions, HR notices (owner request 2026-09-27). */
 @Controller('api/cash-on-hand')

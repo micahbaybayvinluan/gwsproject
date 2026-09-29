@@ -45,7 +45,7 @@ export class ReceivingService implements OnModuleInit {
     if (user.locationScoped && !user.locationIds.includes(doc.locationId)) throw new ForbiddenException();
     const costs = await this.master.currentCosts(doc.lines.map((l) => l.productId));
     const preparer = await this.prisma.db.user.findUnique({ where: { id: doc.preparedBy }, select: { id: true, fullName: true } });
-    return { ...doc, preparedByName: preparer?.fullName ?? null, lines: doc.lines.map((l) => ({ ...l, currentStandardCost: costs.get(l.productId) ?? null })) , attachments: await this.attachments.list('ReceivingDoc', id) };
+    return { ...doc, preparedByName: preparer?.fullName ?? null, preparedByRole: (await this.prisma.db.user.findUnique({ where: { id: doc.preparedBy ?? '' }, select: { role: { select: { key: true } } } }))?.role.key ?? null, lines: doc.lines.map((l) => ({ ...l, currentStandardCost: costs.get(l.productId) ?? null })) , attachments: await this.attachments.list('ReceivingDoc', id) };
   }
 
   async create(input: ReceivingInput, user: SessionUser) {
@@ -144,11 +144,21 @@ export class ReceivingService implements OnModuleInit {
       if (!unchanged) allUnchanged = false;
       await this.prisma.db.receivingLine.update({ where: { id: l.id }, data: { isNewProduct: isNew, costUnchanged: unchanged, unitCost: unchanged ? std : l.unitCost } });
     }
+    const preparer = await this.prisma.db.user.findUnique({ where: { id: doc.preparedBy ?? requestedBy }, select: { role: { select: { key: true } } } });
+    // a Warehouse Associate's delivery: the In-Charge checks the goods first, then the Head Auditor approves the cost (owner request 2026-09-29)
+    if (preparer?.role.key === 'WAREHOUSE_ASSOCIATE') {
+      const req = await this.approvals.request({ type: 'WAREHOUSE_IN', documentType: 'ReceivingDoc', documentId: id, requestedBy, summary: { controlNo: doc.controlNo, locationId: doc.locationId, locationName: doc.location.name, supplierCode: doc.supplier.code, lines: doc.lines.length, units: doc.lines.reduce((t, l) => t + l.qty + l.freeQty, 0), step: 'In-Charge checks the goods against the supplier\'s delivery receipt; then the Head Auditor approves the cost', nextSteps: ['Head Auditor approves the cost'] } });
+      await this.prisma.db.receivingDoc.update({ where: { id }, data: { status: 'SUBMITTED', approvalRequestId: req.id, goodsCheckedBy: null, goodsCheckedAt: null, updatedBy: requestedBy } });
+      return;
+    }
+    await this.requestCost(id, requestedBy, allUnchanged);
+  }
+  /** The Head Auditor's cost approval (last step); an unchanged cost approves by itself after the set hours. */
+  private async requestCost(id: string, requestedBy: string, allUnchanged: boolean) {
+    const doc = await this.prisma.db.receivingDoc.findUniqueOrThrow({ where: { id }, include: this.include });
     const hours = await this.settings.get<number>('approval.cost_unchanged_auto_hours');
     const autoApproveAt = allUnchanged ? new Date(Date.now() + hours * 3600000) : null;
-    const preparer = await this.prisma.db.user.findUnique({ where: { id: doc.preparedBy ?? requestedBy }, select: { role: { select: { key: true } } } });
-    const nextSteps = preparer?.role.key === 'WAREHOUSE_ASSOCIATE' ? ['Warehouse In-Charge confirms the goods'] : [];
-    const req = await this.approvals.request({ type: 'COST_ON_RECEIVING', documentType: 'ReceivingDoc', documentId: id, requestedBy, autoApproveAt, summary: { controlNo: doc.controlNo, locationId: doc.locationId, locationName: doc.location.name, supplierCode: doc.supplier.code, lines: doc.lines.length, allUnchanged, nextSteps } });
+    const req = await this.approvals.request({ type: 'COST_ON_RECEIVING', documentType: 'ReceivingDoc', documentId: id, requestedBy, autoApproveAt, summary: { controlNo: doc.controlNo, locationId: doc.locationId, locationName: doc.location.name, supplierCode: doc.supplier.code, lines: doc.lines.length, allUnchanged, step: doc.goodsCheckedAt ? 'Goods checked by the In-Charge; approve the cost and the stock is added' : 'Approve the cost and the stock is added' } });
     await this.prisma.db.receivingDoc.update({ where: { id }, data: { status: 'SUBMITTED', approvalRequestId: req.id, updatedBy: requestedBy } });
   }
 
@@ -176,23 +186,20 @@ export class ReceivingService implements OnModuleInit {
       const stdCosts = await this.master.currentCosts(doc.lines.map((l) => l.productId));
       for (const l of doc.lines) if (l.unitCost == null && stdCosts.get(l.productId) == null) throw new BadRequestException(`Line ${l.product.name} has no cost; Head Auditor must enter it before approval`);
       for (const l of doc.lines) if (l.unitCost == null) await this.prisma.db.receivingLine.update({ where: { id: l.id }, data: { unitCost: D(stdCosts.get(l.productId)!).toFixed(2) } });
-      const preparer = doc.preparedBy ? await this.prisma.db.user.findUnique({ where: { id: doc.preparedBy }, select: { role: { select: { key: true } } } }) : null;
-      if (preparer?.role.key === 'WAREHOUSE_ASSOCIATE') {
-        await this.prisma.db.receivingDoc.update({ where: { id: docId }, data: { status: 'APPROVED' } });
-        await this.approvals.request({ type: 'WAREHOUSE_IN', documentType: 'ReceivingDoc', documentId: docId, requestedBy: doc.preparedBy!, summary: { controlNo: doc.controlNo, locationId: doc.locationId, locationName: doc.location.name, supplierCode: doc.supplier.code, lines: doc.lines.length, units: doc.lines.reduce((t, l) => t + l.qty + l.freeQty, 0), step: 'Cost approved by the Head Auditor; In-Charge to confirm the goods before stock is posted' } });
-        return;
-      }
+      // last step: the stock is added (a Warehouse Associate's goods were already checked by the In-Charge)
       await this.postReceiving(docId, actorId, 'SUBMITTED');
     });
   }
 
-  /** In-Charge accepted (post the stock) or rejected (the receiving goes back as rejected). */
+  /** In-Charge checked the goods (first step): on to the Head Auditor for the cost; or rejected. (APPROVED = the older order, cost already approved.) */
   private async onInChargeDecision(docId: string, outcome: 'APPROVED' | 'REJECTED', actorId: string | null) {
     await requestContext.runSystem(async () => {
-      const doc = await this.prisma.db.receivingDoc.findUniqueOrThrow({ where: { id: docId } });
-      if (doc.status !== 'APPROVED') return;
+      const doc = await this.prisma.db.receivingDoc.findUniqueOrThrow({ where: { id: docId }, include: this.include });
+      if (doc.status !== 'APPROVED' && doc.status !== 'SUBMITTED') return;
       if (outcome === 'REJECTED') { await this.prisma.db.receivingDoc.update({ where: { id: docId }, data: { status: 'REJECTED' } }); return; }
-      await this.postReceiving(docId, actorId, 'APPROVED');
+      if (doc.status === 'APPROVED') { await this.postReceiving(docId, actorId, 'APPROVED'); return; }
+      await this.prisma.db.receivingDoc.update({ where: { id: docId }, data: { goodsCheckedBy: actorId, goodsCheckedAt: new Date() } });
+      await this.requestCost(docId, doc.preparedBy ?? actorId ?? '', doc.lines.every((l) => l.costUnchanged));
     });
   }
 

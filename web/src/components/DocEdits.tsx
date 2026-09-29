@@ -78,7 +78,7 @@ export function ReceivingEditor({ doc, own, preparedByName, onClose }: { doc: Rc
   const save = useSave('receiving', doc.id, onClose);
   const set = (i: number, patch: Partial<(typeof lines)[number]>) => setLines(lines.map((x, k) => (k === i ? { ...x, ...patch } : x)));
   return <Card title={own ? 'Edit draft' : `Propose an edit (${preparedByName ?? 'the preparer'} must accept it)`}>
-    {doc.status === 'SUBMITTED' && <p className="mb-2 text-xs text-amber-700">This document is waiting for cost approval. Saving sends it back through approval with the new figures.</p>}
+    {doc.status === 'SUBMITTED' && <p className="mb-2 text-xs text-amber-700">This document is waiting for approval. Saving sends it back through the approvals (In-Charge, then the Head Auditor's cost) with the new figures.</p>}
     <div className="grid gap-3 md:grid-cols-3"><Field label="Supplier invoice / DR #"><Input value={h.supplierRef} onChange={(e) => setH({ ...h, supplierRef: e.target.value })} /></Field><Field label="Date"><Input type="date" value={h.docDate} onChange={(e) => setH({ ...h, docDate: e.target.value })} /></Field><Field label="Notes"><Input value={h.notes} onChange={(e) => setH({ ...h, notes: e.target.value })} /></Field></div>
     <table className="mt-3 w-full text-sm"><thead className="text-left text-xs text-slate-500"><tr><th>Product</th><th>Qty</th><th>Free</th><th>Expiry</th><th>Batch #</th><th>Remarks</th><th /></tr></thead><tbody>{lines.map((l, i) => <tr key={i} className="border-t">
       <td>{l.name}</td><td><Input type="number" className="w-20" value={l.qty} onChange={(e) => set(i, { qty: Number(e.target.value) })} /></td><td><Input type="number" className="w-16" value={l.freeQty} onChange={(e) => set(i, { freeQty: Number(e.target.value) })} /></td>

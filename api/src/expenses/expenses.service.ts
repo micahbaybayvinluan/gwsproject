@@ -7,6 +7,7 @@ import { AccountsService } from '../gl/accounts.service';
 import { PostingService } from '../gl/posting.service';
 import { r10Deposit, r10Expense } from '../gl/posting-rules';
 import { AttachmentsService } from '../attachments/attachments.service';
+import { CashOnHandService } from '../closing/cash-on-hand.service';
 import { ClosingService } from '../closing/closing.service';
 import { CashFundService } from '../cashfund/cashfund.service';
 import { ScopeService } from '../common/scope.service';
@@ -17,7 +18,7 @@ import type { SessionUser } from '../common/request-context';
 /** §8.6 Branch expenses (associates), main expenses (accounting), franchise-local expenses, cash deposits. */
 @Injectable()
 export class ExpensesService {
-  constructor(private prisma: PrismaService, private seq: SequenceService, private audit: AuditService, private accounts: AccountsService, private posting: PostingService, private attachments: AttachmentsService, private closing: ClosingService, private scope: ScopeService, private cashFund: CashFundService) {}
+  constructor(private cashOnHand: CashOnHandService, private prisma: PrismaService, private seq: SequenceService, private audit: AuditService, private accounts: AccountsService, private posting: PostingService, private attachments: AttachmentsService, private closing: ClosingService, private scope: ScopeService, private cashFund: CashFundService) {}
 
   accountsFor(user: SessionUser, locationId?: string) {
     if (user.permissions.has('expense.create.main') && !locationId) return this.accounts.mainExpenseAccounts();
@@ -47,6 +48,11 @@ export class ExpensesService {
     if (!isMain && (await this.closing.isClosed(locationId, docDate)) && !user.permissions.has('sale.edit.postclose')) throw new BadRequestException({ message: 'Day is closed; request a post-close edit', code: 'DAY_CLOSED' });
     await this.posting.assertPeriodOpen(null, docDate);
     const loc = await this.prisma.db.location.findUniqueOrThrow({ where: { id: locationId } });
+    // paid from the cash on hand (sales cash not yet deposited): only as much as the branch actually has (owner request 2026-09-29)
+    if (input.paidFrom === 'CASH_DRAWER' && !isMain && loc.type !== 'FRANCHISE') {
+      const available = D((await this.cashOnHand.forBranch(locationId)).cashOnHand);
+      if (available.lt(input.amount)) throw new BadRequestException({ code: 'NO_CASH_ON_HAND', available: available.toFixed(2), message: available.lte(0) ? `${loc.name} has no cash on hand, so this expense cannot be paid from it. Pay it from the cash fund (petty cash) or ask Accounting to pay it from the bank.` : `${loc.name} has only ₱${available.toFixed(2)} cash on hand, less than this expense (₱${input.amount.toFixed(2)}). Pay it from the cash fund (petty cash) or ask Accounting to pay it from the bank.` });
+    }
     const doc = await this.prisma.db.$transaction((tx) => this.insert(tx, { locationId, docDate, account, isMain, payee: input.payee, amount: input.amount, paidFrom: input.paidFrom, paidFromAccountId: input.paidFromAccountId, notes: input.notes, userId: user.id }));
     await this.audit.log({ action: 'CREATE', entityType: 'ExpenseDoc', entityId: doc.id, after: doc });
     return doc;

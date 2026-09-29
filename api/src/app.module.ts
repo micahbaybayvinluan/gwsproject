@@ -14,6 +14,7 @@ import { PricingModule } from './pricing/pricing.module';
 import { ClosingModule } from './closing/closing.module';
 import { SalesModule } from './sales/sales.module';
 import { EcommerceModule } from './ecommerce/ecommerce.module';
+import { TargetsModule } from './targets/targets.module';
 import { ExpensesModule } from './expenses/expenses.module';
 import { AlertsModule } from './alerts/alerts.module';
 import { CountsModule } from './counts/counts.module';
@@ -34,7 +35,7 @@ import { FranchiseModule } from './franchise/franchise.module';
 @Module({
   imports: [
     CommonModule, ChargesModule, RevisionsModule, AuthModule, UsersModule, MasterModule, StockModule, NotificationsModule, ApprovalsModule, AttachmentsModule, GlModule,
-    ReceivingModule, TransfersModule, PricingModule, ClosingModule, SalesModule, ExpensesModule, AlertsModule, CountsModule, ReportsModule, ImportsModule, PayrollModule, DashboardModule, JobsModule, EditsModule, CashFundModule, InspectionsModule, HelpModule, FranchiseModule, EcommerceModule,
+    ReceivingModule, TransfersModule, PricingModule, ClosingModule, SalesModule, ExpensesModule, AlertsModule, CountsModule, ReportsModule, ImportsModule, PayrollModule, DashboardModule, JobsModule, EditsModule, CashFundModule, InspectionsModule, HelpModule, FranchiseModule, EcommerceModule, TargetsModule,
   ],
   controllers: [HealthController],
 })

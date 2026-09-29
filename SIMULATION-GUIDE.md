@@ -37,6 +37,8 @@ Two-factor codes are switched off for the simulation (`AUTH_TOTP_OPTIONAL=true` 
 | XV | Field Auditor | `field.auditor` | Every branch, franchise and the warehouse (inventory only, counts, inspections) | No |
 | XVI | Executive Assistant | `exec.assistant` | Main-office bank accounts, supplier payables, office expenses, balance-sheet accounts | No |
 | XVII | E-comm Associate (TikTok, Shopee, Lazada) | `ecomm.assoc` | E-commerce only; items come from the Warehouse | No |
+| XVIII | Sales Manager | `sales.manager` | Sales of every branch, agents and platforms; targets; AR | No |
+| XIX | Agent (Jerick Quinto) | `agent.jerick` | Own sales at every branch, own target | No |
 
 Admin can add more users of any role under **Admin → Users & Roles** (for example a Sales Associate for another branch or a Franchise Owner for Parañaque): username, email, the person's full name, their **company ID number** (required), role, a temporary password, and the branch(es) to assign. At first sign-in that person must set their own password and accept the accountability statement. Users & Roles shows each person's ID, whether they accepted, their last sign-in and recent devices; **Activity** opens everything they did in the Audit Log.
 
@@ -51,8 +53,8 @@ Use two browser windows, or log out and in between steps. Each step names the ac
 **1. Warehouse receives stock** — `wh.assoc`
 Inventory → Receiving → New receiving: pick a supplier code, add "Prothin Whey Ripped 60s (Choco)" qty 24 with an expiry date next year, create draft, open it, upload any photo as the supplier invoice, **Submit for cost approval**. Notice there is no cost column for this role.
 
-**2. Head Auditor approves the cost** — `head.auditor`
-Approvals (badge in the menu) → the receiving shows "new" per line → open it, type the unit cost (e.g. 900) → Save costs → Approve. Stock now appears in Stock on Hand at the Warehouse with its batch and expiry.
+**2. In-Charge checks the goods, then the Head Auditor approves the cost** — `wh.incharge`, then `head.auditor`
+As `wh.incharge`: My Approvals → "Goods into the warehouse" → compare with the delivery receipt → Approve. As `head.auditor`: My Approvals → the receiving shows "new" per line → open it, type the unit cost (e.g. 900) → Save costs → Approve. Stock now appears in Stock on Hand at the Warehouse with its batch and expiry.
 
 **3. Branch requests stock** — `sales.westave`
 Inventory → Transfers: From Warehouse, To West Ave, type RESTOCK, add the product qty 12 → Create draft → Submit for approval. The system picks the earliest-expiry batches.
@@ -74,7 +76,7 @@ Approvals → Special price → expand to see tier price, sold price, discount %
 New Sale: channel Prothin Dealer, payment AR/PDC, customer Topform, due date. Then AR / Credit → tick the invoice → Record payment (partial amount) → a Credit Note number is issued.
 
 **9. Branch expense and daily close** — `sales.westave`
-Expenses: pick "Meralco - West Ave" (only West Ave accounts are listed), amount 300, cash drawer. Daily Close: fill the Money Breakdown, Save cash count, then **Daily Sales Report xlsx**. Open the file: it is your `SAles Report Sample.xlsx` layout with today's numbers.
+Expenses: pick "Meralco - West Ave" (only West Ave accounts are listed), amount 300, Cash on hand. Daily Close: fill the Money Breakdown, Save cash count, then **Daily Sales Report xlsx**. Open the file: it is your `SAles Report Sample.xlsx` layout with today's numbers.
 
 **10. Try to edit a closed day** — `sales.westave` (any sale dated before today)
 Open the sale → Void: it is refused because the day is closed → "Request post-close void". `head.auditor` approves, nothing changes yet; `asst.auditor` approves, then it applies. Both are needed.
@@ -125,7 +127,7 @@ Expenses → Paid from "Cash fund" → save. Cash Fund → "Replenish from today
 Inventory Count → choose the branch → Create count sheet. Every item is listed with its beginning count; type the actual counts → Submit. The sheet is now locked; "Correct this count…" sends a revision to the Head Auditor, and Admin is notified. Store Inspections → New → fill the 19 checklist items from the paper form → Submit to HR. HR, Admin and the Head Auditor are notified.
 
 **26. Weekly count and discrepancy countdown** — `sales.csr`, then `hr.staff`
-Sign in as `sales.csr`: the dashboard shows a red "weekly count sheet" alarm → Start my weekly count → type actual counts → Submit. `hr.staff` → Weekly Count Compliance shows who submitted. When a discrepancy is open, the sales associate's dashboard shows the days left in bold red and an Explain button.
+Sign in as `sales.csr`: the dashboard shows a red "weekly count sheet" alarm → Start my weekly count → type actual counts → Submit. `hr.staff` → Weekly Count Check shows who submitted. When a discrepancy is open, the sales associate's dashboard shows the days left in bold red and an Explain button.
 
 **27. AR payment from the branch** — `sales.westave`, then `acct.assoc`
 AR / Credit → tick an invoice → enter the amount → "Send payment for Accounting approval". The payment shows "Waiting for Accounting". As `acct.assoc`: Approvals → AR payment → Approve. The invoice balance drops and the credit note is issued.
@@ -145,8 +147,8 @@ As `head.auditor`: Products → New product → Save. The list shows "Product wa
 **32. HR creates a user account** — `hr.staff`, then `admin`
 Employees → an approved employee → "Create user account…" → username, role, temporary password, branch → Send. As `admin`: Approvals → Approve. The person can now sign in with that password.
 
-**33. Warehouse In-Charge approval** — `wh.assoc`, then `head.auditor`, then `wh.incharge`
-As `wh.assoc`: Receiving → New → Submit. As `head.auditor`: approve the cost. The receiving shows "Cost approved · waiting for the In-Charge". As `wh.incharge`: Approvals → "Goods into the warehouse" → Approve; only now does stock go up. A transfer out prepared by `wh.assoc` also waits for "Goods out of the warehouse". Repeat as `wh.incharge` yourself: only the cost approval is needed. Warehouse sales need no In-Charge approval.
+**33. Warehouse In-Charge approval** — `wh.assoc`, then `wh.incharge`, then `head.auditor`
+As `wh.assoc`: Supplier Deliveries → New → Submit. As `wh.incharge`: My Approvals → "Goods into the warehouse" → Approve; the receiving shows "2. Goods checked · waiting for the Head Auditor's cost approval". As `head.auditor`: approve the cost; only now does stock go up. A transfer out prepared by `wh.assoc` also waits for "Goods out of the warehouse". Repeat as `wh.incharge` yourself: only the cost approval is needed. Warehouse sales need no In-Charge approval.
 
 **34. Visual workflow and price notices** — `sales.westave`, `admin`, `fr.mayon.owner`
 Open any document waiting for approval: the workflow bar shows each step, who must approve and who already did. The dashboard's "My requests" shows the same. As `admin`: Price Changes → change a retail and a franchise price → approve. `sales.westave` sees the retail change under "Price updates"; `fr.mayon.owner` sees only the franchise price. A cost change on receiving shows only for `admin`, `head.auditor`, `ext.auditor` and `acct.head`.
@@ -164,10 +166,10 @@ Accounting → Journal Vouchers → open one → Edit entry → change the lines
 Settings → Company letterhead → type the details → Save details. Upload a logo… → slide "Remove the background" until the background is checkered → Use this logo. Print any form: the letterhead is at the top; the sign-in page and menu show the logo.
 
 **39. Incentive and daily report submission** — `sales.westave`
-New Sale → add an item → **+ Add incentive expense** (Sales incentive, given to "Juan", ₱50) → Save. Daily Close: expected cash is ₱50 lower. Daily Branch Sales Report → **Submit today's report…** → tick "true and correct" → **I agree — submit**. Try a new sale: the day is closed.
+New Sale → add an item → **+ Add incentive expense** (Sales incentive, given to "Juan", ₱50) → Save. Daily Close: expected cash is ₱50 lower. Daily Sales Report → **Submit today's report…** → tick "true and correct" → **I agree — submit**. Try a new sale: the day is closed.
 
 **40. Count sheet with every item** — `sales.csr`, then `head.auditor`, `hr.staff`
-Inventory Count Sheets → Start my weekly count sheet. Items in the system come first, then items not in the system. Download the sheet, type the counts in Excel (one item short), upload, submit. Everyone concerned is notified; the case gives 7 days to explain.
+Stock Counts → Start my weekly count sheet. Items in the system come first, then items not in the system. Download the sheet, type the counts in Excel (one item short), upload, submit. Everyone concerned is notified; the case gives 7 days to explain.
 
 **41. Cash on hand** — `head.auditor`, then `sales.westave`, `admin`
 Cash on Hand → set West Ave "Days allowed" to 0. As `sales.westave`: the dashboard shows cash due today; **Request extension** with a reason. `head.auditor` and `admin` both approve in Approvals. Record the deposit in Daily Close (choose **Gcash (GWS)** or a bank).
@@ -176,16 +178,28 @@ Cash on Hand → set West Ave "Days allowed" to 0. As `sales.westave`: the dashb
 As `admin`: Catalogue → Consignees → New consignee. As `sales.westave`: Consignment → 1. Send goods → Save draft → Print draft → Submit. `asst.auditor` approves the check, `admin` gives the final approval. Then 2. Record consignee sales: prices are pre-filled and editable; print the draft and submit.
 
 **43. Cost edit, days to consume and customer follow-ups** — `head.auditor`, `admin`, `sales.westave`
-As `head.auditor`: open a product → Edit cost → Send for approval; `admin` approves. Set "Days to consume one unit" to 30. As `sales.westave`: sell it with the customer's mobile number. As `admin`: Settings → Customer re-order messages → edit the SMS. Customer Contact List & Follow-ups shows the items ordered and, when due, the customer to call with SMS / Email buttons.
+As `head.auditor`: open a product → Edit cost → Send for approval; `admin` approves. Set "Days to consume one unit" to 30. As `sales.westave`: sell it with the customer's mobile number. As `admin`: Settings → Customer re-order messages → edit the SMS. Customers & Follow-ups shows the items ordered and, when due, the customer to call with SMS / Email buttons.
 
 **44. Help** — any account
-Help & User Guide opens on **My guide** (the steps for your role), with **Guide for everyone** and **More topics** next to it. `admin` also sees **Every role** for training.
+Help & Guide opens on **My guide** (the steps for your role), with **Guide for everyone** and **More topics** next to it. `admin` also sees **Every role** for training.
 
 **45. Sales Report and graphs** — `admin`, then `sales.westave`
-Reports → Sales Report: choose All branches and This month, then one branch and Last month; Excel. Reports → Monthly Sales Performance: each branch's running total in its own colour, the company total, and each month of the year (hover for amounts, or Show as tables). As `sales.westave` only West Ave appears.
+Reports → Sales Report: choose All branches and This month, then one branch and Last month; Excel. Reports → Sales Graphs: each branch's running total in its own colour, the company total, and each month of the year (hover for amounts, or Show as tables). As `sales.westave` only West Ave appears.
 
 **46. E-commerce: TikTok, Shopee and Lazada** — `ecomm.assoc`, `wh.incharge`, `acct.head`, `admin`
 As `ecomm.assoc`: E-commerce → TikTok Shop → 1. Orders → pull-out → **GWS orders template** → fill two orders with GWS SKUs → upload. A draft pull-out appears; open it, **Print picking list**, **Submit**. As `wh.incharge`: Approvals → approve it (stock moves to "TikTok – with courier"). As `ecomm.assoc`: 2. Payouts → **GWS payout template** → one row per order (gross, fees, payout) → upload → check ✓ → **Send to Accounting**. As `acct.head`: approve; Journal Vouchers shows the payout, each TikTok fee, withholding tax and the cost of sales. Back as `ecomm.assoc`: 3. Returns → type an order ID → `wh.incharge` receives it (E-commerce → Returned parcels) marking one item damaged. 4. Ads → record ₱1,000. As `admin`: E-commerce → All platforms: profit report. Do the same on the Shopee and Lazada tabs: each keeps its own orders, payouts and totals.
+
+**47. Transfer received with a different quantity** — `wh.incharge`, `sales.westave`, `head.auditor`, `admin`, `hr.staff`
+As `wh.incharge`: Transfers & Pull-outs → new transfer to West Ave with 2 of an item → submit; `head.auditor` approves. As `sales.westave`: open it, leave the line unticked, type **1** and "only 1 in the box", add an item that is not on the form, **Confirm receipt**. As `head.auditor`: My Approvals → **Confirm the difference**. As `wh.incharge`: My Approvals → **Agree** (or Disagree with a note: then `admin` decides on the transfer page). The transfer page shows the -002 and -003 forms. As `hr.staff`: HR Notices shows the case.
+
+**48. AR, PDC and approvals with proof** — `sales.westave`, `acct.head`
+New Sale → payment AR / PDC → **Dealer** (only dealers are listed) → due date; tick **There is a PDC** to type the cheque. AR & Collections → tick the invoice → record an online payment with a screenshot. As `acct.head`: My Approvals shows the proof and the account; **Reject** asks for the reason.
+
+**49. Expense from the cash on hand** — `sales.csr`
+Expenses → Paid from **Cash on hand** → type an amount bigger than the cash on hand shown → **Save**: a notice pops up; press **Pay from the cash fund**.
+
+**50. Sales targets** — `sales.manager`, `admin`, `agent.jerick`
+As `sales.manager`: Sales Targets → set a target for West Ave and for Jerick Quinto → Send. As `admin`: approve both in My Approvals. As `sales.manager`: the bars show % achieved against the days gone. As `agent.jerick`: My Sales shows his sales at every branch, his target and his customers' unpaid balances.
 
 ## Where the files come out
 

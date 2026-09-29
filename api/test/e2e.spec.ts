@@ -12,6 +12,8 @@ import { INestApplication } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
 import { createApp } from '../src/main';
 import { ApprovalsService } from '../src/approvals/approvals.service';
+import { TransferDiscrepancyService } from '../src/transfers/transfer-discrepancy.service';
+import { SalesService } from '../src/sales/sales.service';
 
 const PW = process.env.SEED_PASSWORD || 'ChangeMe!2026';
 const TOTP_ROLES = ['admin', 'ext.auditor', 'head.auditor', 'acct.head'];
@@ -47,7 +49,7 @@ async function inChargeApproves(documentType: string, id: string) {
   if (!r) throw new Error(`No In-Charge approval pending for ${documentType} ${id}`);
   ok(await as('wh.incharge').post(`/api/approvals/${r.id}/decide`).send({ decision: 'APPROVE' }));
 }
-const USERS = ['admin', 'ext.auditor', 'head.auditor', 'asst.auditor', 'audit.assoc', 'wh.incharge', 'wh.assoc', 'sales.westave', 'fr.mayon.assoc', 'fr.mayon.owner', 'custom.user', 'acct.head', 'acct.assoc', 'hr.staff', 'field.auditor', 'sales.dasma', 'sales.csr', 'exec.assistant', 'ecomm.assoc'];
+const USERS = ['admin', 'ext.auditor', 'head.auditor', 'asst.auditor', 'audit.assoc', 'wh.incharge', 'wh.assoc', 'sales.westave', 'fr.mayon.assoc', 'fr.mayon.owner', 'custom.user', 'acct.head', 'acct.assoc', 'hr.staff', 'field.auditor', 'sales.dasma', 'sales.csr', 'exec.assistant', 'ecomm.assoc', 'sales.manager', 'agent.jerick'];
 const as = (u: string) => ({ get: (p: string) => http.get(p).set('Authorization', `Bearer ${tokens[u]}`), post: (p: string) => http.post(p).set('Authorization', `Bearer ${tokens[u]}`), put: (p: string) => http.put(p).set('Authorization', `Bearer ${tokens[u]}`), patch: (p: string) => http.patch(p).set('Authorization', `Bearer ${tokens[u]}`), delete: (p: string) => http.delete(p).set('Authorization', `Bearer ${tokens[u]}`) });
 const has = (o: unknown, re: RegExp): boolean => JSON.stringify(o).match(re) !== null;
 const ok = (r: request.Response) => { if (r.status >= 400) throw new Error(`${r.request?.method} ${r.request?.url} → ${r.status} ${JSON.stringify(r.body)}`); return r; };
@@ -57,7 +59,7 @@ async function resetTransactionalData() {
   if (process.env.NODE_ENV !== 'test') throw new Error('refusing to reset data outside NODE_ENV=test');
   await prisma.$executeRawUnsafe(`TRUNCATE stock_ledger, stock_balances, receiving_lines, receiving_docs, transfer_lines, transfer_docs, sales_lines, payment_allocations, payments, sales_docs, expense_docs, count_lines, count_docs, discrepancy_cases, charge_form_allocations, charge_form_lines, charge_forms, expiry_writeoff_lines, expiry_writeoff_docs, approval_decisions, approval_requests, notifications, audit_log, batches, daily_closes, post_close_edits, journal_lines, journal_vouchers, beginning_balances, accounting_periods, voucher_sequences, control_sequences, alert_states, attachments, employee_loans, payroll_lines, payroll_runs, employees, min_stock_levels, revaluation_lines, revaluation_entries, cash_deposits, login_session_records, cash_fund_txns, cash_fund_checks, store_inspections, contribution_remittances, document_revisions, price_change_lines, price_change_docs, price_update_logs, franchise_salaries, franchise_charges, franchise_expenses CASCADE`);
   await prisma.$executeRawUnsafe(`TRUNCATE cash_deposits, cash_deposit_extensions, hr_notices, sales_report_submissions`);
-  await prisma.$executeRawUnsafe(`TRUNCATE ecom_orders, ecom_order_lines, ecom_settlements, ecom_returns, ecom_ad_spend, ecom_sku_maps`);
+  await prisma.$executeRawUnsafe(`TRUNCATE ecom_orders, ecom_order_lines, ecom_settlements, ecom_returns, ecom_ad_spend, ecom_sku_maps, transfer_discrepancies, sales_targets`);
   await prisma.$executeRawUnsafe(`UPDATE locations SET franchise_associate_receives = false, cash_deposit_max_days = 1`);
   await prisma.$executeRawUnsafe(`UPDATE cash_funds SET balance = imprest_amount`);
   await prisma.priceList.deleteMany({ where: { product: { name: { startsWith: 'E2E ' } } } });
@@ -108,17 +110,17 @@ describe('Phase 1 flow: receive → approve cost → transfer → confirm → FE
     await http.post(`/api/attachments/ReceivingDoc/${receivingId}`).set('Authorization', `Bearer ${tokens['wh.assoc']}`).attach('file', png, { filename: 'invoice.png', contentType: 'image/png' }).expect(201);
     await http.post(`/api/attachments/ReceivingDoc/${receivingId}`).set('Authorization', `Bearer ${tokens['wh.assoc']}`).attach('file', Buffer.from('not a png'), { filename: 'x.png', contentType: 'image/png' }).expect(400); // magic-byte check
     ok(await as('wh.assoc').post(`/api/receiving/${receivingId}/submit`));
+    // the associate's delivery: the In-Charge checks the goods first, then the Head Auditor approves the cost (owner request 2026-09-29)
+    expect(await prisma.approvalRequest.count({ where: { documentId: receivingId, type: 'COST_ON_RECEIVING' } })).toBe(0);
+    await inChargeApproves('ReceivingDoc', receivingId);
     const inbox = ok(await as('head.auditor').get('/api/approvals/inbox?type=COST_ON_RECEIVING')).body;
     const req = inbox.items.find((i: { documentId: string }) => i.documentId === receivingId);
     expect(req).toBeTruthy(); expect(req.autoApproveAt).toBeNull(); expect(req.summary.allUnchanged).toBe(false); // first-ever receipt of this product = new product → never auto (§6.1)
     const doc = ok(await as('head.auditor').get(`/api/receiving/${receivingId}`)).body;
     expect(doc.lines[0].currentStandardCost).toBe('900'); expect(has(doc, /Secret Supplier/)).toBe(true);
     await as('wh.assoc').post(`/api/approvals/${req.id}/decide`).send({ decision: 'APPROVE' }).expect(403);
-    ok(await as('head.auditor').post(`/api/approvals/${req.id}/decide`).send({ decision: 'APPROVE', note: 'same cost' }));
-    // the associate's goods wait for the Warehouse In-Charge before stock is posted
-    expect(ok(await as('head.auditor').get(`/api/receiving/${receivingId}`)).body.status).toBe('APPROVED');
     expect(await prisma.stockBalance.count({ where: { productId, locationId: whId } })).toBe(0);
-    await inChargeApproves('ReceivingDoc', receivingId);
+    ok(await as('head.auditor').post(`/api/approvals/${req.id}/decide`).send({ decision: 'APPROVE', note: 'same cost' }));
     const posted = ok(await as('head.auditor').get(`/api/receiving/${receivingId}`)).body;
     expect(posted.status).toBe('POSTED');
     const batches = ok(await as('head.auditor').get(`/api/stock/batches/${productId}?locationId=${whId}`)).body as { batchId: string; batchNo: string; qty: number; unitCost: string }[];
@@ -128,12 +130,12 @@ describe('Phase 1 flow: receive → approve cost → transfer → confirm → FE
     const r2 = ok(await as('wh.assoc').post('/api/receiving').send({ supplierId, supplierRef: 'INV-2', lines: [{ productId, qty: 1, expiryDate: '2029-01-01', batchNo: 'AUTO' }] })).body;
     await http.post(`/api/attachments/ReceivingDoc/${r2.id}`).set('Authorization', `Bearer ${tokens['wh.assoc']}`).attach('file', png, { filename: 'invoice2.png', contentType: 'image/png' }).expect(201);
     ok(await as('wh.assoc').post(`/api/receiving/${r2.id}/submit`));
+    await inChargeApproves('ReceivingDoc', r2.id);
     const req2 = (ok(await as('head.auditor').get('/api/approvals/inbox?type=COST_ON_RECEIVING'))).body.items.find((i: { documentId: string }) => i.documentId === r2.id);
     expect(req2.autoApproveAt).toBeTruthy(); expect(req2.summary.allUnchanged).toBe(true);
     await prisma.approvalRequest.update({ where: { id: req2.id }, data: { autoApproveAt: new Date(Date.now() - 1000) } });
     ok(await as('admin').post('/api/alerts/run')); // any job tick; auto-approve also runs from the scheduler
     await app.get(ApprovalsService).runAutoApprovals();
-    await inChargeApproves('ReceivingDoc', r2.id);
     expect((await prisma.receivingDoc.findUniqueOrThrow({ where: { id: r2.id } })).status).toBe('POSTED');
     expect((await prisma.approvalRequest.findUniqueOrThrow({ where: { id: req2.id } })).status).toBe('AUTO_APPROVED');
   });
@@ -155,7 +157,11 @@ describe('Phase 1 flow: receive → approve cost → transfer → confirm → FE
     const near = lines.find((l) => l.batch.batchNo === 'NEAR')!; const far = lines.find((l) => l.batch.batchNo === 'FAR')!;
     const c = ok(await as('sales.westave').post(`/api/transfers/${transferId}/confirm`).send({ lines: [{ lineId: near.id, qtyReceived: 10, discrepancyNote: '1 damaged box' }, { lineId: far.id, qtyReceived: 1 }] })).body;
     expect(c.status).toBe('DISCREPANCY');
-    ok(await as('head.auditor').post(`/api/transfers/${transferId}/resolve`).send({ resolution: 'WRITEOFF' }));
+    // difference steps: Head Auditor confirms → the Warehouse disagrees → the Owner decides the item was lost (company expense)
+    const decide = async (u: string, type: string, decision: 'APPROVE' | 'REJECT', note?: string) => { const r = await prisma.approvalRequest.findFirstOrThrow({ where: { documentId: transferId, type, status: 'PENDING' } }); ok(await as(u).post(`/api/approvals/${r.id}/decide`).send({ decision, note })); };
+    await decide('head.auditor', 'TRANSFER_DIFF_REVIEW', 'APPROVE');
+    await decide('wh.incharge', 'TRANSFER_DIFF_SENDER', 'REJECT', 'We packed 12');
+    ok(await as('admin').post(`/api/transfers/${transferId}/discrepancy/decide`).send({ outcome: 'LOST_COMPANY', note: 'Lost in transit' }));
     expect(ok(await as('head.auditor').get(`/api/transfers/${transferId}`)).body.status).toBe('RESOLVED');
   });
   it('sales associate sells at branch: FEFO deducts NEAR batch, qty > on-hand blocked, unit cost redacted, DR uniqueness enforced', async () => {
@@ -778,21 +784,34 @@ describe('Owner controls batch (owner requests 2026-09-26): In-Charge approvals,
     pid = ok(await as('admin').post('/api/products').send({ name: `Batch Whey ${run}`, categoryId: cats.find((c) => c.accountingClass === 'SUPPLEMENT')!.id, supplierId: sup, prices: { RETAIL: 2000, DEALER: 1800, FRANCHISE: 1500, AGENT: 1700 }, cost: 1000 })).body.id;
   });
 
-  it('receiving by the Warehouse Associate: Head Auditor approves the cost, then the In-Charge, then stock posts; the timeline shows each step; a cost change reaches only the cost roles', async () => {
+  it('receiving by the Warehouse Associate: the In-Charge checks the goods first, then the Head Auditor approves the cost, then stock posts; a failed approval is never stuck; the timeline shows each step; a cost change reaches only the cost roles', async () => {
     const r = ok(await as('wh.assoc').post('/api/receiving').send({ supplierId: sup, supplierRef: `B-${run}`, lines: [{ productId: pid, qty: 20, expiryDate: '2029-06-30', batchNo: 'B1', }] })).body;
     await http.post(`/api/attachments/ReceivingDoc/${r.id}`).set('Authorization', `Bearer ${tokens['wh.assoc']}`).attach('file', png, { filename: 'inv.png', contentType: 'image/png' }).expect(201);
     ok(await as('wh.assoc').post(`/api/receiving/${r.id}/submit`));
+    await as('head.auditor').post(`/api/approvals/${(await pending('WAREHOUSE_IN', r.id)).id}/decide`).send({ decision: 'APPROVE' }).expect(403);
+    ok(await as('wh.incharge').post(`/api/approvals/${(await pending('WAREHOUSE_IN', r.id)).id}/decide`).send({ decision: 'APPROVE' }));
+    let tl = ok(await as('wh.assoc').get(`/api/approvals/timeline/ReceivingDoc/${r.id}`)).body as { type: string; steps: { who: string; status: string; by?: string }[] }[];
+    expect(tl.map((t) => t.type)).toEqual(['WAREHOUSE_IN', 'COST_ON_RECEIVING']);
+    expect(tl[0].steps[0]).toMatchObject({ who: 'Warehouse In-Charge', status: 'approved' }); expect(tl[1].steps[0]).toMatchObject({ who: 'Head Auditor', status: 'waiting' });
+    expect(await prisma.stockBalance.count({ where: { productId: pid } })).toBe(0);
     const doc = ok(await as('head.auditor').get(`/api/receiving/${r.id}`)).body;
     ok(await as('head.auditor').post(`/api/receiving/${r.id}/costs`).send({ costs: [{ lineId: doc.lines[0].id, unitCost: 1100 }] }));
     ok(await as('head.auditor').post(`/api/approvals/${(await pending('COST_ON_RECEIVING', r.id)).id}/decide`).send({ decision: 'APPROVE' }));
-    let tl = ok(await as('wh.assoc').get(`/api/approvals/timeline/ReceivingDoc/${r.id}`)).body as { type: string; steps: { who: string; status: string; by?: string }[] }[];
-    expect(tl.map((t) => t.type)).toEqual(['COST_ON_RECEIVING', 'WAREHOUSE_IN']);
-    expect(tl[0].steps[0]).toMatchObject({ who: 'Head Auditor', status: 'approved', by: 'Head Auditor' }); expect(tl[1].steps[0]).toMatchObject({ who: 'Warehouse In-Charge', status: 'waiting' });
-    expect(await prisma.stockBalance.count({ where: { productId: pid } })).toBe(0);
-    await as('head.auditor').post(`/api/approvals/${(await pending('WAREHOUSE_IN', r.id)).id}/decide`).send({ decision: 'APPROVE' }).expect(403);
-    ok(await as('wh.incharge').post(`/api/approvals/${(await pending('WAREHOUSE_IN', r.id)).id}/decide`).send({ decision: 'APPROVE' }));
     expect(ok(await as('wh.assoc').get(`/api/receiving/${r.id}`)).body.status).toBe('POSTED');
-    tl = ok(await as('wh.assoc').get(`/api/approvals/timeline/ReceivingDoc/${r.id}`)).body; expect(tl[1].steps[0].status).toBe('approved');
+    tl = ok(await as('wh.assoc').get(`/api/approvals/timeline/ReceivingDoc/${r.id}`)).body; expect(tl[1].steps[0]).toMatchObject({ status: 'approved', by: 'Head Auditor' });
+    // a brand-new product without a cost: the Head Auditor's approval is refused and NOT recorded, so it stays in the inbox until the cost is typed
+    const np = ok(await as('admin').post('/api/products').send({ name: `No Cost Yet ${run}`, categoryId: (await prisma.product.findUniqueOrThrow({ where: { id: pid } })).categoryId, prices: { RETAIL: 100 } })).body.id;
+    const r3 = ok(await as('wh.assoc').post('/api/receiving').send({ supplierId: sup, supplierRef: `C-${run}`, lines: [{ productId: np, qty: 5, expiryDate: '2029-06-30', batchNo: 'N1' }] })).body;
+    await http.post(`/api/attachments/ReceivingDoc/${r3.id}`).set('Authorization', `Bearer ${tokens['wh.assoc']}`).attach('file', png, { filename: 'inv.png', contentType: 'image/png' }).expect(201);
+    ok(await as('wh.assoc').post(`/api/receiving/${r3.id}/submit`));
+    ok(await as('wh.incharge').post(`/api/approvals/${(await pending('WAREHOUSE_IN', r3.id)).id}/decide`).send({ decision: 'APPROVE' }));
+    const costReq = await pending('COST_ON_RECEIVING', r3.id);
+    await as('head.auditor').post(`/api/approvals/${costReq.id}/decide`).send({ decision: 'APPROVE' }).expect(400);
+    expect((ok(await as('head.auditor').get('/api/approvals/inbox?type=COST_ON_RECEIVING')).body.items as { id: string }[]).map((i) => i.id)).toContain(costReq.id);
+    const d3 = ok(await as('head.auditor').get(`/api/receiving/${r3.id}`)).body;
+    ok(await as('head.auditor').post(`/api/receiving/${r3.id}/costs`).send({ costs: [{ lineId: d3.lines[0].id, unitCost: 55 }] }));
+    ok(await as('head.auditor').post(`/api/approvals/${costReq.id}/decide`).send({ decision: 'APPROVE' }));
+    expect(ok(await as('wh.assoc').get(`/api/receiving/${r3.id}`)).body.status).toBe('POSTED');
     for (const u of ['head.auditor', 'ext.auditor', 'acct.head', 'admin']) expect(await notes(u)).toContain('COST_UPDATE');
     for (const u of ['asst.auditor', 'audit.assoc', 'acct.assoc', 'wh.assoc', 'sales.westave', 'fr.mayon.owner']) expect(await notes(u)).not.toContain('Supplier cost change');
     const dash = ok(await as('head.auditor').get('/api/dashboard')).body; expect(dash.priceUpdates.some((p: { what: string }) => p.what === 'Supplier cost')).toBe(true);
@@ -1276,5 +1295,188 @@ describe('E-commerce: TikTok, Shopee and Lazada kept separate (owner request 202
     // each platform is its own line in the company sales performance graphs
     const perf = ok(await as('admin').get('/api/reports/sales-performance')).body;
     expect(perf.branches.map((b: { name: string }) => b.name)).toContain('E-commerce – TikTok');
+  });
+});
+
+describe('Transfer received with a different quantity (owner request 2026-09-29)', () => {
+  let wh = ''; let west = ''; let a = ''; let b = '';
+  const today = () => new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);
+  const giveStock = async (locationId: string, productId: string, qty: number, cost: number) => {
+    const batch = await prisma.batch.create({ data: { productId, batchNo: `D-${run}-${qty}`, receivedRef: 'TEST', unitCost: cost.toFixed(2) } });
+    await prisma.stockLedger.create({ data: { locationId, productId, batchId: batch.id, qtyDelta: qty, movementType: 'RECEIVE', documentType: 'OpeningStock', documentId: batch.id, unitCost: cost.toFixed(2), businessDate: new Date(`${today()}T00:00:00Z`) } });
+    await prisma.stockBalance.create({ data: { locationId, productId, batchId: batch.id, qty } });
+  };
+  const onHand = async (locationId: string, productId: string) => (await prisma.stockBalance.aggregate({ where: { locationId, productId }, _sum: { qty: true } }))._sum.qty ?? 0;
+  const decide = async (u: string, id: string, type: string, decision: 'APPROVE' | 'REJECT', note?: string) => { const r = await prisma.approvalRequest.findFirstOrThrow({ where: { documentId: id, type, status: 'PENDING' } }); return as(u).post(`/api/approvals/${r.id}/decide`).send({ decision, note }); };
+  /** Warehouse → West Ave, approved and in transit; West Ave receives `got` of `qty` (plus extras). */
+  const sendAndReceive = async (qty: number, got: number, extras: { productId: string; qty: number; note?: string }[] = []) => {
+    const t = ok(await as('wh.incharge').post('/api/transfers').send({ fromLocationId: wh, toLocationId: west, transferType: 'RESTOCK', lines: [{ productId: a, qty }] })).body;
+    ok(await as('wh.incharge').post(`/api/transfers/${t.id}/submit`));
+    ok(await decide('head.auditor', t.id, 'TRANSFER_INTERNAL', 'APPROVE'));
+    const d = ok(await as('sales.westave').get(`/api/transfers/${t.id}`)).body;
+    const c = ok(await as('sales.westave').post(`/api/transfers/${t.id}/confirm`).send({ lines: [{ lineId: d.lines[0].id, qtyReceived: got, discrepancyNote: got < qty ? `only ${got} in the box` : undefined }], extras })).body;
+    return { id: t.id as string, controlNo: t.controlNo as string, status: c.status as string };
+  };
+  beforeAll(async () => {
+    wh = (await prisma.location.findUniqueOrThrow({ where: { code: 'WH' } })).id; west = (await prisma.location.findUniqueOrThrow({ where: { code: 'WESTAVE' } })).id;
+    const cats = ok(await as('admin').get('/api/categories')).body as { id: string; accountingClass: string }[];
+    const supp = cats.find((c) => c.accountingClass === 'SUPPLEMENT')!.id;
+    a = ok(await as('admin').post('/api/products').send({ name: `DIFF Whey ${run}`, categoryId: supp, prices: { RETAIL: 1000, FRANCHISE: 700 }, cost: 500 })).body.id;
+    b = ok(await as('admin').post('/api/products').send({ name: `DIFF Shaker ${run}`, categoryId: supp, prices: { RETAIL: 200, FRANCHISE: 150 }, cost: 80 })).body.id;
+    await giveStock(wh, a, 30, 500); await giveStock(wh, b, 10, 80);
+  });
+
+  it('receive 1 of 2 plus an item not on the form: Head Auditor first, then the sending branch agrees → -002 back to the sender and -003 for the extra item; HR is told', async () => {
+    const t = await sendAndReceive(2, 1, [{ productId: b, qty: 1, note: 'shaker not on the form' }]);
+    expect(t.status).toBe('DISCREPANCY');
+    expect(await onHand(west, a)).toBe(1); expect(await onHand(west, b)).toBe(0);
+    const rev = await prisma.approvalRequest.findFirstOrThrow({ where: { documentId: t.id, type: 'TRANSFER_DIFF_REVIEW', status: 'PENDING' } });
+    expect(rev.requiredApproverRoles).toEqual(['HEAD_AUDITOR']);
+    expect((await decide('wh.incharge', t.id, 'TRANSFER_DIFF_REVIEW', 'APPROVE')).status).toBe(403); // the sender waits for the Head Auditor
+    ok(await decide('head.auditor', t.id, 'TRANSFER_DIFF_REVIEW', 'APPROVE'));
+    const mid = ok(await as('wh.incharge').get(`/api/transfers/${t.id}/discrepancy`)).body;
+    expect(mid.status).toBe('SENDER'); expect(mid.canAct).toBe(true);
+    expect(new Date(mid.senderDueAt).getTime() - Date.now()).toBeGreaterThan(47 * 3600e3);
+    expect(ok(await as('sales.westave').get(`/api/transfers/${t.id}/discrepancy`)).body.canAct).toBe(false);
+    ok(await decide('wh.incharge', t.id, 'TRANSFER_DIFF_SENDER', 'APPROVE', 'Found it on the shelf'));
+    const done = ok(await as('wh.incharge').get(`/api/transfers/${t.id}/discrepancy`)).body;
+    expect(done.status).toBe('RESOLVED'); expect(done.outcome).toBe('RETURN_TO_SENDER');
+    expect(done.adjustmentForms.map((f: { controlNo: string }) => f.controlNo).sort()).toEqual([`${t.controlNo}-002`, `${t.controlNo}-003`]);
+    const back = done.adjustmentForms.find((f: { controlNo: string }) => f.controlNo.endsWith('-002'));
+    expect(back.fromLocation.name).toBe('West Ave'); expect(back.toLocation.name).toBe('Warehouse');
+    expect(await onHand(wh, a)).toBe(29); expect(await onHand(west, a)).toBe(1); expect(await onHand(west, b)).toBe(1); expect(await onHand(wh, b)).toBe(9);
+    const transit = (await prisma.location.findUniqueOrThrow({ where: { code: 'V-TRANSIT' } })).id;
+    expect(await onHand(transit, a)).toBe(0);
+    expect(ok(await as('head.auditor').get(`/api/transfers/${t.id}`)).body.status).toBe('RESOLVED');
+    const n = await prisma.hrNotice.findFirstOrThrow({ where: { dedupeKey: `TRANSFER_DIFF:${t.id}` } });
+    expect(n.kind).toBe('TRANSFER_DISCREPANCY'); expect((n.details as { staffName: string; countIn30Days: number }).countIn30Days).toBe(1);
+    expect(JSON.stringify(ok(await as('hr.staff').get('/api/notifications')).body)).toContain(t.controlNo);
+  });
+
+  it('no answer in 2 days → the Owner decides (charge to staff); the third case of the same person → HR is advised to refer it to the Owner', async () => {
+    const t2 = await sendAndReceive(2, 1);
+    ok(await decide('head.auditor', t2.id, 'TRANSFER_DIFF_REVIEW', 'APPROVE'));
+    const svc = app.get(TransferDiscrepancyService);
+    expect(await svc.runDeadlines(new Date(Date.now() + 25 * 3600e3))).toEqual({ reminded: 1, escalated: 0 });
+    expect(await svc.runDeadlines(new Date(Date.now() + 49 * 3600e3))).toEqual({ reminded: 0, escalated: 1 });
+    expect(ok(await as('admin').get(`/api/transfers/${t2.id}/discrepancy`)).body.status).toBe('ADMIN');
+    await as('head.auditor').post(`/api/transfers/${t2.id}/discrepancy/decide`).send({ outcome: 'LOST_COMPANY' }).expect(403);
+    const emp = await prisma.employee.findFirstOrThrow({ where: { active: true } });
+    ok(await as('admin').post(`/api/transfers/${t2.id}/discrepancy/decide`).send({ outcome: 'LOST_CHARGE', employeeIds: [emp.id], note: 'Checker did not count' }));
+    const r2 = await prisma.transferDiscrepancy.findUniqueOrThrow({ where: { transferId: t2.id } });
+    expect(r2.chargeFormId).toBeTruthy();
+    expect((await prisma.chargeForm.findUniqueOrThrow({ where: { id: r2.chargeFormId! } })).kind).toBe('INVENTORY_DISCREPANCY');
+    // third case for the same preparer: the sending branch disagrees, the Owner rules the difference stands
+    const t3 = await sendAndReceive(3, 2);
+    ok(await decide('head.auditor', t3.id, 'TRANSFER_DIFF_REVIEW', 'APPROVE'));
+    ok(await decide('wh.incharge', t3.id, 'TRANSFER_DIFF_SENDER', 'REJECT', 'We sent 3'));
+    expect((await prisma.approvalRequest.findFirstOrThrow({ where: { documentId: t3.id, type: 'TRANSFER_DIFF_ADMIN', status: 'PENDING' } })).requiredApproverRoles).toEqual(['ADMIN']);
+    ok(await decide('admin', t3.id, 'TRANSFER_DIFF_ADMIN', 'APPROVE'));
+    expect((await prisma.transferDoc.findFirstOrThrow({ where: { controlNo: `${t3.controlNo}-002` } })).status).toBe('RECEIVED');
+    const n3 = await prisma.hrNotice.findFirstOrThrow({ where: { dedupeKey: `TRANSFER_DIFF:${t3.id}` } });
+    expect(n3.details).toMatchObject({ countIn30Days: 3, recommendReferral: true });
+    ok(await as('hr.staff').put(`/api/hr-notices/${n3.id}`).send({ status: 'REFERRED', note: 'Third time this month' }));
+    expect(JSON.stringify(ok(await as('admin').get('/api/notifications')).body)).toContain('HR_NOTICE_REFERRED');
+  });
+
+  it('Head Auditor finds the receiving branch miscounted: it gets the items as on the form and HR is told about the receiver', async () => {
+    const t = await sendAndReceive(2, 1);
+    const before = await onHand(west, a);
+    ok(await decide('head.auditor', t.id, 'TRANSFER_DIFF_REVIEW', 'REJECT', 'CCTV shows 2 boxes arrived'));
+    expect(await onHand(west, a)).toBe(before + 1);
+    const r = ok(await as('sales.westave').get(`/api/transfers/${t.id}/discrepancy`)).body;
+    expect(r.outcome).toBe('RECEIVED_AS_SENT');
+    const n = await prisma.hrNotice.findFirstOrThrow({ where: { dedupeKey: `TRANSFER_DIFF:${t.id}` } });
+    expect((n.details as { staffName: string }).staffName).toMatch(/West Ave/);
+  });
+});
+
+describe('AR entry and reminders; dashboard sales by payment (owner requests 2026-09-29)', () => {
+  it('AR without a PDC needs no cheque details; a PDC needs cheque no. and date; reminders by due date reach the branch, auditors and the Owner; the dashboard lists AR nearest due first', async () => {
+    await prisma.salesReportSubmission.deleteMany({}); // an earlier test closed today's report for every branch
+    const west = (await prisma.location.findUniqueOrThrow({ where: { code: 'WESTAVE' } })).id;
+    const cats = ok(await as('admin').get('/api/categories')).body as { id: string; accountingClass: string }[];
+    const p = ok(await as('admin').post('/api/products').send({ name: `AR Whey ${run}`, categoryId: cats.find((c) => c.accountingClass === 'SUPPLEMENT')!.id, prices: { RETAIL: 1000, DEALER: 800, FRANCHISE: 700 }, cost: 500 })).body.id;
+    const batch = await prisma.batch.create({ data: { productId: p, batchNo: `AR-${run}`, receivedRef: 'TEST', unitCost: '500' } });
+    await prisma.stockLedger.create({ data: { locationId: west, productId: p, batchId: batch.id, qtyDelta: 5, movementType: 'RECEIVE', documentType: 'OpeningStock', documentId: batch.id, unitCost: '500', businessDate: new Date() } });
+    await prisma.stockBalance.create({ data: { locationId: west, productId: p, batchId: batch.id, qty: 5 } });
+    const dealer = (ok(await as('sales.westave').get('/api/customers')).body as { id: string; type: string }[]).find((c) => c.type === 'DEALER')!;
+    const day = (n: number) => new Date(Date.now() + 8 * 3600e3 + n * 86400000).toISOString().slice(0, 10);
+    ok(await as('sales.westave').post('/api/sales').send({ channel: 'DEALER', paymentMode: 'AR_PDC', drSiNo: `AR-${run}-1`, customerId: dealer.id, dueDate: day(5), lines: [{ productId: p, qty: 1 }] }));
+    ok(await as('sales.westave').post('/api/sales').send({ channel: 'DEALER', paymentMode: 'AR_PDC', drSiNo: `AR-${run}-2`, customerId: dealer.id, dueDate: day(2), pdcBank: 'BDO', pdcChequeNo: '000123', pdcDate: day(2), lines: [{ productId: p, qty: 1 }] }));
+    await as('sales.westave').post('/api/sales').send({ channel: 'DEALER', paymentMode: 'AR_PDC', drSiNo: `AR-${run}-3`, customerId: dealer.id, dueDate: day(3), pdcBank: 'BDO', lines: [{ productId: p, qty: 1 }] }).expect(400);
+    const dash = ok(await as('sales.westave').get('/api/dashboard')).body;
+    const mine = (dash.arDue as { drSiNo: string; daysToDue: number }[]).filter((a) => a.drSiNo.startsWith(`AR-${run}`));
+    expect(mine.map((a) => a.drSiNo)).toEqual([`AR-${run}-2`, `AR-${run}-1`]);
+    expect(dash.todaySales.byMode).toHaveProperty('ONLINE'); expect(dash.cashOnHand).toBeDefined();
+    await prisma.alertState.deleteMany({ where: { kind: 'AR_OVERDUE' } });
+    await app.get(SalesService).notifyOverdue();
+    for (const u of ['sales.westave', 'asst.auditor', 'head.auditor', 'admin']) expect(JSON.stringify(ok(await as(u).get('/api/notifications')).body)).toContain(`AR-${run}-2`);
+    // Accounting rejects a branch's AR payment only with a reason, which the branch sees
+    const inv = (ok(await as('sales.westave').get('/api/ar')).body as { id: string; drSiNo: string }[]).find((x) => x.drSiNo === `AR-${run}-1`)!;
+    const pay = ok(await as('sales.westave').post('/api/ar/payments').send({ salesDocIds: [inv.id], amount: 500, paymentMode: 'CASH' })).body;
+    const req = await prisma.approvalRequest.findFirstOrThrow({ where: { documentId: pay.id, type: 'AR_PAYMENT', status: 'PENDING' } });
+    const review = ok(await as('acct.head').get(`/api/ar/payments/${pay.id}/review`)).body;
+    expect(review).toMatchObject({ paymentMode: 'CASH', branch: 'West Ave' }); expect(review.invoices[0].drSiNo).toBe(`AR-${run}-1`);
+    await as('acct.head').post(`/api/approvals/${req.id}/decide`).send({ decision: 'REJECT' }).expect(400);
+    ok(await as('acct.head').post(`/api/approvals/${req.id}/decide`).send({ decision: 'REJECT', note: 'Wrong amount (does not match the proof)' }));
+    expect(JSON.stringify(ok(await as('sales.westave').get('/api/notifications')).body)).toContain('Reason: Wrong amount');
+    // an expense paid from the cash on hand cannot be more than the branch has
+    const acct = (ok(await as('sales.westave').get(`/api/expenses/accounts?locationId=${west}`)).body as { id: string }[])[0];
+    const r = await as('sales.westave').post('/api/expenses').send({ locationId: west, accountId: acct.id, amount: 99999999, paidFrom: 'CASH_DRAWER' }).expect(400);
+    expect(r.body.code).toBe('NO_CASH_ON_HAND');
+    // the count sheet shows the day's movements after the beginning count
+    const cnt = ok(await as('head.auditor').post('/api/counts').send({ locationId: west })).body;
+    const cl = (cnt.lines as { productId: string; beginQty: number; systemQty: number; moves: { received: number; sales: number }; expectedFromDay: number }[]).find((l) => l.productId === p)!;
+    expect(cl.moves.sales).toBe(2); expect(cl.expectedFromDay).toBe(cl.systemQty);
+    // write-offs are not decided by branch staff
+    await as('sales.westave').post('/api/writeoffs').send({ lines: [] }).expect(403);
+  });
+});
+
+describe('Sales Manager and Agent accounts: targets and achievement, never cost (owner request 2026-09-29)', () => {
+  it('the Sales Manager sets targets per branch and per agent, the Owner approves; progress per branch and agent; the Agent sees only their own sales at every branch; no cost anywhere', async () => {
+    await prisma.salesReportSubmission.deleteMany({}); // an earlier test closed today's report for every branch
+    const month = new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 7);
+    const west = (await prisma.location.findUniqueOrThrow({ where: { code: 'WESTAVE' } })).id; const dasma = (await prisma.location.findUniqueOrThrow({ where: { code: 'DASMA' } })).id;
+    const jerickUser = await prisma.user.findUniqueOrThrow({ where: { username: 'agent.jerick' } });
+    // Jerick also sells for Dasmariñas: the Sales Manager links that listing to his account too
+    const dasmaListing = (await prisma.agent.findFirst({ where: { name: 'Jerick Quinto', locationId: dasma } })) ?? (await prisma.agent.create({ data: { name: 'Jerick Quinto', locationId: dasma } }));
+    ok(await as('sales.manager').put(`/api/targets/agents/${dasmaListing.id}/user`).send({ userId: jerickUser.id }));
+    const cats = ok(await as('admin').get('/api/categories')).body as { id: string; accountingClass: string }[];
+    const p = ok(await as('admin').post('/api/products').send({ name: `TGT Whey ${run}`, categoryId: cats.find((c) => c.accountingClass === 'SUPPLEMENT')!.id, prices: { RETAIL: 1000, AGENT: 900, FRANCHISE: 700 }, cost: 500 })).body.id;
+    for (const loc of [west, dasma]) { const b = await prisma.batch.create({ data: { productId: p, batchNo: `T-${run}-${loc.slice(0, 4)}`, receivedRef: 'TEST', unitCost: '500' } }); await prisma.stockLedger.create({ data: { locationId: loc, productId: p, batchId: b.id, qtyDelta: 10, movementType: 'RECEIVE', documentType: 'OpeningStock', documentId: b.id, unitCost: '500', businessDate: new Date() } }); await prisma.stockBalance.create({ data: { locationId: loc, productId: p, batchId: b.id, qty: 10 } }); }
+    const westAgent = (await prisma.agent.findFirstOrThrow({ where: { name: 'Jerick Quinto', locationId: west } })).id;
+    ok(await as('sales.westave').post('/api/sales').send({ channel: 'AGENT', paymentMode: 'CASH', drSiNo: `TGT-${run}-W`, agentId: westAgent, lines: [{ productId: p, qty: 2 }] }));
+    ok(await as('sales.dasma').post('/api/sales').send({ channel: 'AGENT', paymentMode: 'CASH', drSiNo: `TGT-${run}-D`, agentId: dasmaListing.id, lines: [{ productId: p, qty: 1 }] }));
+    // targets: branch and agent; the Owner approves
+    const agents = ok(await as('sales.manager').get('/api/targets/agents')).body as { key: string; name: string; agentIds: string[] }[];
+    const jerick = agents.find((a) => a.key === jerickUser.id)!; expect(jerick.agentIds.length).toBeGreaterThanOrEqual(2);
+    const t1 = ok(await as('sales.manager').post('/api/targets').send({ month, kind: 'BRANCH', locationId: west, amount: 100000 })).body;
+    const t2 = ok(await as('sales.manager').post('/api/targets').send({ month, kind: 'AGENT', agentKey: jerick.key, amount: 5000 })).body;
+    expect(t1.status).toBe('PENDING');
+    const req = await prisma.approvalRequest.findFirstOrThrow({ where: { documentId: t2.id } }); expect(req.requiredApproverRoles).toEqual(['ADMIN']);
+    for (const t of [t1, t2]) { const r = await prisma.approvalRequest.findFirstOrThrow({ where: { documentId: t.id } }); ok(await as('admin').post(`/api/approvals/${r.id}/decide`).send({ decision: 'APPROVE' })); }
+    const prog = ok(await as('sales.manager').get(`/api/targets/progress?month=${month}`)).body;
+    const j = prog.agents.find((a: { key: string }) => a.key === jerickUser.id);
+    expect(j.target).toBe(5000); expect(j.actual).toBeGreaterThanOrEqual(2700); expect(j.transactions).toBeGreaterThanOrEqual(2);
+    expect(prog.branches.find((b: { id: string }) => b.id === west).target).toBe(100000);
+    // the Agent: own sales at both branches, own target; nothing else
+    const mine = ok(await as('agent.jerick').get(`/api/targets/mine?month=${month}`)).body;
+    expect(mine.sales.map((x: { drSiNo: string }) => x.drSiNo)).toEqual(expect.arrayContaining([`TGT-${run}-W`, `TGT-${run}-D`]));
+    expect(mine.target).toBe(5000); expect(new Set(mine.sales.map((x: { branch: string }) => x.branch)).size).toBeGreaterThanOrEqual(2);
+    for (const path of ['/api/sales', '/api/ar', '/api/targets/progress', '/api/reports/sales-summary', '/api/stock/on-hand']) await as('agent.jerick').get(path).expect(403);
+    await as('agent.jerick').post('/api/targets').send({ month, kind: 'AGENT', agentKey: jerick.key, amount: 1 }).expect(403);
+    // the Sales Manager: every branch's sales and AR, never cost; cannot record sales or money
+    const sum = ok(await as('sales.manager').get(`/api/reports/sales-summary?from=${month}-01&to=${new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10)}`)).body;
+    expect(sum.totals.sales).toBeGreaterThan(0); expect(sum.totals.grossProfit).toBeUndefined();
+    const sale = (ok(await as('sales.manager').get('/api/sales')).body as { id: string; drSiNo: string }[]).find((x) => x.drSiNo === `TGT-${run}-W`)!;
+    expect(has(ok(await as('sales.manager').get(`/api/sales/${sale.id}`)).body, /unitCost|"cost"/)).toBe(false);
+    expect(ok(await as('sales.manager').get('/api/ar')).body).toBeDefined();
+    await as('sales.manager').post('/api/sales').send({ channel: 'WALK_IN', paymentMode: 'CASH', drSiNo: `X-${run}`, lines: [{ productId: p, qty: 1 }] }).expect(403);
+    await as('sales.manager').post('/api/ar/payments').send({ salesDocIds: [sale.id], amount: 1, paymentMode: 'CASH' }).expect(403);
+    await as('sales.manager').get('/api/accounts').expect(403);
+    const dash = ok(await as('sales.manager').get('/api/dashboard')).body; expect(dash.targets.target).toBeGreaterThan(0);
+    expect(ok(await as('agent.jerick').get('/api/dashboard')).body.agentMonth.target).toBe(5000);
   });
 });

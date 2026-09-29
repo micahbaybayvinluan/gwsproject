@@ -17,6 +17,8 @@ import type { SessionUser } from '../common/request-context';
 import { requestContext } from '../common/request-context';
 import type { ApprovalType } from '../common/permissions';
 
+/** An item that arrived but is not on the form (or more than the form says). */
+export interface ExtraItem { productId: string; qty: number; note?: string }
 export interface TransferLineInput { productId: string; qty: number; batchId?: string | null; checkerRemarks?: string }
 export interface TransferEditInput { toLocationId?: string; transferType?: TransferType; returnReason?: string | null; docDate?: string; notes?: string | null; lines: TransferLineInput[] }
 export interface TransferInput { fromLocationId?: string; toLocationId: string; transferType: TransferType; returnReason?: string; docDate?: string; notes?: string; lines: TransferLineInput[] }
@@ -37,10 +39,13 @@ export class TransfersService implements OnModuleInit {
     this.approvals.register('ECOM_PULLOUT', async (r, outcome, actor) => { await this.onDecision(r.documentId, outcome, actor?.id ?? null); for (const h of this.ecomHooks) await h(r.documentId, outcome); });
   }
   private ecomHooks: ((docId: string, outcome: 'APPROVED' | 'REJECTED') => Promise<void>)[] = [];
+  private discrepancyHooks: ((docId: string, extras: ExtraItem[], receivedBy: string) => Promise<void>)[] = [];
+  /** Called when the receiver got a different quantity than the form (the discrepancy steps start). */
+  onDiscrepancy(fn: (docId: string, extras: ExtraItem[], receivedBy: string) => Promise<void>) { this.discrepancyHooks.push(fn); }
   /** Called after an e-commerce pull-out is approved or rejected (the e-commerce module updates its orders). */
   onEcomPulloutDecided(fn: (docId: string, outcome: 'APPROVED' | 'REJECTED') => Promise<void>) { this.ecomHooks.push(fn); }
 
-  private static readonly INCLUDE = { fromLocation: { select: { id: true, code: true, name: true, type: true } }, toLocation: { select: { id: true, code: true, name: true, type: true } }, lines: { include: { product: { select: { id: true, sku: true, name: true, category: { select: { accountingClass: true } } } }, batch: { select: { id: true, batchNo: true, expiryDate: true, unitCost: true, isConsignmentIn: true } } } } } as const;
+  static readonly INCLUDE = { fromLocation: { select: { id: true, code: true, name: true, type: true } }, toLocation: { select: { id: true, code: true, name: true, type: true } }, lines: { include: { product: { select: { id: true, sku: true, name: true, category: { select: { accountingClass: true } } } }, batch: { select: { id: true, batchNo: true, expiryDate: true, unitCost: true, isConsignmentIn: true } } } } } as const;
 
   async list(user: SessionUser, q: { direction?: 'out' | 'in'; status?: string; locationId?: string; from?: string; to?: string }) {
     const scope = user.locationScoped ? user.locationIds : null;
@@ -263,7 +268,8 @@ export class TransfersService implements OnModuleInit {
    * Receiving location accepts the items line by line: a ticked line means "received exactly as sent"; an unticked line must state the
    * quantity actually received (and a note when short). The UI offers "tick all if correct".
    */
-  async confirm(id: string, input: { lineId: string; checked?: boolean; qtyReceived?: number; discrepancyNote?: string }[], user: SessionUser) {
+  async confirm(id: string, input: { lineId: string; checked?: boolean; qtyReceived?: number; discrepancyNote?: string }[], user: SessionUser, extras: ExtraItem[] = []) {
+    for (const e of extras) if (!Number.isInteger(e.qty) || e.qty <= 0) throw new BadRequestException('The quantity of an extra item must be a whole number above 0');
     const sent = await this.prisma.db.transferLine.findMany({ where: { docId: id }, include: { product: { select: { name: true } } } });
     const received = sent.map((l) => {
       const r = input.find((x) => x.lineId === l.id);
@@ -283,12 +289,13 @@ export class TransfersService implements OnModuleInit {
     // goods into the warehouse confirmed by a Warehouse Associate wait for the In-Charge (owner request 2026-09-26)
     if (user.roleKey === 'WAREHOUSE_ASSOCIATE' && doc.toLocation.type === 'WAREHOUSE') {
       if (doc.pendingReceipt) throw new BadRequestException('This receipt is already waiting for the Warehouse In-Charge');
-      await this.prisma.db.transferDoc.update({ where: { id }, data: { pendingReceipt: received as unknown as Prisma.InputJsonValue, pendingReceiptBy: user.id } });
+      const pending = [...received, ...extras.map((e) => ({ lineId: `extra:${e.productId}`, qtyReceived: e.qty, discrepancyNote: e.note }))];
+      await this.prisma.db.transferDoc.update({ where: { id }, data: { pendingReceipt: pending as unknown as Prisma.InputJsonValue, pendingReceiptBy: user.id } });
       await this.approvals.request({ type: 'WAREHOUSE_IN', documentType: 'TransferDoc', documentId: id, requestedBy: user.id, summary: { controlNo: doc.transferInNo ?? doc.controlNo, locationId: doc.toLocationId, locationName: `${doc.fromLocation.name} → ${doc.toLocation.name}`, lines: received.length, units: received.reduce((t, r) => t + r.qtyReceived, 0), short: received.filter((r) => r.qtyReceived < doc.lines.find((l) => l.id === r.lineId)!.qtySent).length, step: 'Warehouse Associate checked the goods in; the In-Charge confirms before stock is added' } });
       await this.audit.log({ action: 'CONFIRM_PENDING', entityType: 'TransferDoc', entityId: id, after: received });
       return this.get(id, user);
     }
-    return this.applyReceipt(id, received, user.id, user);
+    return this.applyReceipt(id, received, user.id, user, extras);
   }
 
   private async onWarehouseIn(docId: string, outcome: 'APPROVED' | 'REJECTED', actorId: string | null) {
@@ -302,12 +309,14 @@ export class TransfersService implements OnModuleInit {
         return;
       }
       void actorId;
-      await this.applyReceipt(docId, doc.pendingReceipt as unknown as { lineId: string; qtyReceived: number; discrepancyNote?: string }[], by, null);
+      const all = doc.pendingReceipt as unknown as { lineId: string; qtyReceived: number; discrepancyNote?: string }[];
+      const extras = all.filter((r) => r.lineId.startsWith('extra:')).map((r) => ({ productId: r.lineId.slice(6), qty: r.qtyReceived, note: r.discrepancyNote }));
+      await this.applyReceipt(docId, all.filter((r) => !r.lineId.startsWith('extra:')), by, null, extras);
     });
   }
 
   /** Stock in-transit → receiver for the confirmed quantities; a shortfall stays in transit for the Head Auditor. */
-  private async applyReceipt(id: string, received: { lineId: string; qtyReceived: number; discrepancyNote?: string }[], receivedBy: string, user: SessionUser | null) {
+  private async applyReceipt(id: string, received: { lineId: string; qtyReceived: number; discrepancyNote?: string }[], receivedBy: string, user: SessionUser | null, extras: ExtraItem[] = []) {
     const doc = await this.prisma.db.transferDoc.findUniqueOrThrow({ where: { id }, include: TransfersService.INCLUDE });
     const transit = await this.stock.locationByCode(null, VIRTUAL_CODES.IN_TRANSIT);
     let shortfall = false;
@@ -325,7 +334,7 @@ export class TransfersService implements OnModuleInit {
         );
       }
       await this.stock.post(tx, posts);
-      const updated = await tx.transferDoc.update({ where: { id }, data: { status: shortfall ? 'DISCREPANCY' : 'RECEIVED', receivedBy, receivedAt: new Date(), pendingReceipt: Prisma.DbNull, pendingReceiptBy: null }, include: TransfersService.INCLUDE });
+      const updated = await tx.transferDoc.update({ where: { id }, data: { status: shortfall || extras.length ? 'DISCREPANCY' : 'RECEIVED', receivedBy, receivedAt: new Date(), pendingReceipt: Prisma.DbNull, pendingReceiptBy: null }, include: TransfersService.INCLUDE });
       await this.postTransferJournal(tx, updated, receivedBy);
       return updated;
     });
@@ -334,10 +343,8 @@ export class TransfersService implements OnModuleInit {
       const owner = await this.prisma.db.location.findUnique({ where: { id: doc.toLocationId }, select: { franchiseOwnerUserId: true } });
       if (owner?.franchiseOwnerUserId) await this.notify.toUsers([owner.franchiseOwnerUserId], { type: 'FRANCHISE_RECEIVED', title: `${user.fullName} received transfer ${doc.transferInNo ?? doc.controlNo} from ${doc.fromLocation.name}${shortfall ? ' (with a shortfall)' : ''}`, link: `/transfers/${id}` });
     }
-    if (shortfall) {
-      await this.notify.toUsers([doc.preparedBy], { type: 'TRANSFER_DISCREPANCY', title: `Discrepancy on transfer ${doc.controlNo}`, link: `/transfers/${id}` });
-      await this.notify.toRoles(['HEAD_AUDITOR', 'ADMIN'], { type: 'TRANSFER_DISCREPANCY', title: `Discrepancy on transfer ${doc.controlNo} (${doc.fromLocation.name} → ${doc.toLocation.name})`, link: `/transfers/${id}` });
-    }
+    // a difference between the form and what arrived starts the discrepancy steps (Head Auditor first; owner request 2026-09-29)
+    if (shortfall || extras.length) for (const h of this.discrepancyHooks) await h(id, extras, receivedBy);
     return result;
   }
 
@@ -345,6 +352,7 @@ export class TransfersService implements OnModuleInit {
   async resolveShortfall(id: string, resolution: 'TO_SENDER' | 'TO_RECEIVER' | 'WRITEOFF', user: SessionUser) {
     const doc = await this.get(id, user);
     if (doc.status !== 'DISCREPANCY') throw new BadRequestException('No open discrepancy on this transfer');
+    if (await this.prisma.db.transferDiscrepancy.findUnique({ where: { transferId: id } })) throw new BadRequestException('This difference follows the discrepancy steps (Head Auditor, sending branch, Owner) on the transfer page');
     const transit = await this.stock.locationByCode(null, VIRTUAL_CODES.IN_TRANSIT);
     await this.prisma.db.$transaction(async (tx) => {
       const posts = [] as Parameters<StockService['post']>[1];
@@ -370,7 +378,7 @@ export class TransfersService implements OnModuleInit {
   }
 
   /** R6 (company ↔ company) or R7 (to franchise = sale at FRANCHISE tier) for the received quantities. */
-  private async postTransferJournal(tx: Tx, doc: Prisma.TransferDocGetPayload<{ include: typeof TransfersService.INCLUDE }>, actorId: string) {
+  async postTransferJournal(tx: Tx, doc: Prisma.TransferDocGetPayload<{ include: typeof TransfersService.INCLUDE }>, actorId: string) {
     const recvLines = doc.lines.filter((l) => (l.qtyReceived ?? 0) > 0).map((l) => ({ productId: l.productId, accountingClass: l.product.category.accountingClass, qty: l.qtyReceived!, unitCost: l.batch.unitCost, isConsignmentIn: l.batch.isConsignmentIn, supplierId: null }));
     if (doc.toLocation.type === 'FRANCHISE') {
       let saleTotal = D(0);

@@ -127,7 +127,7 @@ Rates change by category and program, so GWS-ERP never computes them itself: it 
 3. **Order tracker:** shipped / settled / returned / overdue, with days since shipping.
 4. **Returns report:** returns by reason and SKU, return rate %, damaged vs. restocked, return shipping cost.
 5. **SKU performance:** units, net sales, fees per unit, contribution per SKU. This shows which products are worth selling online after fees.
-6. It also appears in the new **Monthly Sales Performance** graphs as its own colour ("E-commerce"), next to the branches.
+6. It also appears in the new **Sales Graphs** graphs as its own colour ("E-commerce"), next to the branches.
 
 ## 6. Who does what
 

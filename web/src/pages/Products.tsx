@@ -74,7 +74,7 @@ export function PriceChangesPage() {
   const tiers = useQuery({ queryKey: ['tiers'], queryFn: () => api.get<{ key: string; name: string }[]>('/api/products/tiers') });
   const m = useMutation({ mutationFn: () => api.post('/api/price-changes', { effectiveFrom: eff || undefined, lines: lines.map((l) => ({ productId: l.productId, tier: l.tier || null, newPrice: l.newPrice ? Number(l.newPrice) : null, costNew: l.costNew ? Number(l.costNew) : null })) }), onSuccess: () => { setLines([]); void qc.invalidateQueries({ queryKey: ['price-changes'] }); } });
   return <div className="space-y-4">
-    <h1 className="text-2xl font-bold tracking-tight text-navy">Price Change Requests</h1>
+    <h1 className="text-2xl font-bold tracking-tight text-navy">Price Changes</h1>
     <Card title="New price change (Admin approval; effective 00:00 Manila on the date; history untouched)">
       <div className="flex flex-wrap items-end gap-2"><Field label="Effective from (default tomorrow)"><Input type="date" value={eff} onChange={(e) => setEff(e.target.value)} /></Field><Field label="Add product"><Input value={search} onChange={(e) => setSearch(e.target.value)} /></Field></div>
       {search.length >= 2 && <ul className="max-h-40 divide-y overflow-auto rounded border bg-white text-sm">{products.data?.map((p) => <li key={p.id}><button className="w-full px-2 py-1 text-left hover:bg-slate-50" onClick={() => { setLines([...lines, { productId: p.id, name: p.name, tier: 'RETAIL', newPrice: '', costNew: '' }]); setSearch(''); }}>{p.name}</button></li>)}</ul>}

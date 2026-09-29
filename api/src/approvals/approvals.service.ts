@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException, OnApplicationBootstrap } from '@nestjs/common';
 import { ApprovalStatus, Prisma } from '@prisma/client';
 import { PrismaService, Tx } from '../common/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -15,12 +15,29 @@ export type ApprovalHandler = (req: { id: string; type: string; documentType: st
  * finally APPROVED (all required roles, or any-one when anyOf) or REJECTED (any listed role).
  */
 @Injectable()
-export class ApprovalsService {
+export class ApprovalsService implements OnApplicationBootstrap {
   private log = new Logger('Approvals');
   private handlers = new Map<string, ApprovalHandler>();
   constructor(private prisma: PrismaService, private notify: NotificationsService, private audit: AuditService) {}
 
   /** One handler per type, or per type + document type when one approval type covers several documents (WAREHOUSE_IN). */
+  /**
+   * Repair: a request that already has every decision it needs but is still pending was left behind by a failed step (before the fix
+   * that undoes such a decision). Its decisions are removed so the approver sees it again and can decide once the problem is fixed.
+   */
+  async onApplicationBootstrap() {
+    try {
+      const stuck = await this.prisma.db.approvalRequest.findMany({ where: { status: 'PENDING', decisions: { some: { decision: 'APPROVE' } } }, include: { decisions: true } });
+      for (const r of stuck) {
+        const approved = r.decisions.filter((d) => d.decision === 'APPROVE');
+        const complete = r.requiredApproverUserIds.length ? (r.anyOf || r.requiredApproverUserIds.every((u) => approved.some((d) => d.userId === u))) : (r.anyOf || r.requiredApproverRoles.every((role) => approved.some((d) => d.roleKey === role)));
+        if (!complete) continue;
+        await this.prisma.db.approvalDecision.deleteMany({ where: { requestId: r.id } });
+        this.log.warn(`Re-opened stuck approval ${r.type} ${r.id} (${r.documentType} ${r.documentId})`);
+      }
+    } catch (e) { this.log.warn(`Approval repair skipped: ${(e as Error).message}`); }
+  }
+
   register(type: ApprovalType, handler: ApprovalHandler, documentType?: string) { this.handlers.set(documentType ? `${type}:${documentType}` : type, handler); }
 
   async request(input: { type: ApprovalType; documentType: string; documentId: string; requestedBy: string; requesterRole?: RoleKey; summary?: unknown; autoApproveAt?: Date | null; extraRoles?: RoleKey[]; discrepancyCaseId?: string | null; approverUserIds?: string[] }, tx: Tx | null = null) {
@@ -119,18 +136,20 @@ export class ApprovalsService {
       if (!user.permissions.has(`approval.act.${req.type}`)) throw new ForbiddenException(`Missing permission approval.act.${req.type}`);
     }
     if (req.decisions.some((d) => d.userId === user.id)) throw new BadRequestException('You already decided on this request');
-    await this.prisma.db.approvalDecision.create({ data: { requestId: id, userId: user.id, roleKey: user.roleKey, decision, note } });
+    if (decision === 'REJECT' && REASON_REQUIRED.includes(req.type) && !note?.trim()) throw new BadRequestException('Choose the reason for rejecting it');
+    const made = await this.prisma.db.approvalDecision.create({ data: { requestId: id, userId: user.id, roleKey: user.roleKey, decision, note } });
     const decisions = [...req.decisions.map((d) => ({ roleKey: d.roleKey, decision: d.decision })), { roleKey: user.roleKey, decision }];
     let final: ApprovalStatus | null = null;
     if (decision === 'REJECT') final = 'REJECTED';
-    else if (targeted) { const approvedUsers = new Set([...req.decisions.filter((d) => d.decision === 'APPROVE').map((d) => d.userId), user.id]); if (req.requiredApproverUserIds.every((u) => approvedUsers.has(u))) final = 'APPROVED'; }
+    else if (targeted) { const approvedUsers = new Set([...req.decisions.filter((d) => d.decision === 'APPROVE').map((d) => d.userId), user.id]); if (req.anyOf || req.requiredApproverUserIds.every((u) => approvedUsers.has(u))) final = 'APPROVED'; }
     else if (req.anyOf) final = 'APPROVED';
     else {
       const approvedRoles = new Set(decisions.filter((d) => d.decision === 'APPROVE').map((d) => d.roleKey));
       if (req.requiredApproverRoles.every((r) => approvedRoles.has(r))) final = 'APPROVED';
     }
     await this.audit.log({ action: decision, entityType: 'ApprovalRequest', entityId: id, after: { type: req.type, documentType: req.documentType, documentId: req.documentId, note } });
-    if (final) await this.finalize(req.id, final, { id: user.id, note });
+    // if the document cannot take the decision (e.g. a cost is missing), the decision is undone so the approver can fix it and decide again
+    if (final) { try { await this.finalize(req.id, final, { id: user.id, note }); } catch (e) { await this.prisma.db.approvalDecision.delete({ where: { id: made.id } }).catch(() => undefined); throw e; } }
     else {
       // tell the requester how far it got: who approved, who is still to decide
       const t = (await this.describe([await this.get(id)]))[0];
@@ -149,6 +168,9 @@ export class ApprovalsService {
     }
     return results;
   }
+
+  /** The pending request of a type for a document (to show approve / reject buttons on the document page). */
+  pendingFor(documentType: string, documentId: string, type: string) { return this.prisma.db.approvalRequest.findFirst({ where: { documentType, documentId, type, status: 'PENDING' } }); }
 
   private async finalize(id: string, status: ApprovalStatus, actor: { id: string; note?: string } | null) {
     const req = await this.prisma.db.approvalRequest.update({ where: { id }, data: { status, decidedAt: new Date() } });
@@ -195,9 +217,11 @@ export class ApprovalsService {
   }
 }
 
+/** Types whose rejection must carry a reason (sent back to the person who entered it). */
+export const REASON_REQUIRED: string[] = ['AR_PAYMENT'];
 export function humanType(t: string) { return t.replace(/_/g, ' ').toLowerCase().replace(/^\w/, (c) => c.toUpperCase()); }
 function summaryLine(s: unknown) { if (!s || typeof s !== 'object') return ''; const o = s as Record<string, unknown>; return [o.controlNo, o.locationName, o.total != null ? `₱${o.total}` : null].filter(Boolean).join(' · '); }
 export function documentLink(type: string, id: string) {
-  const map: Record<string, string> = { ReceivingDoc: '/receiving', TransferDoc: '/transfers', SalesDoc: '/sales', ExpiryWriteoffDoc: '/writeoffs', PriceChangeDoc: '/price-changes', PostCloseEdit: '/post-close-edits', CountDoc: '/counts', DiscrepancyCase: '/discrepancies', AccountingPeriod: '/accounting/periods', BeginningBalance: '/accounting/beginning-balances' };
+  const map: Record<string, string> = { ReceivingDoc: '/receiving', TransferDoc: '/transfers', SalesDoc: '/sales', ExpiryWriteoffDoc: '/writeoffs', PriceChangeDoc: '/price-changes', PostCloseEdit: '/post-close-edits', CountDoc: '/counts', DiscrepancyCase: '/discrepancies', AccountingPeriod: '/accounting/periods', BeginningBalance: '/accounting/beginning-balances', SalesTarget: '/targets', EcomSettlement: '/ecommerce' };
   return `${map[type] ?? '/'}/${id}`;
 }

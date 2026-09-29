@@ -120,7 +120,7 @@ export function PerformancePage() {
   const company = useMemo(() => p ? [{ name: 'All branches', color: '#0b1f3a', values: p.days.map((_, i) => series.reduce((t, s) => t + (s.values[i] ?? 0), 0)) }] : [], [p, series]);
   const monthName = new Date(Date.UTC(year, month - 1, 1)).toLocaleString('en', { month: 'long', year: 'numeric' });
   return <div className="space-y-4">
-    <div className="flex flex-wrap items-end gap-2"><h1 className="mr-auto text-2xl font-bold tracking-tight text-navy">Monthly Sales Performance</h1><Field label="Month"><Input type="month" value={ym} onChange={(e) => setYm(e.target.value)} /></Field><Button variant="outline" onClick={() => setTables(!tables)}>{tables ? 'Hide tables' : 'Show as tables'}</Button></div>
+    <div className="flex flex-wrap items-end gap-2"><h1 className="mr-auto text-2xl font-bold tracking-tight text-navy">Sales Graphs</h1><Field label="Month"><Input type="month" value={ym} onChange={(e) => setYm(e.target.value)} /></Field><Button variant="outline" onClick={() => setTables(!tables)}>{tables ? 'Hide tables' : 'Show as tables'}</Button></div>
     {p && <>
       <div className="grid gap-3 sm:grid-cols-3">
         <Stat label={`Company sales — ${monthName} to date`} value={peso(p.monthToDate.total)} sub={`${p.days.length} day(s)`} />

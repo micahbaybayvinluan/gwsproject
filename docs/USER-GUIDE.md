@@ -23,13 +23,13 @@ Each section below starts with a hidden line that says which roles it is for. Th
 
 ## Menus by role (quick start)
 <!-- for: all -->
-- **Sales Associate:** New Sale, Sales, AR / Credit, Expenses, Daily Close, Cash Fund, Transfers (request stock and receive), Inventory Count (weekly sheet), Discrepancies, Write-offs, Stock on Hand, My Pay & Charges.
+- **Sales Associate:** New Sale, Sales, AR / Credit, Expenses, Daily Close, Cash Fund, Transfers (request stock and receive), Inventory Count (weekly sheet), Discrepancies, Stock on Hand, My Pay & Charges.
 - **Warehouse Associate / In-Charge:** Receiving, Transfers (send stock), Stock on Hand, Inventory Count, Write-offs, Expiry & Alerts.
 - **Head Auditor / Asst Auditor:** Approvals, Receiving costs, Discrepancies, Inventory Count, Revision Log, Cash Fund, Store Inspections, all reports with cost.
 - **Audit Associate:** branch reports with cost, correction requests (approved by the Head Auditor), Revision Log.
 - **Field Auditor:** Inventory Count (audit sheets), Cash Fund (confirm the cash found), Store Inspections, Stock on Hand and expiries of every branch and franchise. No cost, no sales.
-- **HR Staff:** Charge Forms, Payroll & Contributions, Weekly Count Compliance, Store Inspections, Revision Log.
-- **Accounting Head / Associate:** AR approvals, Accounting menus, Inventory & Direct Cost, cash funds, payroll (the Associate sees totals only).
+- **HR Staff:** Charge Forms, Payroll & Contributions, Weekly Count Check, Store Inspections, Revision Log.
+- **Accounting Head / Associate:** AR approvals, Accounting menus, Inventory Cost, cash funds, payroll (the Associate sees totals only).
 - **Franchise Owner / Associate:** Franchise Portal, sales and stock of their franchise.
 - **Admin (Owner):** everything, including Users & Roles, Settings and final approvals.
 
@@ -76,18 +76,22 @@ Each section below starts with a hidden line that says which roles it is for. Th
 
 ## AR / credit sales and collecting payments
 <!-- for: ar.view, ar.collect, ar.approve -->
-- A sale with payment **AR/PDC** needs a customer (dealer, agent or franchise) and a due date. For a post-dated cheque, type the bank, cheque number and cheque date.
+- A sale with payment **AR/PDC** needs a customer and a due date. Choose **Dealer**, **Franchisee**, **Agent** or **Other customer** first: only that kind is listed (a Dealer or Franchise sale lists only dealers or franchisees).
+- Tick **There is a PDC** only when a post-dated cheque was given; then type the bank, cheque number and cheque date. Not ticked = no PDC.
+- **Reminders:** every morning the branch (and the sales associate who made the sale), the auditors and the Owner get the list of receivables overdue or due within 7 days, nearest due first. The dashboard shows the same list.
 - **AR / Credit** lists open invoices with the balance and how many days overdue. Tick **Overdue only** to filter.
+- **AR per branch:** the table at the top totals each branch's open and overdue balance. Choose a branch (or press **Show this branch**) to list only its invoices; **All branches** shows everything.
 - **Recording a payment:** tick the invoice(s) of one customer, type the amount (and a discount if any), choose Cash / Online / Card, then press the button.
   - **Branch staff:** the payment is sent to the Accounting Associate or Accounting Head for approval. It shows "Waiting for Accounting" until approved; the invoice balance drops after approval.
   - **Accounting:** the payment applies at once, a Credit Note number is issued and the branch is notified.
+  - **Approving a branch's payment (Accounting):** My Approvals shows the customer, amount, how it was paid, the account it was deposited to, the invoices and the proof picture. **Reject** asks for the reason (wrong amount, wrong proof, money not received, …), which the branch sees.
 - Each payment shows who entered it. Download the Credit Note as PDF from the register.
 
 ## Branch expenses
 <!-- for: expense.create.branch, expense.create.main -->
 1. Open **Expenses**.
 2. Choose the account. Only your branch's expense accounts are listed (for example "Meralco - West Ave").
-3. Type the amount and payee, and choose where the money came from: **Cash drawer** or **Cash fund**.
+3. Type the amount and payee, and choose where the money came from: **Cash on hand** (sales cash not yet deposited; it cannot be more than the branch has, a notice pops up) or **Cash fund**.
 4. Save. Your expense gets a number like WA-EX-000001.
 - Direct cost accounts are not available to branch staff. Only the Accounting Associate and Accounting Head can use them; direct cost is generated from sales automatically.
 - Cash-drawer expenses reduce the cash for deposit in the Daily Close.
@@ -120,7 +124,7 @@ Each section below starts with a hidden line that says which roles it is for. Th
 
 ## Submitting today's Daily Sales Report (branch staff)
 <!-- for: sale.create -->
-1. Before 8 PM, open **Daily Branch Sales Report** (the dashboard reminds you) and check every number.
+1. Before 8 PM, open **Daily Sales Report** (the dashboard reminds you) and check every number.
 2. Press **Submit today's report…**, tick **"I acknowledge that this Daily Sales Report is true and correct"** and press **I agree — submit**.
 3. Today is then closed for your branch. Any later change follows the revision protocol: a post-close edit approved by the auditors.
 - You are reminded at 7:30 PM. A report not submitted by 9 PM is submitted automatically **as it stands**, and the Head Auditor, Asst Auditor, Audit Associate and HR are notified.
@@ -138,7 +142,16 @@ Each section below starts with a hidden line that says which roles it is for. Th
 2. Print your copy with **Transfer-In copy** if you need paper.
 3. Check the items. Tick each line that arrived complete, or **Tick all** if everything is right.
 4. For a line that is short, leave it unticked, type the quantity actually received and a note.
-5. Press **Confirm receipt**. The stock is added to your branch. A shortfall goes to the Head Auditor to resolve.
+5. An item that arrived but is not on the form: **+ An item arrived that is not on the form**, pick it and type the quantity.
+6. Press **Confirm receipt**. What you received is added to your branch.
+
+## When the received quantity is different from the form
+<!-- for: transfer.confirm, transfer.create, transfer.resolve_discrepancy, hr.notice -->
+1. The receiving branch receives what arrived; the rest waits "in transit" and is in no branch's count.
+2. **Head Auditor** reviews first: confirms the difference, or finds the receiver miscounted (the receiver then gets the items as on the form).
+3. **Sending branch** agrees or disagrees within **2 days** (reminder after 1 day). No answer or disagreement → the **Owner** decides: difference stands, received after all, lost (company expense) or lost and charged to staff.
+4. A confirmed difference creates an adjustment form with the same number plus **-002** (missing items back to the sender) and **-003** for items received that were not on the form. The original form never changes. The transfer page shows each step, who decided and the adjustment forms.
+5. **HR** gets a notice for every case with the person answerable and their number of cases in 30 days; from the third, HR is advised to **Refer to the Owner**.
 
 ## Pull-outs and returns from a branch
 <!-- for: transfer.create -->
@@ -151,9 +164,11 @@ Each section below starts with a hidden line that says which roles it is for. Th
 1. **Receiving → New receiving**: choose the supplier and type the supplier's invoice or DR reference.
 2. Add each product with the quantity, free quantity, **expiry date** and batch number.
 3. **Same item, different expiry dates:** press **+ another expiry** on the line and enter the quantity for each date. Each date becomes its own batch and is shown everywhere the item appears.
-4. **Create draft**, upload a photo of the supplier invoice, then **Submit for cost approval**.
+4. **Upload Supplier Delivery Receipt** (photo or PDF), **Create draft**, then **Submit**.
+- A Warehouse Associate's delivery goes to the **Warehouse In-Charge** first (checks the goods), then to the **Head Auditor** (cost).
 - Warehouse staff do not see or enter costs. The Head Auditor types or confirms the cost and approves. If every cost is unchanged from the last delivery, it is approved automatically after 24 hours.
-- The stock is added to the warehouse when approved.
+- The stock is added to the warehouse when the Head Auditor approves (the last step).
+- **Upload Supplier Delivery Receipt** (on the new delivery form): a photo or PDF of the supplier's DR / invoice, saved with the delivery.
 
 ## Warehouse: sending stock
 <!-- for: receiving.create -->
@@ -188,6 +203,7 @@ Each section below starts with a hidden line that says which roles it is for. Th
    - first the items the system has at your branch, with today's beginning count;
    - then the items **not in the system** (for stock that was never transferred in the system).
    Type the **actual count** for the first group. In the second group, type only what you find; blank means none.
+   - Each line also shows the day's movements after the beginning count: **+ Received**, **+ Transfer in**, **+ Returns**, **− Sales** (entered today), **− Transfer out**, **± Other** (write-offs, tasting, adjustments), then **Expected now**. Beginning + in − out ± other = Expected; compare it with what you count.
 3. **Save actuals** as you go, then **Submit count**. HR can see who did and did not submit.
 4. If anything differs, a **discrepancy case** opens. You, the Head Auditor, Asst Auditor, Audit Associate, the Owner and HR are notified, and you have 7 days to explain.
 - **Excel:** **Download sheet (xlsx)**, type the counts in the "Actual count" column, and **Upload filled sheet**. The items come in the same order.
@@ -234,7 +250,7 @@ Each section below starts with a hidden line that says which roles it is for. Th
   - AR payment entered by a branch: Accounting Associate **or** Accounting Head.
   - Warehouse edit: the person who prepared the document.
   - New product, supplier, category, customer, agent, rider, branch, account, employee, user account or import file: Admin (Owner).
-  - Stock in or out of the warehouse entered by a Warehouse Associate: the Warehouse In-Charge (after the Head Auditor approves the cost for items received).
+  - Stock in or out of the warehouse entered by a Warehouse Associate: the Warehouse In-Charge. For supplier deliveries the In-Charge checks the goods first, then the Head Auditor approves the cost.
 - Each document that needs approval shows a **workflow bar**: every step, who must approve it, and who already did. With two or more approvers you can see that one has approved and the other has not yet.
 
 ## Approval workflow and your requests
@@ -270,7 +286,8 @@ Each section below starts with a hidden line that says which roles it is for. Th
 ## Warehouse: In-Charge approval of stock in and out
 <!-- for: approval.act.WAREHOUSE_IN, approval.act.WAREHOUSE_OUT, receiving.create -->
 - Stock that a **Warehouse Associate** receives (supplier deliveries, transfers in) or sends out (transfers, pull-outs) is not counted until the **Warehouse In-Charge** approves it.
-- For supplier deliveries the Head Auditor approves the cost first, then the In-Charge approves the receipt. The page shows "Cost approved · waiting for the In-Charge".
+- For supplier deliveries the **In-Charge checks the goods first** ("1. Waiting for the In-Charge to check the goods"), then the **Head Auditor approves the cost** ("2. Goods checked · waiting for the Head Auditor's cost approval"). The stock is added only after both.
+- If an approval cannot go through (for example a new product without a cost), the approver sees the reason and the document stays in their list to try again.
 - When the In-Charge enters the document personally, only the Head Auditor's cost approval is needed.
 - Sales from the warehouse do not need In-Charge approval.
 - Quantities on transfers and receivings can never be negative. Negative figures appear only in discrepancy results and pay computations.
@@ -328,7 +345,7 @@ Each section below starts with a hidden line that says which roles it is for. Th
 
 ## HR: weekly count compliance
 <!-- for: employee.manage, discrepancy.resolve -->
-- **Weekly Count Compliance** shows, for each sales associate, which weeks they submitted a count sheet and which they missed. The dashboard shows who missed last week.
+- **Weekly Count Check** shows, for each sales associate, which weeks they submitted a count sheet and which they missed. The dashboard shows who missed last week.
 
 ## Products, prices and price changes
 <!-- for: product.view, price.edit -->
@@ -344,7 +361,7 @@ Each section below starts with a hidden line that says which roles it is for. Th
 ## Consignment
 <!-- for: consignment.manage, consignment.request -->
 - **Consignee accounts** (Catalogue → Consignees, the Owner only): name, what they pay (retail price, consignee price or agreed cost), payment terms, contact and address. One step creates the consignee's stock location, customer, receivable account and agreement.
-- **Consignment (In & Out)** has three simple steps:
+- **Consignment** has three simple steps:
   - **1. Send goods to a consignee:** choose the consignee and items → **Save draft** → **Print draft** → **Submit for approval**.
   - **2. Record consignee sales:** consignee, period, items sold. Prices are filled in from the agreement and can be edited. Print the draft, then submit.
   - **3. Goods returned by a consignee:** consignee, items and the branch taking them back → save, print, submit, then confirm when they arrive.
@@ -360,7 +377,7 @@ Each section below starts with a hidden line that says which roles it is for. Th
 <!-- for: gl.view -->
 - **Chart of Accounts**, **Journal Vouchers** (every posted entry, with a link to its source document), **Trial Balance**, and **Periods & Opening** (beginning balances and period locks).
 - When automatic posting is switched on (Settings), sales, expenses, transfers, receivings, charges, cash fund movements, payroll and remittances post journal vouchers by themselves.
-- **Inventory & Direct Cost:** inventory cost movements per day or per month (beginning, received, transfers in, pull-outs, direct cost of sales, ending) and direct cost generated from sales, per branch, with Excel export.
+- **Inventory Cost:** inventory cost movements per day or per month (beginning, received, transfers in, pull-outs, direct cost of sales, ending) and direct cost generated from sales, per branch, with Excel export.
 - Locking a period: the Accounting Head requests it and Admin approves.
 
 ## Financial statements
@@ -376,7 +393,8 @@ Each section below starts with a hidden line that says which roles it is for. Th
 
 ## Inventory reports: item search and items with movement first
 <!-- for: report.inventory.own, report.inventory.all -->
-- **Inventory Reports & Movement:** type part of a name, SKU or brand in **Search item** and press **Search**. It works for the daily report, the monthly movement sheet and the stock ledger.
+- **Inventory Reports:** type part of a name, SKU or brand in **Search item** and press **Search**. It works for the daily report, the monthly movement sheet and the stock ledger.
+- **Stock ledger:** each movement shows its document (Sale DR, Pull-out, Transfer-in, Supplier delivery, Count sheet, Write-off…) with its number; click it to open the document.
 - The **Daily Inventory Report** lists the items that moved in the period first (with a "moved" badge), then the items only carried in stock. The Excel file follows the same order and has a **Movement** column. Cost columns appear only for people allowed to see cost.
 
 ## Freebies received from suppliers
@@ -389,7 +407,7 @@ Each section below starts with a hidden line that says which roles it is for. Th
 <!-- for: sale.incentive -->
 1. On **New Sale**, press **+ Add incentive expense**.
 2. Choose **Sales incentive** or **Rider / driver incentive**, who receives it, and the amount.
-3. It is recorded as the branch's expense (Incentives / Rider-Driver Incentive account), paid from the cash drawer. It lowers the cash to deposit and shows on the Daily Sales Report.
+3. It is recorded as the branch's expense (Incentives / Rider-Driver Incentive account), paid from the cash on hand. It lowers the cash to deposit and shows on the Daily Sales Report.
 - Voiding the sale voids the incentive too.
 
 ## Cash on hand (sales cash not yet deposited)
@@ -413,7 +431,7 @@ Each section below starts with a hidden line that says which roles it is for. Th
 
 ## Customer contacts and re-order follow-ups
 <!-- for: report.sales.own, report.sales.all -->
-- **Customer Contact List & Follow-ups → Customers & items ordered:** every customer with contact number, email, the **items they ordered**, number of purchases and totals. Export to Excel.
+- **Customers & Follow-ups → Customers & items ordered:** every customer with contact number, email, the **items they ordered**, number of purchases and totals. Export to Excel.
 - **Re-order follow-ups:**
   - When a customer with a number or email buys a product that has days to consume, a follow-up is due after quantity × days.
   - On that morning the store where they bought it is notified to call.
@@ -438,20 +456,32 @@ Each platform has its own tab, reports and accounts; nothing is mixed. E-commerc
    - For an order already paid, the cost goes back to inventory.
 5. **Ads:** entered or uploaded per platform and month as an expense, paid from the platform balance or a bank / card account.
 6. **Order tracker:** shipped, paid, returned and **overdue** orders (shipped over 30 days ago, not paid nor returned; the days are in Settings as `ecom.overdue_days`). Reminder every Friday.
-7. **Profit report:** TikTok | Shopee | Lazada | All. Cost of goods and profit after cost only for people allowed to see cost. Each platform also appears as its own line in Monthly Sales Performance.
+7. **Profit report:** TikTok | Shopee | Lazada | All. Cost of goods and profit after cost only for people allowed to see cost. Each platform also appears as its own line in Sales Graphs.
+
+## Dashboard: today's sales and cash on hand (branch staff)
+<!-- for: sale.create -->
+- **Today's sales by payment:** cash, online (bank / GCash), credit card and on credit (AR / PDC), and the total.
+- **Cash on hand:** the sales cash not yet deposited, always shown (₱0 = all deposited), with the deposit deadline.
+
+## Sales targets, Sales Manager and Agents
+<!-- for: target.manage, target.view, agent.self -->
+- **Sales Targets:** the Sales Manager sets a monthly target per branch and per agent; the Owner approves it. The page shows target, sales so far and % achieved against how much of the month has gone (green on track, amber slightly behind, red behind).
+- An agent listed at several branches is one person: all their sales add up. The Sales Manager links each agent to their **Agent** account.
+- **My Sales (Agents):** own sales at every branch, own target and achievement, and customers who have not paid yet, nearest due first.
+- The Sales Manager and Agents never see cost, margin or supplier data.
 
 ## Page names and what each page is for
 <!-- for: all -->
-- Every menu item has a descriptive name (for example **Supplier Deliveries (Receiving)** or **Stock Transfers & Pull-outs**).
+- Every menu item has a descriptive name (for example **Supplier Deliveries** or **Transfers & Pull-outs**).
 - The top of each page says in one line what the page is for.
 
-## Sales Report and Monthly Sales Performance
+## Sales Report and Sales Graphs
 <!-- for: report.sales.own, report.sales.all -->
 - **Sales Report:**
   - Choose the branch (or **All branches**) and the period, or press **Today**, **This month**, **Last month** or **This year**.
   - It shows total sales, number of sales and average per sale, products sold, how customers paid, sales by channel, per branch (with each branch's share), per day and the top products.
   - Gross profit shows only for people allowed to see cost. **Excel** exports the same report.
-- **Monthly Sales Performance:**
+- **Sales Graphs:**
   - Choose the month. The first graph shows each branch's running total for the month so far, each branch in its own colour; the second shows the whole company.
   - The third graph shows every month of the year: the column height is the company total, and the coloured parts are the branches.
   - Hover for exact amounts, or press **Show as tables**. Branch staff see only their own branch.

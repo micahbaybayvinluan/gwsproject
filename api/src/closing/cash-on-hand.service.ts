@@ -139,10 +139,12 @@ export class CashOnHandService implements OnModuleInit {
 
   listNotices(status?: string) { return this.prisma.db.hrNotice.findMany({ where: { status: status || undefined }, orderBy: { createdAt: 'desc' }, take: 300 }); }
 
-  async updateNotice(id: string, input: { status: 'NTE_ISSUED' | 'CLOSED' | 'OPEN'; note?: string }, user: SessionUser) {
+  async updateNotice(id: string, input: { status: 'NTE_ISSUED' | 'CLOSED' | 'OPEN' | 'REFERRED'; note?: string }, user: SessionUser) {
     const before = await this.prisma.db.hrNotice.findUnique({ where: { id } }); if (!before) throw new NotFoundException();
     const after = await this.prisma.db.hrNotice.update({ where: { id }, data: { status: input.status, note: input.note ?? before.note, resolvedAt: input.status === 'OPEN' ? null : new Date(), resolvedBy: input.status === 'OPEN' ? null : user.id } });
     await this.audit.log({ action: 'UPDATE', entityType: 'HrNotice', entityId: id, before, after, userId: user.id });
+    // HR refers a case to the Owner for a more serious consideration (e.g. the third transfer difference of the same person)
+    if (input.status === 'REFERRED') await this.notify.toRoles(['ADMIN'], { type: 'HR_NOTICE_REFERRED', title: `HR (${user.fullName}) refers to you: ${after.title}`, body: input.note ?? undefined, link: '/hr-notices' });
     return after;
   }
 }

@@ -52,7 +52,7 @@ export function ConsignmentPage() {
   const hasPrice = items.some((i) => i.unitPrice);
   const total = items.reduce((t, i) => t + (Number(i.unitPrice) || 0) * i.qty, 0);
   return <div className="space-y-4">
-    <div className="flex flex-wrap items-center gap-2"><h1 className="mr-auto text-2xl font-bold tracking-tight text-navy">Consignment (In & Out)</h1>{can('consignment.manage') && <Link className="text-sm text-brand underline" to="/consignees">Consignee accounts</Link>}</div>
+    <div className="flex flex-wrap items-center gap-2"><h1 className="mr-auto text-2xl font-bold tracking-tight text-navy">Consignment</h1>{can('consignment.manage') && <Link className="text-sm text-brand underline" to="/consignees">Consignee accounts</Link>}</div>
     <div className="inline-flex flex-wrap rounded-xl bg-white p-1 shadow-sm ring-1 ring-slate-200">{([['send', '1. Send goods to a consignee'], ['sales', '2. Record consignee sales'], ['return', '3. Goods returned by a consignee'], ['stock', 'Stock at consignees']] as const).map(([k, l]) => <button key={k} onClick={() => { setTab(k); reset(); setMsg(''); }} className={`rounded-lg px-3.5 py-1.5 text-sm font-semibold ${tab === k ? 'bg-navy text-white shadow' : 'text-slate-600 hover:text-navy'}`}>{l}</button>)}</div>
     {msg && <p className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">{msg}</p>}
     {tab !== 'stock' && <Card>
@@ -84,7 +84,7 @@ export function ConsigneesPage() {
   const [f, setF] = useState(blank); const [done, setDone] = useState('');
   const create = useMutation({ mutationFn: () => api.post<{ name: string; code: string }>('/api/consignment/consignees', { ...f, code: f.code || undefined, settlementDays: f.settlementDays ? Number(f.settlementDays) : undefined }), onSuccess: (r) => { setDone(`${r.name} (${r.code}) created. Staff can now send goods to it under Consignment.`); setF(blank); void qc.invalidateQueries({ queryKey: ['consignees'] }); } });
   return <div className="space-y-4">
-    <h1 className="text-2xl font-bold tracking-tight text-navy">Consignees (Consignment Accounts)</h1>
+    <h1 className="text-2xl font-bold tracking-tight text-navy">Consignees</h1>
     {me!.roleKey === 'ADMIN' && <Card title="New consignee">
       <div className="grid gap-3 md:grid-cols-3">
         <Field label="Name"><Input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="e.g. Anytime Fitness Katipunan" /></Field>

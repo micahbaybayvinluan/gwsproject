@@ -66,6 +66,7 @@ It checks the settings file, Docker (database and Redis), the app server and the
 
 - `docs/USER-GUIDE.md`: the guide for everyone (Help page, "Guide for everyone" / "More topics").
 - `docs/ROLE-GUIDES.md`: one step-by-step guide per role (Help page, "My guide").
+- **Picture guide** (`web/public/picture-guide/`, and Help → **Picture guide (screenshots)**): screenshots with numbered red boxes showing where to click, per role, plus a printable PDF. Re-make it after screen changes with `node scripts/picture-guide.mjs` on the demo data while `pnpm dev` runs.
 - `docs/ECOMMERCE-PROPOSAL.md`: the e-commerce (TikTok / Shopee / Lazada) process, entries and reports, now built (menu: E-commerce).
 
 ## Help & Guide and the AI assistant

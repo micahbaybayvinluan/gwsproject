@@ -787,6 +787,10 @@ describe('Owner controls batch (owner requests 2026-09-26): In-Charge approvals,
   it('receiving by the Warehouse Associate: the In-Charge checks the goods first, then the Head Auditor approves the cost, then stock posts; a failed approval is never stuck; the timeline shows each step; a cost change reaches only the cost roles', async () => {
     const r = ok(await as('wh.assoc').post('/api/receiving').send({ supplierId: sup, supplierRef: `B-${run}`, lines: [{ productId: pid, qty: 20, expiryDate: '2029-06-30', batchNo: 'B1', }] })).body;
     await http.post(`/api/attachments/ReceivingDoc/${r.id}`).set('Authorization', `Bearer ${tokens['wh.assoc']}`).attach('file', png, { filename: 'inv.png', contentType: 'image/png' }).expect(201);
+    // the attachment opens as the file itself (not the attachment list)
+    const att = (ok(await as('wh.incharge').get(`/api/attachments/ReceivingDoc/${r.id}`)).body as { id: string }[])[0];
+    const file = await as('wh.incharge').get(`/api/attachments/file/${att.id}`).expect(200);
+    expect(file.headers['content-type']).toMatch(/image\/png/);
     ok(await as('wh.assoc').post(`/api/receiving/${r.id}/submit`));
     await as('head.auditor').post(`/api/approvals/${(await pending('WAREHOUSE_IN', r.id)).id}/decide`).send({ decision: 'APPROVE' }).expect(403);
     ok(await as('wh.incharge').post(`/api/approvals/${(await pending('WAREHOUSE_IN', r.id)).id}/decide`).send({ decision: 'APPROVE' }));

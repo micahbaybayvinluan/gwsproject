@@ -17,21 +17,21 @@ export function ApprovalsPage() {
   const [results, setResults] = useState<{ id: string; ok: boolean; error?: string }[] | null>(null);
   const bulk = useMutation({ mutationFn: (v: 'APPROVE' | 'REJECT' | { decision: 'REJECT'; reason: string }) => api.post<{ id: string; ok: boolean; error?: string }[]>('/api/approvals/bulk', { ids: [...selected], decision: typeof v === 'string' ? v : v.decision, note: typeof v === 'string' ? note || undefined : v.reason }), onSuccess: (r) => { setResults(r); setSelected(new Set()); setNote(''); void qc.invalidateQueries({ queryKey: ['approvals-inbox'] }); void qc.invalidateQueries({ queryKey: ['approvals-count'] }); } });
   // rejecting an AR payment needs a reason, which goes back to the branch (owner request 2026-09-29)
-  const [rejecting, setRejecting] = useState<{ ids: string[]; bulk: boolean } | null>(null);
+  const [rejecting, setRejecting] = useState<{ ids: string[]; bulk: boolean; type: string } | null>(null);
   const one = useMutation({ mutationFn: ({ id, decision, reason }: { id: string; decision: 'APPROVE' | 'REJECT'; reason?: string }) => api.post(`/api/approvals/${id}/decide`, { decision, note: reason ?? (note || undefined) }), onSuccess: () => { void qc.invalidateQueries({ queryKey: ['approvals-inbox'] }); void qc.invalidateQueries({ queryKey: ['approvals-count'] }); } });
   const items = (q.data?.items ?? []).filter((i) => !sp.get('type') || i.type === sp.get('type'));
   const groups = [...new Set(items.map((i) => i.type))].map((t) => ({ type: t, items: items.filter((i) => i.type === t) }));
   const toggle = (id: string) => { const n = new Set(selected); n.has(id) ? n.delete(id) : n.add(id); setSelected(n); };
   const selectAll = () => setSelected(selected.size === items.length ? new Set() : new Set(items.map((i) => i.id)));
   return <div className="space-y-4">
-    {rejecting && <RejectReason onClose={() => setRejecting(null)} onReject={(reason) => { if (rejecting.bulk) bulk.mutate({ decision: 'REJECT', reason }); else one.mutate({ id: rejecting.ids[0], decision: 'REJECT', reason }); setRejecting(null); }} />}
+    {rejecting && <RejectReason type={rejecting.type} onClose={() => setRejecting(null)} onReject={(reason) => { if (rejecting.bulk) bulk.mutate({ decision: 'REJECT', reason }); else one.mutate({ id: rejecting.ids[0], decision: 'REJECT', reason }); setRejecting(null); }} />}
     <div className="flex flex-wrap items-center justify-between gap-2"><h1 className="text-2xl font-bold tracking-tight text-navy">My Approvals <span className="text-base text-slate-500">({q.data?.count ?? 0} pending{q.data?.oldestDays ? `, oldest ${q.data.oldestDays} d` : ''})</span></h1></div>
     <Card>
       <div className="flex flex-wrap items-center gap-2">
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={items.length > 0 && selected.size === items.length} onChange={selectAll} /> Select all ({selected.size})</label>
         <Input className="max-w-xs" placeholder="Note applied to all selected (optional)" value={note} onChange={(e) => setNote(e.target.value)} />
         <Button disabled={!selected.size || bulk.isPending} onClick={() => bulk.mutate('APPROVE')}>Approve selected</Button>
-        <Button variant="danger" disabled={!selected.size || bulk.isPending} onClick={() => (items.some((i) => selected.has(i.id) && i.type === 'AR_PAYMENT') ? setRejecting({ ids: [...selected], bulk: true }) : bulk.mutate('REJECT'))}>Reject selected</Button>
+        <Button variant="danger" disabled={!selected.size || bulk.isPending} onClick={() => { const t = items.find((i) => selected.has(i.id) && NEEDS_REASON.includes(i.type))?.type; if (t) setRejecting({ ids: [...selected], bulk: true, type: t }); else bulk.mutate('REJECT'); }}>Reject selected</Button>
       </div>
       <ErrorBox error={bulk.error || one.error} />
       {results && <div className="mt-2 text-sm">{results.filter((r) => r.ok).length} succeeded{results.some((r) => !r.ok) && <ul className="list-disc pl-5 text-red-700">{results.filter((r) => !r.ok).map((r) => <li key={r.id}>{r.error}</li>)}</ul>}</div>}
@@ -45,7 +45,7 @@ export function ApprovalsPage() {
             <div className="flex flex-wrap items-center gap-2 text-sm"><span className="font-medium">{String(r.summary?.controlNo ?? r.summary?.drSiNo ?? r.documentType)}</span>{r.summary?.locationName ? <span className="text-slate-500">{String(r.summary.locationName)}</span> : null}{r.summary?.total !== undefined ? <span>{peso(r.summary.total)}</span> : null}{r.summary?.franchiseTier === true ? <Badge tone="purple">FRANCHISE</Badge> : null}{r.autoApproveAt && <Badge tone="blue">auto-approves {new Date(r.autoApproveAt).toLocaleString()}</Badge>}{!r.anyOf && r.requiredApproverRoles.length > 1 && <Badge tone="amber">needs all: {r.requiredApproverRoles.join(' + ')}</Badge>}</div>
             <div className="text-xs text-slate-500">by {r.requesterName} · {new Date(r.createdAt).toLocaleString()}{r.decisions.length ? ` · decided by ${r.decisions.map((d) => `${d.user.fullName} (${d.decision})`).join(', ')}` : ''}</div>
           </button>
-          <div className="flex gap-1"><Button size="sm" onClick={() => one.mutate({ id: r.id, decision: 'APPROVE' })}>{r.type === 'WAREHOUSE_EDIT' ? 'Accept' : 'Approve'}</Button><Button size="sm" variant="danger" onClick={() => (r.type === 'AR_PAYMENT' ? setRejecting({ ids: [r.id], bulk: false }) : one.mutate({ id: r.id, decision: 'REJECT' }))}>Reject</Button></div>
+          <div className="flex gap-1"><Button size="sm" onClick={() => one.mutate({ id: r.id, decision: 'APPROVE' })}>{APPROVE_LABEL[r.type] ?? 'Approve'}</Button><Button size="sm" variant="danger" onClick={() => (NEEDS_REASON.includes(r.type) ? setRejecting({ ids: [r.id], bulk: false, type: r.type }) : one.mutate({ id: r.id, decision: 'REJECT' }))}>{REJECT_LABEL[r.type] ?? 'Reject'}</Button></div>
         </div>
         {r.type === 'AR_PAYMENT' && <PaymentReview id={r.documentId} />}
         {r.type === 'WAREHOUSE_EDIT' && Array.isArray(r.summary?.changes) && <div className="ml-6 mt-1 rounded border border-amber-200 bg-amber-50 p-2 text-sm">
@@ -124,8 +124,18 @@ export const PAYMENT_REJECT_REASONS = [
   'Cheque bounced or not yet cleared',
 ];
 
-function RejectReason({ onReject, onClose }: { onReject: (reason: string) => void; onClose: () => void }) {
+/** Rejections that must say why (the person who sent it sees the reason). */
+const NEEDS_REASON = ['AR_PAYMENT', 'TRANSFER_DIFF_SENDER', 'TRANSFER_DIFF_REVIEW'];
+const APPROVE_LABEL: Record<string, string> = { WAREHOUSE_EDIT: 'Accept', TRANSFER_DIFF_SENDER: 'Agree', TRANSFER_DIFF_REVIEW: 'Confirm the difference' };
+const REJECT_LABEL: Record<string, string> = { TRANSFER_DIFF_SENDER: 'Disagree', TRANSFER_DIFF_REVIEW: 'Receiver miscounted' };
+
+function RejectReason({ type, onReject, onClose }: { type: string; onReject: (reason: string) => void; onClose: () => void }) {
   const [pick, setPick] = useState(''); const [other, setOther] = useState('');
+  if (type !== 'AR_PAYMENT') return <Modal title={type === 'TRANSFER_DIFF_SENDER' ? 'Why do you disagree?' : 'What did you find?'} onClose={onClose}>
+    <p className="mb-3 text-sm text-slate-600">{type === 'TRANSFER_DIFF_SENDER' ? 'For example "we packed all items, the checker counted them". The Owner reads this and decides.' : 'For example "CCTV shows both boxes arrived". The receiving branch gets the items as on the form.'}</p>
+    <Input value={other} onChange={(e) => setOther(e.target.value)} placeholder="Reason (required)" autoFocus />
+    <div className="mt-4 flex justify-end gap-2"><Button variant="outline" onClick={onClose}>Cancel</Button><Button variant="danger" disabled={!other.trim()} onClick={() => onReject(other.trim())}>{REJECT_LABEL[type] ?? 'Reject'}</Button></div>
+  </Modal>;
   const reason = pick === 'OTHER' ? other.trim() : pick ? `${pick}${other.trim() ? ` — ${other.trim()}` : ''}` : '';
   return <Modal title="Why is this payment rejected?" onClose={onClose}>
     <p className="mb-3 text-sm text-slate-600">The branch sees this reason and records the payment again.</p>

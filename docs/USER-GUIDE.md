@@ -39,6 +39,8 @@ Each section below starts with a hidden line that says which roles it is for. Th
 - Type a question in **Ask** (for example "how do I record a delivery sale?"). If the AI assistant is switched on, it answers from this guide in plain words. If not, the matching guide sections are shown instead.
 - The assistant only explains how to use the system. It cannot see or change your data, and it does not know your sales or stock figures.
 
+- **Picture guide (screenshots)** (button at the top of Help & Guide): each process with screenshots, numbered red boxes on where to click and the matching steps; it has a printable PDF.
+
 ## Recording a sale
 <!-- for: sale.create -->
 1. Open **New Sale**.

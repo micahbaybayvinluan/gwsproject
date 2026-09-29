@@ -218,7 +218,7 @@ export class ApprovalsService implements OnApplicationBootstrap {
 }
 
 /** Types whose rejection must carry a reason (sent back to the person who entered it). */
-export const REASON_REQUIRED: string[] = ['AR_PAYMENT'];
+export const REASON_REQUIRED: string[] = ['AR_PAYMENT', 'TRANSFER_DIFF_SENDER', 'TRANSFER_DIFF_REVIEW'];
 export function humanType(t: string) { return t.replace(/_/g, ' ').toLowerCase().replace(/^\w/, (c) => c.toUpperCase()); }
 function summaryLine(s: unknown) { if (!s || typeof s !== 'object') return ''; const o = s as Record<string, unknown>; return [o.controlNo, o.locationName, o.total != null ? `₱${o.total}` : null].filter(Boolean).join(' · '); }
 export function documentLink(type: string, id: string) {

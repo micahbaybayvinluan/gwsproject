@@ -1,0 +1,240 @@
+import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException, OnApplicationBootstrap } from '@nestjs/common';
+import { ApprovalStatus, Prisma } from '@prisma/client';
+import { PrismaService, Tx } from '../common/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import { AuditService } from '../common/audit.service';
+import { APPROVAL_ROUTING, ApprovalType, ROLE_BY_KEY, RoleKey, editRequestApprovers } from '../common/permissions';
+import type { SessionUser } from '../common/request-context';
+import { requestContext } from '../common/request-context';
+
+export type ApprovalOutcome = 'APPROVED' | 'REJECTED';
+export type ApprovalHandler = (req: { id: string; type: string; documentType: string; documentId: string; requestedBy: string; summary: unknown }, outcome: ApprovalOutcome, actor: { id: string; note?: string } | null) => Promise<void>;
+
+/**
+ * §6 Generic approval engine. Modules register a handler per type; the engine calls it once the request is
+ * finally APPROVED (all required roles, or any-one when anyOf) or REJECTED (any listed role).
+ */
+@Injectable()
+export class ApprovalsService implements OnApplicationBootstrap {
+  private log = new Logger('Approvals');
+  private handlers = new Map<string, ApprovalHandler>();
+  constructor(private prisma: PrismaService, private notify: NotificationsService, private audit: AuditService) {}
+
+  /** One handler per type, or per type + document type when one approval type covers several documents (WAREHOUSE_IN). */
+  /**
+   * Repair: a request that already has every decision it needs but is still pending was left behind by a failed step (before the fix
+   * that undoes such a decision). Its decisions are removed so the approver sees it again and can decide once the problem is fixed.
+   */
+  async onApplicationBootstrap() {
+    try {
+      const stuck = await this.prisma.db.approvalRequest.findMany({ where: { status: 'PENDING', decisions: { some: { decision: 'APPROVE' } } }, include: { decisions: true } });
+      for (const r of stuck) {
+        const approved = r.decisions.filter((d) => d.decision === 'APPROVE');
+        const complete = r.requiredApproverUserIds.length ? (r.anyOf || r.requiredApproverUserIds.every((u) => approved.some((d) => d.userId === u))) : (r.anyOf || r.requiredApproverRoles.every((role) => approved.some((d) => d.roleKey === role)));
+        if (!complete) continue;
+        await this.prisma.db.approvalDecision.deleteMany({ where: { requestId: r.id } });
+        this.log.warn(`Re-opened stuck approval ${r.type} ${r.id} (${r.documentType} ${r.documentId})`);
+      }
+    } catch (e) { this.log.warn(`Approval repair skipped: ${(e as Error).message}`); }
+  }
+
+  register(type: ApprovalType, handler: ApprovalHandler, documentType?: string) { this.handlers.set(documentType ? `${type}:${documentType}` : type, handler); }
+
+  async request(input: { type: ApprovalType; documentType: string; documentId: string; requestedBy: string; requesterRole?: RoleKey; summary?: unknown; autoApproveAt?: Date | null; extraRoles?: RoleKey[]; discrepancyCaseId?: string | null; approverUserIds?: string[] }, tx: Tx | null = null) {
+    const db = (tx ?? this.prisma.db);
+    const route = APPROVAL_ROUTING[input.type];
+    let roles: RoleKey[] = [...route.roles];
+    if (input.type === 'EDIT_REQUEST' && input.requesterRole) roles = editRequestApprovers(input.requesterRole);
+    // cost typed by the Head Auditor goes to the Owner, and the other way round; anyone else needs both
+    if (input.type === 'COST_EDIT' && input.requesterRole && roles.length > 1) roles = roles.filter((r) => r !== input.requesterRole);
+    if (input.extraRoles?.length) roles = [...new Set([...roles, ...input.extraRoles])];
+    const userIds = [...new Set(input.approverUserIds ?? [])];
+    if (userIds.length) roles = [];
+    const req = await db.approvalRequest.create({
+      data: {
+        type: input.type, documentType: input.documentType, documentId: input.documentId, requestedBy: input.requestedBy,
+        requiredApproverRoles: roles, requiredApproverUserIds: userIds, anyOf: !!route.anyOf && !input.extraRoles?.length, summary: (input.summary ?? undefined) as Prisma.InputJsonValue | undefined,
+        autoApproveAt: input.autoApproveAt ?? null, discrepancyCaseId: input.discrepancyCaseId ?? null,
+      },
+    });
+    // notify approvers (after commit when in tx — best effort)
+    const message = { type: 'APPROVAL_REQUESTED', title: `${humanType(input.type)} needs your ${userIds.length ? 'acceptance' : 'approval'}`, body: `${input.documentType} ${summaryLine(input.summary)}`, link: `/approvals?type=${input.type}` };
+    const doNotify = () => (userIds.length ? this.notify.toUsers(userIds, message) : this.notify.toRoles(roles, message)).catch((e) => this.log.warn(e));
+    if (tx) setImmediate(doNotify); else await doNotify();
+    return req;
+  }
+
+  /** Inbox for the current approver: pending requests where one of their roles is required and they have not decided yet. */
+  async inbox(user: SessionUser, type?: string, all = false) {
+    const byRole: Prisma.ApprovalRequestWhereInput = { requiredApproverRoles: { has: user.roleKey }, requiredApproverUserIds: { isEmpty: true } };
+    if (user.roleKey === 'FRANCHISE_OWNER') {
+      // franchise owner only sees requests for their own franchise (summary.locationId)
+      byRole.summary = { path: ['locationId'], string_contains: user.locationIds[0] ?? '∅' } as never;
+    }
+    // the Owner is the highest authority (owner request 2026-09-30): with "all" they see every pending request and may decide any of them
+    const ownerAll = all && user.roleKey === 'ADMIN';
+    const where: Prisma.ApprovalRequestWhereInput = { status: 'PENDING', type: type || undefined, decisions: { none: { userId: user.id } }, ...(ownerAll ? {} : { OR: [byRole, { requiredApproverUserIds: { has: user.id } }] }) };
+    const rows = await this.prisma.db.approvalRequest.findMany({ where, include: { decisions: { include: { user: { select: { fullName: true } } } } }, orderBy: { createdAt: 'desc' } });
+    const oldest = rows.length ? Math.floor((Date.now() - Math.min(...rows.map((r) => r.createdAt.getTime()))) / 86400000) : 0;
+    const requesterIds = [...new Set(rows.map((r) => r.requestedBy))];
+    const requesters = await this.prisma.db.user.findMany({ where: { id: { in: requesterIds } }, select: { id: true, fullName: true } });
+    const byId = new Map(requesters.map((u) => [u.id, u.fullName]));
+    return { count: rows.length, oldestDays: oldest, items: rows.map((r) => ({ ...r, requesterName: byId.get(r.requestedBy) ?? r.requestedBy })) };
+  }
+  /** The requester's own requests with their progress (dashboard: pending, and decided in the last 3 days). */
+  async mine(userId: string) {
+    const rows = await this.prisma.db.approvalRequest.findMany({ where: { requestedBy: userId, OR: [{ status: 'PENDING' }, { decidedAt: { gte: new Date(Date.now() - 3 * 86400000) } }] }, include: { decisions: { include: { user: { select: { fullName: true } } } } }, orderBy: { createdAt: 'desc' }, take: 50 });
+    return this.describe(rows);
+  }
+
+  /** Every approval a document went through, oldest first, as steps for the visual workflow. */
+  async timeline(documentType: string, documentId: string) {
+    const rows = await this.prisma.db.approvalRequest.findMany({ where: { documentType, documentId }, include: { decisions: { include: { user: { select: { fullName: true } } } } }, orderBy: { createdAt: 'asc' } });
+    return this.describe(rows);
+  }
+
+  /** Steps per request: one per required role (all must approve), one shared step (any one of the roles), or one per named person. */
+  async describe(rows: Prisma.ApprovalRequestGetPayload<{ include: { decisions: { include: { user: { select: { fullName: true } } } } } }>[]) {
+    const roleName = (r: string) => ROLE_BY_KEY[r]?.name ?? r;
+    const roleUsers = new Map<string, string[]>();
+    const peopleFor = async (role: string) => { if (!roleUsers.has(role)) roleUsers.set(role, (await this.prisma.db.user.findMany({ where: { active: true, role: { key: role } }, select: { fullName: true } })).map((u) => u.fullName)); return roleUsers.get(role)!; };
+    const reqIds = [...new Set(rows.map((r) => r.requestedBy).concat(rows.flatMap((r) => r.requiredApproverUserIds)))];
+    const names = new Map((await this.prisma.db.user.findMany({ where: { id: { in: reqIds } }, select: { id: true, fullName: true } })).map((u) => [u.id, u.fullName]));
+    type Step = { who: string; status: 'approved' | 'rejected' | 'waiting' | 'auto' | 'cancelled'; by?: string; at?: Date; note?: string | null; people?: string[] };
+    const out: { id: string; type: string; label: string; documentType: string; documentId: string; link: string; controlNo: string | null; locationName: string | null; status: string; createdAt: Date; decidedAt: Date | null; requestedBy: string; steps: Step[]; nextSteps: string[] }[] = [];
+    for (const r of rows) {
+      const auto = r.status === 'AUTO_APPROVED';
+      const steps: Step[] = [];
+      const decisionOf = (match: (d: (typeof r.decisions)[number]) => boolean) => r.decisions.find(match);
+      const stepFor = async (who: string, match: (d: (typeof r.decisions)[number]) => boolean, people?: string[]): Promise<Step> => {
+        const d = decisionOf(match);
+        if (d) return { who, status: d.decision === 'APPROVE' ? 'approved' : 'rejected', by: d.user.fullName, at: d.decidedAt, note: d.note };
+        if (auto) return { who, status: 'auto', at: r.decidedAt ?? undefined };
+        if (r.status === 'CANCELLED') return { who, status: 'cancelled' };
+        if (r.status !== 'PENDING') return { who, status: 'approved' };
+        return { who, status: 'waiting', people };
+      };
+      if (r.requiredApproverUserIds.length) for (const u of r.requiredApproverUserIds) steps.push(await stepFor(names.get(u) ?? 'named person', (d) => d.userId === u, [names.get(u) ?? '']));
+      else if (r.anyOf) steps.push(await stepFor(r.requiredApproverRoles.map(roleName).join(' or '), (d) => r.requiredApproverRoles.includes(d.roleKey), (await Promise.all(r.requiredApproverRoles.map(peopleFor))).flat()));
+      else for (const role of r.requiredApproverRoles) steps.push(await stepFor(roleName(role), (d) => d.roleKey === role, await peopleFor(role)));
+      // the Owner decided a request that was not theirs: shown as its own, final step
+      const ownerD = r.decisions.find((d) => d.roleKey === 'ADMIN' && !r.requiredApproverRoles.includes('ADMIN') && !r.requiredApproverUserIds.includes(d.userId));
+      if (ownerD) steps.push({ who: 'Owner (final)', status: ownerD.decision === 'APPROVE' ? 'approved' : 'rejected', by: ownerD.user.fullName, at: ownerD.decidedAt, note: ownerD.note });
+      const summary = (r.summary ?? {}) as { controlNo?: string; nextSteps?: string[]; locationName?: string };
+      out.push({ id: r.id, type: r.type, label: humanType(r.type), documentType: r.documentType, documentId: r.documentId, link: documentLink(r.documentType, r.documentId), controlNo: summary.controlNo ?? null, locationName: summary.locationName ?? null, status: r.status, createdAt: r.createdAt, decidedAt: r.decidedAt, requestedBy: names.get(r.requestedBy) ?? '', steps, nextSteps: r.status === 'PENDING' || r.status === 'APPROVED' || r.status === 'AUTO_APPROVED' ? summary.nextSteps ?? [] : [] });
+    }
+    // an upcoming step is dropped once a later request for the same document exists
+    return out.map((t, i) => (out.slice(i + 1).some((x) => x.documentId === t.documentId) ? { ...t, nextSteps: [] } : t));
+  }
+  async get(id: string) { const r = await this.prisma.db.approvalRequest.findUnique({ where: { id }, include: { decisions: { include: { user: { select: { fullName: true } } } } } }); if (!r) throw new NotFoundException(); return r; }
+  forDocument(documentType: string, documentId: string) { return this.prisma.db.approvalRequest.findMany({ where: { documentType, documentId }, include: { decisions: { include: { user: { select: { fullName: true } } } } }, orderBy: { createdAt: 'desc' } }); }
+
+  async decide(id: string, user: SessionUser, decision: 'APPROVE' | 'REJECT', note?: string) {
+    const req = await this.get(id);
+    if (req.status !== 'PENDING') throw new BadRequestException('Request already decided');
+    const targeted = (req.requiredApproverUserIds ?? []).length > 0;
+    // the Owner may decide any request, and their decision is final (owner request 2026-09-30)
+    const owner = user.roleKey === 'ADMIN';
+    if (owner) { /* highest authority */ } else if (targeted) {
+      // person-targeted request: only the named person decides (their role does not matter)
+      if (!req.requiredApproverUserIds.includes(user.id)) throw new ForbiddenException('This request is addressed to another person');
+    } else {
+      if (!req.requiredApproverRoles.includes(user.roleKey)) throw new ForbiddenException('Your role is not an approver for this request');
+      if (!user.permissions.has(`approval.act.${req.type}`)) throw new ForbiddenException(`Missing permission approval.act.${req.type}`);
+    }
+    if (req.decisions.some((d) => d.userId === user.id)) throw new BadRequestException('You already decided on this request');
+    if (decision === 'REJECT' && REASON_REQUIRED.includes(req.type) && !note?.trim()) throw new BadRequestException('Choose the reason for rejecting it');
+    const made = await this.prisma.db.approvalDecision.create({ data: { requestId: id, userId: user.id, roleKey: user.roleKey, decision, note } });
+    const decisions = [...req.decisions.map((d) => ({ roleKey: d.roleKey, decision: d.decision })), { roleKey: user.roleKey, decision }];
+    let final: ApprovalStatus | null = null;
+    if (decision === 'REJECT') final = 'REJECTED';
+    else if (owner) final = 'APPROVED';
+    else if (targeted) { const approvedUsers = new Set([...req.decisions.filter((d) => d.decision === 'APPROVE').map((d) => d.userId), user.id]); if (req.anyOf || req.requiredApproverUserIds.every((u) => approvedUsers.has(u))) final = 'APPROVED'; }
+    else if (req.anyOf) final = 'APPROVED';
+    else {
+      const approvedRoles = new Set(decisions.filter((d) => d.decision === 'APPROVE').map((d) => d.roleKey));
+      if (req.requiredApproverRoles.every((r) => approvedRoles.has(r))) final = 'APPROVED';
+    }
+    await this.audit.log({ action: decision, entityType: 'ApprovalRequest', entityId: id, after: { type: req.type, documentType: req.documentType, documentId: req.documentId, note } });
+    // if the document cannot take the decision (e.g. a cost is missing), the decision is undone so the approver can fix it and decide again
+    if (final) { try { await this.finalize(req.id, final, { id: user.id, note }); } catch (e) { await this.prisma.db.approvalDecision.delete({ where: { id: made.id } }).catch(() => undefined); throw e; } }
+    else {
+      // tell the requester how far it got: who approved, who is still to decide
+      const t = (await this.describe([await this.get(id)]))[0];
+      const waiting = t.steps.filter((x) => x.status === 'waiting').map((x) => x.who).join(', ');
+      await this.notify.toUsers([req.requestedBy], { type: 'APPROVAL_PROGRESS', title: `${humanType(req.type)}: approved by ${user.fullName} (${ROLE_BY_KEY[user.roleKey]?.name ?? user.roleKey}); waiting for ${waiting}`, link: documentLink(req.documentType, req.documentId) });
+    }
+    return this.get(id);
+  }
+
+  /** Bulk approve/reject with one note (§6.2). Mixed selection allowed; per-item errors are reported, not thrown. */
+  async decideBulk(ids: string[], user: SessionUser, decision: 'APPROVE' | 'REJECT', note?: string) {
+    const results: { id: string; ok: boolean; error?: string }[] = [];
+    for (const id of ids) {
+      try { await this.decide(id, user, decision, note); results.push({ id, ok: true }); }
+      catch (e) { results.push({ id, ok: false, error: (e as Error).message }); }
+    }
+    return results;
+  }
+
+  /** The pending request of a type for a document (to show approve / reject buttons on the document page). */
+  pendingFor(documentType: string, documentId: string, type: string) { return this.prisma.db.approvalRequest.findFirst({ where: { documentType, documentId, type, status: 'PENDING' } }); }
+
+  private async finalize(id: string, status: ApprovalStatus, actor: { id: string; note?: string } | null) {
+    const req = await this.prisma.db.approvalRequest.update({ where: { id }, data: { status, decidedAt: new Date() } });
+    const handler = this.handlers.get(`${req.type}:${req.documentType}`) ?? this.handlers.get(req.type);
+    const outcome: ApprovalOutcome = status === 'REJECTED' ? 'REJECTED' : 'APPROVED';
+    if (handler) {
+      try { await handler({ id: req.id, type: req.type, documentType: req.documentType, documentId: req.documentId, requestedBy: req.requestedBy, summary: req.summary }, outcome, actor); }
+      catch (e) {
+        this.log.error(`Handler for ${req.type} failed: ${(e as Error).message}`);
+        await this.prisma.db.approvalRequest.update({ where: { id }, data: { status: 'PENDING', decidedAt: null } });
+        throw e;
+      }
+    }
+    await this.notify.toUsers([req.requestedBy], { type: 'APPROVAL_DECIDED', title: `${humanType(req.type)} ${outcome.toLowerCase()}`, body: actor?.note ?? undefined, link: documentLink(req.documentType, req.documentId) });
+  }
+
+  /** Job: auto-approve untouched requests whose autoApproveAt has passed (§6.1 COST_ON_RECEIVING 24 h). */
+  async runAutoApprovals() {
+    const due = await this.prisma.db.approvalRequest.findMany({ where: { status: 'PENDING', autoApproveAt: { lte: new Date() } } });
+    let n = 0;
+    for (const r of due) {
+      await requestContext.runSystem(async () => {
+        await this.audit.log({ action: 'AUTO_APPROVE', entityType: 'ApprovalRequest', entityId: r.id, after: { reason: 'auto-approved (unchanged cost)' }, userId: null });
+        await this.finalize(r.id, 'AUTO_APPROVED', null);
+      });
+      n++;
+    }
+    return { autoApproved: n };
+  }
+
+  /** Reminder job: cost approvals pending > 12 h → Head Auditor; > 24 h → Admin (§12). */
+  async remindStaleCostApprovals() {
+    const now = Date.now();
+    const pending = await this.prisma.db.approvalRequest.findMany({ where: { status: 'PENDING', type: 'COST_ON_RECEIVING' } });
+    for (const p of pending) {
+      const hours = (now - p.createdAt.getTime()) / 3600000;
+      if (hours >= 24) await this.notify.toRoles(['ADMIN'], { type: 'APPROVAL_STALE', title: 'Cost approval pending > 24 h', link: '/approvals?type=COST_ON_RECEIVING' });
+      else if (hours >= 12) await this.notify.toRoles(['HEAD_AUDITOR'], { type: 'APPROVAL_STALE', title: 'Cost approval pending > 12 h', link: '/approvals?type=COST_ON_RECEIVING' });
+    }
+  }
+
+  async cancelForDocument(documentType: string, documentId: string) {
+    await this.prisma.db.approvalRequest.updateMany({ where: { documentType, documentId, status: 'PENDING' }, data: { status: 'CANCELLED', decidedAt: new Date() } });
+  }
+}
+
+/** Types whose rejection must carry a reason (sent back to the person who entered it). */
+export const REASON_REQUIRED: string[] = ['AR_PAYMENT', 'TRANSFER_DIFF_SENDER', 'TRANSFER_DIFF_REVIEW', 'FRANCHISE_AR_EXTENSION', 'CASH_DEPOSIT_AUDIT', 'CASH_DEPOSIT_ACCOUNTING'];
+export function humanType(t: string) { return t.replace(/_/g, ' ').toLowerCase().replace(/^\w/, (c) => c.toUpperCase()); }
+function summaryLine(s: unknown) { if (!s || typeof s !== 'object') return ''; const o = s as Record<string, unknown>; return [o.controlNo, o.locationName, o.total != null ? `₱${o.total}` : null].filter(Boolean).join(' · '); }
+export function documentLink(type: string, id: string) {
+  if (type === 'OpeningArEntry') return `/ar?opening=${id}`;
+  if (type === 'AgentIncentive') return `/incentives?id=${id}`;
+  if (type === 'SixPackOverride') return `/six-pack?x=${id}`;
+  if (type === 'CashDeposit') return `/closing?deposit=${id}`;
+  if (type === 'FranchiseArExtension') return `/franchise-ar?extension=${id}`;
+  const map: Record<string, string> = { ReceivingDoc: '/receiving', TransferDoc: '/transfers', SalesDoc: '/sales', ExpiryWriteoffDoc: '/writeoffs', PriceChangeDoc: '/price-changes', PostCloseEdit: '/post-close-edits', CountDoc: '/counts', DiscrepancyCase: '/discrepancies', AccountingPeriod: '/accounting/periods', BeginningBalance: '/accounting/beginning-balances', SalesTarget: '/targets', EcomSettlement: '/ecommerce' };
+  return `${map[type] ?? '/'}/${id}`;
+}

@@ -1,0 +1,2411 @@
+// GWS-ERP Prisma schema — single data model for Phase 1 (operations) and Phase 2 (finance).
+// Money: Decimal(14,2). Quantities: Int. Timestamps stored UTC; business dates computed in Asia/Manila.
+// No hard deletes on transactional tables: voided_at / voided_by / void_reason.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ───────────────────────────── Organisation ─────────────────────────────
+
+enum LocationType {
+  WAREHOUSE
+  BRANCH
+  FRANCHISE
+  OFFICE
+  CONSIGNEE
+  VIRTUAL
+}
+
+model Location {
+  id                         String       @id @default(uuid())
+  code                       String       @unique
+  /// 2-letter code printed first on every form number of this location, e.g. WA-PO-000012 (West Ave pull-out no. 12)
+  shortCode                  String?      @unique @map("short_code")
+  name                       String
+  type                       LocationType
+  isSelling                  Boolean      @default(false) @map("is_selling")
+  franchiseOwnerUserId       String?      @map("franchise_owner_user_id")
+  /// Franchise owner's choice: may the franchise associate confirm incoming transfers (the owner is then only notified)?
+  franchiseAssociateReceives Boolean      @default(false) @map("franchise_associate_receives")
+  // days allowed to deposit a day's cash sales (set by the Head Auditor or Admin)
+  cashDepositMaxDays         Int          @default(1) @map("cash_deposit_max_days")
+  address                    String?
+  active                     Boolean      @default(true)
+  createdAt                  DateTime     @default(now()) @map("created_at")
+  createdBy                  String?      @map("created_by")
+  updatedAt                  DateTime     @updatedAt @map("updated_at")
+  updatedBy                  String?      @map("updated_by")
+
+  franchiseOwner    User?                    @relation("FranchiseOwner", fields: [franchiseOwnerUserId], references: [id])
+  assignments       UserLocationAssignment[]
+  stockLedger       StockLedger[]
+  stockBalances     StockBalance[]
+  minStockLevels    MinStockLevel[]
+  receivingDocs     ReceivingDoc[]
+  transfersFrom     TransferDoc[]            @relation("TransferFrom")
+  transfersTo       TransferDoc[]            @relation("TransferTo")
+  salesDocs         SalesDoc[]
+  expenseDocs       ExpenseDoc[]
+  countDocs         CountDoc[]
+  chargeForms       ChargeForm[]
+  writeoffDocs      ExpiryWriteoffDoc[]
+  consignmentsOut   ConsignmentAgreement[]   @relation("ConsigneeLocation")
+  riders            Rider[]
+  agents            Agent[]
+  accounts          Account[]
+  dailyCloses       DailyClose[]
+  cashFund          CashFund?
+  storeInspections  StoreInspection[]
+  franchiseExpenses FranchiseExpense[]
+  employees         Employee[]
+  /// franchise on cash-before-delivery after unpaid accounts (memo 2026-07-31)
+  creditHold        Boolean                  @default(false) @map("credit_hold")
+  creditHoldNote    String?                  @map("credit_hold_note")
+
+  @@map("locations")
+}
+
+model Role {
+  id          String   @id @default(uuid())
+  key         String   @unique // ADMIN, HEAD_AUDITOR, ...
+  name        String
+  description String?
+  permissions Json // string[] of permission keys
+  isSystem    Boolean  @default(true) @map("is_system")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  users User[]
+
+  @@map("roles")
+}
+
+model User {
+  id                       String    @id @default(uuid())
+  username                 String    @unique
+  email                    String    @unique
+  fullName                 String    @map("full_name")
+  roleId                   String    @map("role_id")
+  passwordHash             String    @map("password_hash")
+  totpSecret               String?   @map("totp_secret")
+  totpEnabled              Boolean   @default(false) @map("totp_enabled")
+  active                   Boolean   @default(true)
+  mustChangePassword       Boolean   @default(true) @map("must_change_password")
+  /// Company ID number of the one person this account belongs to (accounts are personal, never shared).
+  idNumber                 String?   @unique @map("id_number")
+  /// When the person accepted the accountability statement ("this account is mine; everything done under it is my responsibility").
+  accountabilityAcceptedAt DateTime? @map("accountability_accepted_at")
+  accountabilityIp         String?   @map("accountability_ip")
+  emailDigest              Boolean   @default(true) @map("email_digest")
+  lastLoginAt              DateTime? @map("last_login_at")
+  createdAt                DateTime  @default(now()) @map("created_at")
+  createdBy                String?   @map("created_by")
+  updatedAt                DateTime  @updatedAt @map("updated_at")
+  updatedBy                String?   @map("updated_by")
+
+  role                Role                     @relation(fields: [roleId], references: [id])
+  assignments         UserLocationAssignment[]
+  permissionOverrides UserPermissionOverride[]
+  ownedFranchises     Location[]               @relation("FranchiseOwner")
+  notifications       Notification[]
+  approvalDecisions   ApprovalDecision[]
+  auditLogs           AuditLog[]
+  employee            Employee?
+
+  @@map("users")
+}
+
+model UserLocationAssignment {
+  id         String   @id @default(uuid())
+  userId     String   @map("user_id")
+  locationId String   @map("location_id")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  location Location @relation(fields: [locationId], references: [id])
+
+  @@unique([userId, locationId])
+  @@map("user_location_assignments")
+}
+
+model UserPermissionOverride {
+  id            String   @id @default(uuid())
+  userId        String   @map("user_id")
+  permissionKey String   @map("permission_key")
+  granted       Boolean // true = grant, false = revoke
+  createdAt     DateTime @default(now()) @map("created_at")
+  createdBy     String?  @map("created_by")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, permissionKey])
+  @@map("user_permission_overrides")
+}
+
+// ───────────────────────────── Catalogue ─────────────────────────────
+
+model Supplier {
+  id          String   @id @default(uuid())
+  code        String   @unique // SUP-001 — visible to everyone
+  name        String // Admin / Head Auditor / External Auditor only (redacted otherwise)
+  contact     String?
+  termsDays   Int      @default(0) @map("terms_days")
+  apAccountId String?  @map("ap_account_id")
+  isConsignor Boolean  @default(false) @map("is_consignor")
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at")
+  createdBy   String?  @map("created_by")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  updatedBy   String?  @map("updated_by")
+
+  apAccount      Account?               @relation(fields: [apAccountId], references: [id])
+  products       Product[]
+  batches        Batch[]
+  receivingDocs  ReceivingDoc[]
+  consignmentsIn ConsignmentAgreement[] @relation("ConsignorSupplier")
+
+  @@map("suppliers")
+}
+
+enum AccountingClass {
+  SUPPLEMENT
+  FREEBIE
+  PLASTIC
+  APPAREL
+  EQUIPMENT
+  OTHER
+  REPACKED
+  BUNDLE
+}
+
+model Category {
+  id              String          @id @default(uuid())
+  name            String          @unique
+  accountingClass AccountingClass @map("accounting_class")
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+
+  products Product[]
+
+  @@map("categories")
+}
+
+model Product {
+  id               String   @id @default(uuid())
+  sku              String   @unique
+  barcode          String?  @unique
+  name             String
+  /// days a customer takes to finish one unit (e.g. 30 servings = 30); drives the re-order reminder to the store
+  consumptionDays  Int?     @map("consumption_days")
+  categoryId       String   @map("category_id")
+  brand            String?
+  unit             String   @default("pc")
+  /// flavors this SKU comes in (owner request 2026-09-30); receiving suggests them and adds new ones
+  flavors          String[] @default([])
+  supplierId       String?  @map("supplier_id")
+  trackExpiry      Boolean  @default(true) @map("track_expiry")
+  active           Boolean  @default(true)
+  isBundle         Boolean  @default(false) @map("is_bundle")
+  franchiseVisible Boolean  @default(true) @map("franchise_visible")
+  needsReview      Boolean  @default(false) @map("needs_review") // flagged by import keyword map
+  createdAt        DateTime @default(now()) @map("created_at")
+  createdBy        String?  @map("created_by")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+  updatedBy        String?  @map("updated_by")
+
+  category             Category              @relation(fields: [categoryId], references: [id])
+  supplier             Supplier?             @relation(fields: [supplierId], references: [id])
+  bundleComponents     BundleComponent[]     @relation("BundleParent")
+  componentOf          BundleComponent[]     @relation("BundleChild")
+  prices               PriceList[]
+  costs                ProductCost[]
+  minStockLevels       MinStockLevel[]
+  batches              Batch[]
+  stockLedger          StockLedger[]
+  stockBalances        StockBalance[]
+  receivingLines       ReceivingLine[]
+  transferLines        TransferLine[]
+  salesLines           SalesLine[]
+  countLines           CountLine[]
+  chargeFormLines      ChargeFormLine[]
+  writeoffLines        ExpiryWriteoffLine[]
+  priceChangeLines     PriceChangeLine[]
+  consignmentSaleLines ConsignmentSaleLine[]
+
+  @@index([name])
+  @@map("products")
+}
+
+model BundleComponent {
+  id                 String @id @default(uuid())
+  bundleProductId    String @map("bundle_product_id")
+  componentProductId String @map("component_product_id")
+  qty                Int
+
+  bundle    Product @relation("BundleParent", fields: [bundleProductId], references: [id])
+  component Product @relation("BundleChild", fields: [componentProductId], references: [id])
+
+  @@unique([bundleProductId, componentProductId])
+  @@map("bundle_components")
+}
+
+model PriceTier {
+  id        String   @id @default(uuid())
+  key       String   @unique // RETAIL, DEALER, FRANCHISE, AGENT, WHOLESALE, OTHER_1...
+  name      String
+  sortOrder Int      @default(0) @map("sort_order")
+  isSystem  Boolean  @default(false) @map("is_system")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("price_tiers")
+}
+
+model PriceList {
+  id            String   @id @default(uuid())
+  productId     String   @map("product_id")
+  tier          String // PriceTier.key
+  effectiveFrom DateTime @map("effective_from") @db.Date
+  price         Decimal  @db.Decimal(14, 2)
+  approvedBy    String?  @map("approved_by")
+  sourceDocId   String?  @map("source_doc_id")
+  createdAt     DateTime @default(now()) @map("created_at")
+  createdBy     String?  @map("created_by")
+
+  product Product @relation(fields: [productId], references: [id])
+
+  @@unique([productId, tier, effectiveFrom])
+  @@index([productId, tier])
+  @@map("price_lists")
+}
+
+model ProductCost {
+  id            String   @id @default(uuid())
+  productId     String   @map("product_id")
+  effectiveFrom DateTime @map("effective_from") @db.Date
+  cost          Decimal  @db.Decimal(14, 2)
+  approvedBy    String?  @map("approved_by")
+  sourceDocId   String?  @map("source_doc_id")
+  createdAt     DateTime @default(now()) @map("created_at")
+  createdBy     String?  @map("created_by")
+
+  product Product @relation(fields: [productId], references: [id])
+
+  @@unique([productId, effectiveFrom])
+  @@map("product_costs")
+}
+
+model MinStockLevel {
+  id         String   @id @default(uuid())
+  productId  String   @map("product_id")
+  locationId String   @map("location_id")
+  minQty     Int      @map("min_qty")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+  updatedBy  String?  @map("updated_by")
+
+  product  Product  @relation(fields: [productId], references: [id])
+  location Location @relation(fields: [locationId], references: [id])
+
+  @@unique([productId, locationId])
+  @@map("min_stock_levels")
+}
+
+// ───────────────────────────── Stock ─────────────────────────────
+
+model Batch {
+  id               String    @id @default(uuid())
+  productId        String    @map("product_id")
+  batchNo          String?   @map("batch_no")
+  expiryDate       DateTime? @map("expiry_date") @db.Date
+  /// flavor of this batch (owner request 2026-09-30): a SKU is one item; its flavors are told apart per batch, like expiry
+  flavor           String?
+  receivedRef      String?   @map("received_ref") // receiving doc id / opening stock ref
+  unitCost         Decimal   @map("unit_cost") @db.Decimal(14, 2)
+  originalUnitCost Decimal?  @map("original_unit_cost") @db.Decimal(14, 2) // kept when revalued (R12)
+  supplierId       String?   @map("supplier_id")
+  isConsignmentIn  Boolean   @default(false) @map("is_consignment_in")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  createdBy        String?   @map("created_by")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  product       Product              @relation(fields: [productId], references: [id])
+  supplier      Supplier?            @relation(fields: [supplierId], references: [id])
+  ledger        StockLedger[]
+  balances      StockBalance[]
+  transferLines TransferLine[]
+  salesLines    SalesLine[]
+  writeoffLines ExpiryWriteoffLine[]
+  revaluations  RevaluationLine[]
+
+  @@index([productId, expiryDate])
+  @@map("batches")
+}
+
+enum MovementType {
+  RECEIVE
+  TRANSFER_OUT
+  TRANSFER_IN
+  SALE
+  SALE_RETURN
+  RETURN_TO_WAREHOUSE
+  RETURN_TO_SUPPLIER
+  CONSIGN_OUT
+  CONSIGN_SALE
+  CONSIGN_RETURN
+  ADJUST_COUNT
+  EXPIRED_WRITEOFF
+  FREEBIE_ISSUE
+  TASTING
+  BUNDLE_BUILD
+  BUNDLE_BREAK
+}
+
+model StockLedger {
+  id           String       @id @default(uuid())
+  locationId   String       @map("location_id")
+  productId    String       @map("product_id")
+  batchId      String       @map("batch_id")
+  qtyDelta     Int          @map("qty_delta")
+  movementType MovementType @map("movement_type")
+  documentType String       @map("document_type")
+  documentId   String       @map("document_id")
+  unitCost     Decimal      @map("unit_cost") @db.Decimal(14, 2) // batch cost at time of movement
+  postedAt     DateTime     @default(now()) @map("posted_at")
+  businessDate DateTime     @map("business_date") @db.Date // Manila calendar date
+  createdBy    String?      @map("created_by")
+
+  location Location @relation(fields: [locationId], references: [id])
+  product  Product  @relation(fields: [productId], references: [id])
+  batch    Batch    @relation(fields: [batchId], references: [id])
+
+  @@index([locationId, productId])
+  @@index([documentType, documentId])
+  @@index([businessDate])
+  @@map("stock_ledger")
+}
+
+model StockBalance {
+  locationId String   @map("location_id")
+  productId  String   @map("product_id")
+  batchId    String   @map("batch_id")
+  qty        Int
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  location Location @relation(fields: [locationId], references: [id])
+  product  Product  @relation(fields: [productId], references: [id])
+  batch    Batch    @relation(fields: [batchId], references: [id])
+
+  @@id([locationId, productId, batchId])
+  @@index([locationId, productId])
+  @@map("stock_balances")
+}
+
+// ───────────────────────────── Documents ─────────────────────────────
+
+enum DocStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+  POSTED
+  VOIDED
+}
+
+model ControlSequence {
+  id       String @id @default(uuid())
+  docType  String @map("doc_type")
+  scopeKey String @default("") @map("scope_key") // location id or '' (NULLs would defeat ON CONFLICT)
+  year     Int    @default(0)
+  nextNo   Int    @default(1) @map("next_no")
+
+  @@unique([docType, scopeKey, year])
+  @@map("control_sequences")
+}
+
+model Attachment {
+  id           String   @id @default(uuid())
+  documentType String   @map("document_type")
+  documentId   String   @map("document_id")
+  fileName     String   @map("file_name")
+  contentType  String   @map("content_type")
+  sizeBytes    Int      @map("size_bytes")
+  storageKey   String   @map("storage_key")
+  sha256       String
+  scanStatus   String   @default("CLEAN") @map("scan_status") // CLEAN | SKIPPED | INFECTED
+  uploadedBy   String   @map("uploaded_by")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([documentType, documentId])
+  @@map("attachments")
+}
+
+model ReceivingDoc {
+  id                String    @id @default(uuid())
+  controlNo         String    @map("control_no")
+  docDate           DateTime  @map("doc_date") @db.Date
+  status            DocStatus @default(DRAFT)
+  locationId        String    @map("location_id")
+  supplierId        String    @map("supplier_id")
+  supplierRef       String?   @map("supplier_ref")
+  isConsignmentIn   Boolean   @default(false) @map("is_consignment_in")
+  /// Warehouse Associate's delivery: the In-Charge checked the goods (first step; the Head Auditor then approves the cost)
+  goodsCheckedBy    String?   @map("goods_checked_by")
+  goodsCheckedAt    DateTime? @map("goods_checked_at")
+  paidOnReceipt     Boolean   @default(false) @map("paid_on_receipt")
+  paymentAccountId  String?   @map("payment_account_id")
+  notes             String?
+  preparedBy        String    @map("prepared_by")
+  approvalRequestId String?   @map("approval_request_id")
+  postedAt          DateTime? @map("posted_at")
+  voidedAt          DateTime? @map("voided_at")
+  voidedBy          String?   @map("voided_by")
+  voidReason        String?   @map("void_reason")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  createdBy         String?   @map("created_by")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+  updatedBy         String?   @map("updated_by")
+
+  location Location        @relation(fields: [locationId], references: [id])
+  supplier Supplier        @relation(fields: [supplierId], references: [id])
+  lines    ReceivingLine[]
+
+  @@unique([locationId, controlNo])
+  @@map("receiving_docs")
+}
+
+model ReceivingLine {
+  id            String    @id @default(uuid())
+  docId         String    @map("doc_id")
+  productId     String    @map("product_id")
+  qty           Int
+  freeQty       Int       @default(0) @map("free_qty")
+  expiryDate    DateTime? @map("expiry_date") @db.Date
+  batchNo       String?   @map("batch_no")
+  flavor        String?
+  unitCost      Decimal?  @map("unit_cost") @db.Decimal(14, 2) // entered by Head Auditor; hidden from warehouse roles
+  costUnchanged Boolean   @default(false) @map("cost_unchanged")
+  isNewProduct  Boolean   @default(false) @map("is_new_product")
+  batchId       String?   @map("batch_id")
+  remarks       String?
+
+  doc     ReceivingDoc @relation(fields: [docId], references: [id], onDelete: Cascade)
+  product Product      @relation(fields: [productId], references: [id])
+
+  @@map("receiving_lines")
+}
+
+enum TransferType {
+  RESTOCK
+  RETURN
+  REPLACEMENT
+  CONSIGNMENT_OUT
+  CONSIGNMENT_RETURN
+  INTERNAL
+  /// E-commerce pull-out: warehouse → the platform's "with courier" holding place (TikTok / Shopee / Lazada); the In-Charge approves
+  ECOMMERCE
+}
+
+enum TransferStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED // stock moved to IN_TRANSIT
+  REJECTED
+  RECEIVED // fully confirmed
+  DISCREPANCY // received with shortfall pending Head Auditor resolution
+  RESOLVED
+  VOIDED
+}
+
+model TransferDoc {
+  id                String         @id @default(uuid())
+  /// Goods into the warehouse confirmed by a Warehouse Associate wait for the In-Charge (lines as confirmed).
+  pendingReceipt    Json?          @map("pending_receipt")
+  pendingReceiptBy  String?        @map("pending_receipt_by")
+  /// the receiving location's own number for the same document (Transfer-In), e.g. MY-TI-000003
+  transferInNo      String?        @unique @map("transfer_in_no")
+  controlNo         String         @map("control_no")
+  docDate           DateTime       @map("doc_date") @db.Date
+  status            TransferStatus @default(DRAFT)
+  fromLocationId    String         @map("from_location_id")
+  toLocationId      String         @map("to_location_id")
+  transferType      TransferType   @map("transfer_type")
+  returnReason      String?        @map("return_reason") // clumped, damaged, wrong item, expired
+  notes             String?
+  preparedBy        String         @map("prepared_by")
+  approvalRequestId String?        @map("approval_request_id")
+  approvedAt        DateTime?      @map("approved_at")
+  receivedBy        String?        @map("received_by")
+  receivedAt        DateTime?      @map("received_at")
+  discrepancyCaseId String?        @map("discrepancy_case_id")
+  voidedAt          DateTime?      @map("voided_at")
+  voidedBy          String?        @map("voided_by")
+  voidReason        String?        @map("void_reason")
+  createdAt         DateTime       @default(now()) @map("created_at")
+  createdBy         String?        @map("created_by")
+  updatedAt         DateTime       @updatedAt @map("updated_at")
+  updatedBy         String?        @map("updated_by")
+
+  fromLocation Location       @relation("TransferFrom", fields: [fromLocationId], references: [id])
+  toLocation   Location       @relation("TransferTo", fields: [toLocationId], references: [id])
+  lines        TransferLine[]
+
+  @@unique([fromLocationId, controlNo])
+  @@index([toLocationId, status])
+  @@map("transfer_docs")
+}
+
+model TransferLine {
+  id                  String  @id @default(uuid())
+  docId               String  @map("doc_id")
+  productId           String  @map("product_id")
+  batchId             String  @map("batch_id")
+  qtySent             Int     @map("qty_sent")
+  qtyReceived         Int?    @map("qty_received")
+  checkerRemarks      String? @map("checker_remarks")
+  discrepancyNote     String? @map("discrepancy_note")
+  shortfallResolution String? @map("shortfall_resolution") // TO_SENDER | TO_RECEIVER | WRITEOFF
+
+  doc     TransferDoc @relation(fields: [docId], references: [id], onDelete: Cascade)
+  product Product     @relation(fields: [productId], references: [id])
+  batch   Batch       @relation(fields: [batchId], references: [id])
+
+  @@map("transfer_lines")
+}
+
+enum SalesChannel {
+  WALK_IN
+  DELIVERY
+  SHIPPING_COURIER
+  SHIPPING_MARKETPLACE
+  FRANCHISE
+  DEALER
+  AGENT
+  PERSONAL
+  OTHER
+}
+
+enum PaymentMode {
+  CASH
+  ONLINE
+  CREDIT_CARD
+  AR_PDC
+}
+
+enum CustomerType {
+  DEALER
+  FRANCHISE
+  AGENT
+  CONSIGNEE
+  CUSTOMER
+}
+
+model Customer {
+  id          String       @id @default(uuid())
+  code        String       @unique
+  name        String
+  type        CustomerType
+  locationId  String?      @map("location_id") // FRANCHISE/CONSIGNEE customers map to a Location
+  agentId     String?      @map("agent_id")
+  arAccountId String?      @map("ar_account_id")
+  contact     String?
+  phone       String?
+  address     String?
+  email       String?
+  active      Boolean      @default(true)
+  createdAt   DateTime     @default(now()) @map("created_at")
+  createdBy   String?      @map("created_by")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+
+  arAccount  Account?   @relation(fields: [arAccountId], references: [id])
+  salesDocs  SalesDoc[]
+  arPayments Payment[]
+
+  @@map("customers")
+}
+
+model Agent {
+  id          String   @id @default(uuid())
+  name        String
+  /// the Agent's own user account (role Agent): sees this agent's sales at every branch
+  userId      String?  @map("user_id")
+  locationId  String   @map("location_id")
+  onPayroll   Boolean  @default(false) @map("on_payroll")
+  defaultTier String   @default("AGENT") @map("default_tier")
+  employeeId  String?  @map("employee_id")
+  arAccountId String?  @map("ar_account_id")
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  location  Location   @relation(fields: [locationId], references: [id])
+  arAccount Account?   @relation(fields: [arAccountId], references: [id])
+  salesDocs SalesDoc[]
+
+  @@map("agents")
+}
+
+model Rider {
+  id         String   @id @default(uuid())
+  name       String
+  locationId String   @map("location_id")
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  location  Location   @relation(fields: [locationId], references: [id])
+  salesDocs SalesDoc[]
+
+  @@map("riders")
+}
+
+model SalesDoc {
+  id                         String       @id @default(uuid())
+  controlNo                  String       @map("control_no")
+  docDate                    DateTime     @map("doc_date") @db.Date
+  status                     DocStatus    @default(POSTED) // sales post to stock immediately
+  locationId                 String       @map("location_id")
+  channel                    SalesChannel
+  channelSub                 String?      @map("channel_sub") // e.g. CONSIGNMENT, SHOPEE, LAZADA, TIKTOK
+  customerId                 String?      @map("customer_id")
+  agentId                    String?      @map("agent_id")
+  riderId                    String?      @map("rider_id")
+  customerName               String?      @map("customer_name")
+  /// walk-in / online customer contact details captured at the sale (for the customer contact list)
+  customerPhone              String?      @map("customer_phone")
+  customerEmail              String?      @map("customer_email")
+  drSiNo                     String       @map("dr_si_no")
+  paymentMode                PaymentMode  @map("payment_mode")
+  paymentAccountId           String?      @map("payment_account_id")
+  proofOfPaymentAttachmentId String?      @map("proof_of_payment_attachment_id")
+  cardMid                    String?      @map("card_mid")
+  cardSlipNo                 String?      @map("card_slip_no")
+  cardApprovalCode           String?      @map("card_approval_code")
+  cardBatchNo                String?      @map("card_batch_no")
+  /// stickers given on this sale for the 6-Pack Card (owner request 2026-09-30)
+  sixPackStickers            Int          @default(0) @map("six_pack_stickers")
+  deliveryFee                Decimal      @default(0) @map("delivery_fee") @db.Decimal(14, 2)
+  riderIncentive             Decimal      @default(0) @map("rider_incentive") @db.Decimal(14, 2)
+  // incentive paid out of this sale's cash (owner request 2026-09-27): a branch expense deducted from the cash to remit
+  incentiveAmount            Decimal      @default(0) @map("incentive_amount") @db.Decimal(14, 2)
+  incentivePayee             String?      @map("incentive_payee")
+  incentiveExpenseId         String?      @map("incentive_expense_id")
+  shippingFee                Decimal      @default(0) @map("shipping_fee") @db.Decimal(14, 2)
+  shippingExpense            Decimal      @default(0) @map("shipping_expense") @db.Decimal(14, 2)
+  marketplaceCharges         Decimal      @default(0) @map("marketplace_charges") @db.Decimal(14, 2)
+  productTotal               Decimal      @default(0) @map("product_total") @db.Decimal(14, 2)
+  grandTotal                 Decimal      @default(0) @map("grand_total") @db.Decimal(14, 2)
+  amountPaid                 Decimal      @default(0) @map("amount_paid") @db.Decimal(14, 2)
+  dueDate                    DateTime?    @map("due_date") @db.Date
+  pdcBank                    String?      @map("pdc_bank")
+  pdcChequeNo                String?      @map("pdc_cheque_no")
+  pdcDate                    DateTime?    @map("pdc_date") @db.Date
+  notes                      String?
+  preparedBy                 String       @map("prepared_by")
+  specialPriceApprovalId     String?      @map("special_price_approval_id")
+  specialPriceStatus         String?      @map("special_price_status") // PENDING | APPROVED | REJECTED
+  discrepancyCaseId          String?      @map("discrepancy_case_id")
+  voidedAt                   DateTime?    @map("voided_at")
+  voidedBy                   String?      @map("voided_by")
+  voidReason                 String?      @map("void_reason")
+  createdAt                  DateTime     @default(now()) @map("created_at")
+  createdBy                  String?      @map("created_by")
+  updatedAt                  DateTime     @updatedAt @map("updated_at")
+  updatedBy                  String?      @map("updated_by")
+
+  location       Location            @relation(fields: [locationId], references: [id])
+  customer       Customer?           @relation(fields: [customerId], references: [id])
+  agent          Agent?              @relation(fields: [agentId], references: [id])
+  rider          Rider?              @relation(fields: [riderId], references: [id])
+  paymentAccount Account?            @relation(fields: [paymentAccountId], references: [id])
+  lines          SalesLine[]
+  payments       PaymentAllocation[]
+
+  @@unique([locationId, drSiNo])
+  @@index([locationId, docDate])
+  @@index([paymentMode, dueDate])
+  @@map("sales_docs")
+}
+
+model SalesLine {
+  id               String  @id @default(uuid())
+  docId            String  @map("doc_id")
+  productId        String  @map("product_id")
+  batchId          String  @map("batch_id")
+  qty              Int
+  priceTier        String  @map("price_tier")
+  tierPrice        Decimal @map("tier_price") @db.Decimal(14, 2) // tier price at time of sale
+  unitPrice        Decimal @map("unit_price") @db.Decimal(14, 2)
+  unitCost         Decimal @map("unit_cost") @db.Decimal(14, 2) // batch cost snapshot (redacted by role)
+  amount           Decimal @db.Decimal(14, 2)
+  isFreebie        Boolean @default(false) @map("is_freebie")
+  lineRemarks      String? @map("line_remarks")
+  nearExpiryWarn   Boolean @default(false) @map("near_expiry_warn")
+  specialPriceFlag String? @map("special_price_flag") // PENDING | APPROVED | REJECTED
+
+  doc     SalesDoc @relation(fields: [docId], references: [id], onDelete: Cascade)
+  product Product  @relation(fields: [productId], references: [id])
+  batch   Batch    @relation(fields: [batchId], references: [id])
+
+  @@map("sales_lines")
+}
+
+model Payment {
+  id                   String      @id @default(uuid())
+  creditNoteNo         String      @unique @map("credit_note_no")
+  customerId           String?     @map("customer_id")
+  amount               Decimal     @db.Decimal(14, 2)
+  discount             Decimal     @default(0) @db.Decimal(14, 2)
+  paymentMode          PaymentMode @map("payment_mode")
+  paymentAccountId     String?     @map("payment_account_id")
+  proofAttachmentId    String?     @map("proof_attachment_id")
+  receivedAt           DateTime    @map("received_at")
+  businessDate         DateTime    @map("business_date") @db.Date
+  notes                String?
+  /// POSTED = applied to the invoices; PENDING = entered by a branch, waiting for Accounting approval; REJECTED
+  status               String      @default("POSTED")
+  approvalRequestId    String?     @map("approval_request_id")
+  requestedSalesDocIds String[]    @default([]) @map("requested_sales_doc_ids")
+  locationId           String?     @map("location_id")
+  createdAt            DateTime    @default(now()) @map("created_at")
+  createdBy            String?     @map("created_by")
+  voidedAt             DateTime?   @map("voided_at")
+  voidedBy             String?     @map("voided_by")
+  voidReason           String?     @map("void_reason")
+
+  customer       Customer?           @relation(fields: [customerId], references: [id])
+  paymentAccount Account?            @relation(fields: [paymentAccountId], references: [id])
+  allocations    PaymentAllocation[]
+
+  @@map("payments")
+}
+
+model PaymentAllocation {
+  id         String  @id @default(uuid())
+  paymentId  String  @map("payment_id")
+  salesDocId String  @map("sales_doc_id")
+  amount     Decimal @db.Decimal(14, 2)
+
+  payment  Payment  @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  salesDoc SalesDoc @relation(fields: [salesDocId], references: [id])
+
+  @@map("payment_allocations")
+}
+
+model CashDeposit {
+  id                   String    @id @default(uuid())
+  locationId           String    @map("location_id")
+  businessDate         DateTime  @map("business_date") @db.Date
+  amount               Decimal   @db.Decimal(14, 2)
+  bankAccountId        String    @map("bank_account_id")
+  depositedAt          DateTime  @map("deposited_at") @db.Date
+  slipAttachmentId     String?   @map("slip_attachment_id")
+  createdAt            DateTime  @default(now()) @map("created_at")
+  createdBy            String?   @map("created_by")
+  /// the deposit slip is checked by the Audit Associate, then the Accounting Associate (owner request 2026-09-30): PENDING_AUDIT → PENDING_ACCOUNTING → VERIFIED | REJECTED
+  status               String    @default("PENDING_AUDIT")
+  auditVerifiedBy      String?   @map("audit_verified_by")
+  auditVerifiedAt      DateTime? @map("audit_verified_at")
+  accountingVerifiedBy String?   @map("accounting_verified_by")
+  accountingVerifiedAt DateTime? @map("accounting_verified_at")
+  rejectedBy           String?   @map("rejected_by")
+  rejectedAt           DateTime? @map("rejected_at")
+  rejectReason         String?   @map("reject_reason")
+  approvalRequestId    String?   @map("approval_request_id")
+
+  bankAccount Account @relation(fields: [bankAccountId], references: [id])
+
+  @@map("cash_deposits")
+}
+
+enum PaidFrom {
+  CASH_DRAWER
+  PETTY_CASH
+  BANK_ACCOUNT
+  OWNER_ADVANCE
+}
+
+model ExpenseDoc {
+  id                String    @id @default(uuid())
+  controlNo         String    @map("control_no")
+  docDate           DateTime  @map("doc_date") @db.Date
+  status            DocStatus @default(POSTED)
+  locationId        String    @map("location_id")
+  accountId         String    @map("account_id")
+  payee             String?
+  amount            Decimal   @db.Decimal(14, 2)
+  paidFrom          PaidFrom  @map("paid_from")
+  paidFromAccountId String?   @map("paid_from_account_id")
+  notes             String?
+  preparedBy        String    @map("prepared_by")
+  isMain            Boolean   @default(false) @map("is_main")
+  voidedAt          DateTime? @map("voided_at")
+  voidedBy          String?   @map("voided_by")
+  voidReason        String?   @map("void_reason")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  createdBy         String?   @map("created_by")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+  updatedBy         String?   @map("updated_by")
+
+  location        Location @relation(fields: [locationId], references: [id])
+  account         Account  @relation("ExpenseAccount", fields: [accountId], references: [id])
+  paidFromAccount Account? @relation("ExpensePaidFrom", fields: [paidFromAccountId], references: [id])
+
+  @@unique([locationId, controlNo])
+  @@index([locationId, docDate])
+  @@map("expense_docs")
+}
+
+model FranchiseExpense {
+  id         String    @id @default(uuid())
+  locationId String    @map("location_id")
+  docDate    DateTime  @map("doc_date") @db.Date
+  category   String // Rent, Utilities, Salaries, Supplies, Delivery, Marketing, Others
+  payee      String?
+  amount     Decimal   @db.Decimal(14, 2)
+  notes      String?
+  createdAt  DateTime  @default(now()) @map("created_at")
+  createdBy  String?   @map("created_by")
+  voidedAt   DateTime? @map("voided_at")
+  voidedBy   String?   @map("voided_by")
+  voidReason String?   @map("void_reason")
+
+  location Location @relation(fields: [locationId], references: [id])
+
+  @@map("franchise_expenses")
+}
+
+model DailyClose {
+  id                String   @id @default(uuid())
+  locationId        String   @map("location_id")
+  businessDate      DateTime @map("business_date") @db.Date
+  closedAt          DateTime @map("closed_at")
+  closedBy          String?  @map("closed_by") // null = job
+  cashSales         Decimal  @default(0) @map("cash_sales") @db.Decimal(14, 2)
+  cashExpenses      Decimal  @default(0) @map("cash_expenses") @db.Decimal(14, 2)
+  expectedCash      Decimal  @default(0) @map("expected_cash") @db.Decimal(14, 2)
+  countedCash       Decimal? @map("counted_cash") @db.Decimal(14, 2)
+  cashVariance      Decimal? @map("cash_variance") @db.Decimal(14, 2)
+  moneyBreakdown    Json?    @map("money_breakdown") // {1000: n, 500: n, ...}
+  totalCashDeposit  Decimal  @default(0) @map("total_cash_deposit") @db.Decimal(14, 2)
+  /// cash taken from the day's cash sales to replenish the branch cash fund
+  fundReplenishment Decimal  @default(0) @map("fund_replenishment") @db.Decimal(14, 2)
+  /// charge form created when a cash shortage is charged to staff
+  chargeFormId      String?  @map("charge_form_id")
+
+  location Location @relation(fields: [locationId], references: [id])
+
+  @@unique([locationId, businessDate])
+  @@map("daily_closes")
+}
+
+model PostCloseEdit {
+  id                String    @id @default(uuid())
+  documentType      String    @map("document_type")
+  documentId        String    @map("document_id")
+  locationId        String    @map("location_id")
+  requestedBy       String    @map("requested_by")
+  reason            String
+  before            Json
+  after             Json
+  approvalRequestId String    @map("approval_request_id")
+  appliedAt         DateTime? @map("applied_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+
+  @@map("post_close_edits")
+}
+
+model CountDoc {
+  id          String    @id @default(uuid())
+  controlNo   String    @map("control_no")
+  /// AUDIT = Field Auditor / auditor count (opens a discrepancy case); WEEKLY = the sales associate's own weekly count (recorded for compliance)
+  countType   String    @default("AUDIT") @map("count_type")
+  status      DocStatus @default(DRAFT)
+  locationId  String    @map("location_id")
+  countDate   DateTime  @map("count_date") @db.Date
+  countedBy   String    @map("counted_by")
+  notes       String?
+  submittedAt DateTime? @map("submitted_at")
+  voidedAt    DateTime? @map("voided_at")
+  voidedBy    String?   @map("voided_by")
+  voidReason  String?   @map("void_reason")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  createdBy   String?   @map("created_by")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  location        Location         @relation(fields: [locationId], references: [id])
+  lines           CountLine[]
+  discrepancyCase DiscrepancyCase?
+
+  @@unique([locationId, controlNo])
+  @@map("count_docs")
+}
+
+model CountLine {
+  id        String  @id @default(uuid())
+  docId     String  @map("doc_id")
+  productId String  @map("product_id")
+  /// system count at the start of the count date (pre-filled on the sheet)
+  beginQty  Int     @default(0) @map("begin_qty")
+  /// expected on-hand when the count is submitted (beginning ± the day's movements)
+  systemQty Int     @map("system_qty")
+  actualQty Int?    @map("actual_qty")
+  variance  Int     @default(0)
+  remarks   String?
+
+  doc     CountDoc @relation(fields: [docId], references: [id], onDelete: Cascade)
+  product Product  @relation(fields: [productId], references: [id])
+
+  @@unique([docId, productId])
+  @@map("count_lines")
+}
+
+enum DiscrepancyStatus {
+  OPEN
+  RESOLVED
+  FINALIZED
+}
+
+model DiscrepancyCase {
+  caseNo                 String?           @unique @map("case_no")
+  id                     String            @id @default(uuid())
+  countDocId             String            @unique @map("count_doc_id")
+  status                 DiscrepancyStatus @default(OPEN)
+  deadline               DateTime
+  resolvedAt             DateTime?         @map("resolved_at")
+  resolvedBy             String?           @map("resolved_by")
+  resolutionNote         String?           @map("resolution_note")
+  finalReportGeneratedAt DateTime?         @map("final_report_generated_at")
+  chargeFormId           String?           @unique @map("charge_form_id")
+  createdAt              DateTime          @default(now()) @map("created_at")
+  updatedAt              DateTime          @updatedAt @map("updated_at")
+
+  countDoc   CountDoc    @relation(fields: [countDocId], references: [id])
+  chargeForm ChargeForm? @relation(fields: [chargeFormId], references: [id])
+
+  @@map("discrepancy_cases")
+}
+
+enum ChargeKind {
+  INVENTORY_DISCREPANCY
+  EXPIRED
+  DAMAGED
+  CASH_SHORTAGE
+  OTHER
+}
+
+model ChargeForm {
+  id                       String     @id @default(uuid())
+  controlNo                String     @unique @map("control_no")
+  /// What the charge is for; set automatically by the source document (write-off, daily close, count) or chosen for manual forms.
+  kind                     ChargeKind @default(INVENTORY_DISCREPANCY)
+  sourceType               String?    @map("source_type") // ExpiryWriteoffDoc | DailyClose | DiscrepancyCase
+  sourceId                 String?    @map("source_id")
+  locationId               String     @map("location_id")
+  discrepancyCaseId        String?    @map("discrepancy_case_id")
+  reason                   String? // for manual charge forms
+  totalAmount              Decimal    @default(0) @map("total_amount") @db.Decimal(14, 2)
+  finalizedByHrAt          DateTime?  @map("finalized_by_hr_at")
+  finalizedBy              String?    @map("finalized_by")
+  payrollDeductionSchedule Json?      @map("payroll_deduction_schedule") // [{employeeId, periods, perPeriod}]
+  createdAt                DateTime   @default(now()) @map("created_at")
+  createdBy                String?    @map("created_by")
+  updatedAt                DateTime   @updatedAt @map("updated_at")
+
+  location        Location               @relation(fields: [locationId], references: [id])
+  lines           ChargeFormLine[]
+  allocations     ChargeFormAllocation[]
+  discrepancyCase DiscrepancyCase?
+
+  @@map("charge_forms")
+}
+
+model ChargeFormLine {
+  id           String   @id @default(uuid())
+  chargeFormId String   @map("charge_form_id")
+  productId    String?  @map("product_id") // null for amount-only lines (cash shortage, lost equipment…)
+  description  String?
+  qty          Int
+  unitCharge   Decimal  @map("unit_charge") @db.Decimal(14, 2) // franchise-tier price in effect
+  batchCost    Decimal? @map("batch_cost") @db.Decimal(14, 2) // for R11 (never serialized to HR)
+  amount       Decimal  @db.Decimal(14, 2)
+
+  chargeForm ChargeForm @relation(fields: [chargeFormId], references: [id], onDelete: Cascade)
+  product    Product?   @relation(fields: [productId], references: [id])
+
+  @@map("charge_form_lines")
+}
+
+model ChargeFormAllocation {
+  id             String    @id @default(uuid())
+  chargeFormId   String    @map("charge_form_id")
+  employeeId     String    @map("employee_id")
+  amount         Decimal   @db.Decimal(14, 2)
+  deductedToDate Decimal   @default(0) @map("deducted_to_date") @db.Decimal(14, 2)
+  /// The charged employee acknowledges in the app (Salary Deduction Authorization) — no paper upload.
+  acknowledgedAt DateTime? @map("acknowledged_at")
+  acknowledgedBy String?   @map("acknowledged_by")
+
+  chargeForm ChargeForm @relation(fields: [chargeFormId], references: [id], onDelete: Cascade)
+  employee   Employee   @relation(fields: [employeeId], references: [id])
+
+  @@map("charge_form_allocations")
+}
+
+enum WriteoffReason {
+  EXPIRED
+  DAMAGED
+  SPOILED
+}
+
+model ExpiryWriteoffDoc {
+  id                String    @id @default(uuid())
+  controlNo         String    @map("control_no")
+  docDate           DateTime  @map("doc_date") @db.Date
+  status            DocStatus @default(DRAFT)
+  locationId        String    @map("location_id")
+  notes             String?
+  preparedBy        String    @map("prepared_by")
+  approvalRequestId String?   @map("approval_request_id")
+  /// COMPANY = expensed (R9); STAFF = charged to the listed employees (charge form, R11 when HR finalizes)
+  chargeTo          String    @default("COMPANY") @map("charge_to")
+  chargeEmployeeIds String[]  @default([]) @map("charge_employee_ids")
+  chargeFormId      String?   @map("charge_form_id")
+  postedAt          DateTime? @map("posted_at")
+  voidedAt          DateTime? @map("voided_at")
+  voidedBy          String?   @map("voided_by")
+  voidReason        String?   @map("void_reason")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  createdBy         String?   @map("created_by")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  location Location             @relation(fields: [locationId], references: [id])
+  lines    ExpiryWriteoffLine[]
+
+  @@unique([locationId, controlNo])
+  @@map("expiry_writeoff_docs")
+}
+
+model ExpiryWriteoffLine {
+  id        String         @id @default(uuid())
+  docId     String         @map("doc_id")
+  productId String         @map("product_id")
+  batchId   String         @map("batch_id")
+  qty       Int
+  reason    WriteoffReason
+
+  doc     ExpiryWriteoffDoc @relation(fields: [docId], references: [id], onDelete: Cascade)
+  product Product           @relation(fields: [productId], references: [id])
+  batch   Batch             @relation(fields: [batchId], references: [id])
+
+  @@map("expiry_writeoff_lines")
+}
+
+enum ConsignmentDirection {
+  OUT
+  IN
+}
+
+enum ValuationBasis {
+  SRP
+  COST
+  CONSIGNEE_PRICE
+}
+
+model ConsignmentAgreement {
+  id                     String               @id @default(uuid())
+  direction              ConsignmentDirection
+  counterpartyLocationId String?              @map("counterparty_location_id")
+  supplierId             String?              @map("supplier_id")
+  valuationBasis         ValuationBasis       @default(COST) @map("valuation_basis")
+  settlementTerms        String?              @map("settlement_terms")
+  active                 Boolean              @default(true)
+  createdAt              DateTime             @default(now()) @map("created_at")
+  createdBy              String?              @map("created_by")
+  updatedAt              DateTime             @updatedAt @map("updated_at")
+
+  counterpartyLocation Location?               @relation("ConsigneeLocation", fields: [counterpartyLocationId], references: [id])
+  supplier             Supplier?               @relation("ConsignorSupplier", fields: [supplierId], references: [id])
+  saleReports          ConsignmentSaleReport[]
+
+  @@map("consignment_agreements")
+}
+
+model ConsignmentSaleReport {
+  id          String   @id @default(uuid())
+  agreementId String   @map("agreement_id")
+  periodFrom  DateTime @map("period_from") @db.Date
+  periodTo    DateTime @map("period_to") @db.Date
+  salesDocId  String?  @map("sales_doc_id")
+  notes       String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  createdBy   String?  @map("created_by")
+
+  agreement ConsignmentAgreement  @relation(fields: [agreementId], references: [id])
+  lines     ConsignmentSaleLine[]
+
+  @@map("consignment_sale_reports")
+}
+
+model ConsignmentSaleLine {
+  id        String  @id @default(uuid())
+  reportId  String  @map("report_id")
+  productId String  @map("product_id")
+  qty       Int
+  unitPrice Decimal @map("unit_price") @db.Decimal(14, 2)
+
+  report  ConsignmentSaleReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  product Product               @relation(fields: [productId], references: [id])
+
+  @@map("consignment_sale_lines")
+}
+
+model PriceChangeDoc {
+  id                   String    @id @default(uuid())
+  controlNo            String    @unique @map("control_no")
+  status               DocStatus @default(DRAFT)
+  effectiveFrom        DateTime  @map("effective_from") @db.Date
+  notes                String?
+  preparedBy           String    @map("prepared_by")
+  approvalRequestId    String?   @map("approval_request_id")
+  revaluationRequestId String?   @map("revaluation_request_id")
+  revaluationStatus    String?   @map("revaluation_status") // PENDING | APPROVED | DECLINED | NOT_NEEDED
+  appliedAt            DateTime? @map("applied_at")
+  notifiedAt           DateTime? @map("notified_at")
+  createdAt            DateTime  @default(now()) @map("created_at")
+  createdBy            String?   @map("created_by")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
+
+  lines PriceChangeLine[]
+
+  @@map("price_change_docs")
+}
+
+model PriceChangeLine {
+  id        String   @id @default(uuid())
+  docId     String   @map("doc_id")
+  productId String   @map("product_id")
+  tier      String? // null when line is cost-only
+  oldPrice  Decimal? @map("old_price") @db.Decimal(14, 2)
+  newPrice  Decimal? @map("new_price") @db.Decimal(14, 2)
+  costOld   Decimal? @map("cost_old") @db.Decimal(14, 2)
+  costNew   Decimal? @map("cost_new") @db.Decimal(14, 2)
+
+  doc     PriceChangeDoc @relation(fields: [docId], references: [id], onDelete: Cascade)
+  product Product        @relation(fields: [productId], references: [id])
+
+  @@map("price_change_lines")
+}
+
+model RevaluationEntry {
+  id               String   @id @default(uuid())
+  priceChangeDocId String   @map("price_change_doc_id")
+  productId        String   @map("product_id")
+  costOld          Decimal  @map("cost_old") @db.Decimal(14, 2)
+  costNew          Decimal  @map("cost_new") @db.Decimal(14, 2)
+  totalGain        Decimal  @map("total_gain") @db.Decimal(14, 2)
+  postedAt         DateTime @default(now()) @map("posted_at")
+  voucherId        String?  @map("voucher_id")
+
+  lines RevaluationLine[]
+
+  @@map("revaluation_entries")
+}
+
+model RevaluationLine {
+  id         String  @id @default(uuid())
+  entryId    String  @map("entry_id")
+  locationId String  @map("location_id")
+  batchId    String  @map("batch_id")
+  qty        Int
+  gain       Decimal @db.Decimal(14, 2)
+
+  entry RevaluationEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  batch Batch            @relation(fields: [batchId], references: [id])
+
+  @@map("revaluation_lines")
+}
+
+// ───────────────────────────── Approvals, notifications, audit ─────────────────────────────
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  AUTO_APPROVED
+  CANCELLED
+}
+
+model ApprovalRequest {
+  id                      String         @id @default(uuid())
+  type                    String // COST_ON_RECEIVING, TRANSFER_INTERNAL, ...
+  documentType            String         @map("document_type")
+  documentId              String         @map("document_id")
+  requestedBy             String         @map("requested_by")
+  requiredApproverRoles   String[]       @map("required_approver_roles")
+  /// Person-targeted requests (e.g. WAREHOUSE_EDIT: the associate who entered the document must accept the In-Charge's edit). Empty = role routing.
+  requiredApproverUserIds String[]       @default([]) @map("required_approver_user_ids")
+  anyOf                   Boolean        @default(false) @map("any_of") // true = any one listed role suffices
+  status                  ApprovalStatus @default(PENDING)
+  summary                 Json? // snapshot shown inline in the inbox
+  autoApproveAt           DateTime?      @map("auto_approve_at")
+  decidedAt               DateTime?      @map("decided_at")
+  discrepancyCaseId       String?        @map("discrepancy_case_id")
+  createdAt               DateTime       @default(now()) @map("created_at")
+  updatedAt               DateTime       @updatedAt @map("updated_at")
+
+  decisions ApprovalDecision[]
+
+  @@index([status, type])
+  @@index([documentType, documentId])
+  @@map("approval_requests")
+}
+
+model ApprovalDecision {
+  id        String   @id @default(uuid())
+  requestId String   @map("request_id")
+  userId    String   @map("user_id")
+  roleKey   String   @map("role_key")
+  decision  String // APPROVE | REJECT
+  note      String?
+  decidedAt DateTime @default(now()) @map("decided_at")
+
+  request ApprovalRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  user    User            @relation(fields: [userId], references: [id])
+
+  @@map("approval_decisions")
+}
+
+model Notification {
+  id        String    @id @default(uuid())
+  userId    String    @map("user_id")
+  type      String
+  title     String
+  body      String?
+  link      String?
+  readAt    DateTime? @map("read_at")
+  emailedAt DateTime? @map("emailed_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt])
+  @@map("notifications")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  userId     String?  @map("user_id")
+  action     String // CREATE | UPDATE | VOID | APPROVE | LOGIN | LOGIN_FAILED | EXPORT | PERMISSION_CHANGE ...
+  entityType String   @map("entity_type")
+  entityId   String?  @map("entity_id")
+  before     Json?
+  after      Json?
+  ip         String?
+  userAgent  String?  @map("user_agent")
+  at         DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([entityType, entityId])
+  @@index([userId, at])
+  @@map("audit_log")
+}
+
+model Setting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt @map("updated_at")
+  updatedBy String?  @map("updated_by")
+
+  @@map("settings")
+}
+
+model AlertState {
+  id         String   @id @default(uuid())
+  kind       String // MIN_STOCK | EXPIRY_T6 | EXPIRY_MONTHLY | EXPIRED | AR_OVERDUE
+  refKey     String   @map("ref_key") // e.g. `${locationId}:${productId}` or batchId
+  lastSentAt DateTime @map("last_sent_at")
+
+  @@unique([kind, refKey])
+  @@map("alert_states")
+}
+
+// ───────────────────────────── Accounting (Phase 2) ─────────────────────────────
+
+enum AccountClass {
+  CASH
+  AR
+  INVENTORY
+  ADVANCES_TO
+  FIXED_ASSET
+  ACCUM_DEPN
+  CURRENT_LIABILITY
+  ADVANCES_FROM
+  EQUITY
+  REVENUE
+  DIRECT_COST
+  OPEX
+  OTHER_INCOME
+}
+
+enum NormalBalance {
+  DEBIT
+  CREDIT
+}
+
+enum EntryScope {
+  BRANCH
+  MAIN
+  BOTH
+}
+
+enum PaymentAccountType {
+  CASH_DRAWER
+  PETTY_CASH
+  BANK
+  GCASH
+  PLATFORM
+  CREDIT_CARD_SETTLEMENT
+}
+
+model AccountTemplate {
+  id           String       @id @default(uuid())
+  key          String       @unique // PETTY_CASH, CASH_ON_HAND, INV_SUPPLEMENTS, SALES_WALK_IN, ...
+  titlePattern String       @map("title_pattern") // "Petty Cash – {branch}"
+  class        AccountClass
+  channelTag   String?      @map("channel_tag")
+  entryScope   EntryScope   @default(BRANCH) @map("entry_scope")
+  appliesTo    String       @default("BRANCH") @map("applies_to") // BRANCH | FRANCHISE | BOTH
+  sortOrder    Int          @default(0) @map("sort_order")
+
+  accounts Account[]
+
+  @@map("account_templates")
+}
+
+model Account {
+  id                 String              @id @default(uuid())
+  code               String              @unique
+  title              String
+  class              AccountClass
+  normalBalance      NormalBalance       @map("normal_balance")
+  branchTagId        String?             @map("branch_tag_id")
+  channelTag         String?             @map("channel_tag")
+  entryScope         EntryScope          @default(MAIN) @map("entry_scope")
+  isPaymentAccount   Boolean             @default(false) @map("is_payment_account")
+  paymentAccountType PaymentAccountType? @map("payment_account_type")
+  counterpartyType   String?             @map("counterparty_type") // DEALER | FRANCHISE | AGENT | SUPPLIER | CONSIGNEE | EMPLOYEE
+  counterpartyId     String?             @map("counterparty_id")
+  templateId         String?             @map("template_id")
+  parentCode         String?             @map("parent_code")
+  sortOrder          Int                 @default(0) @map("sort_order")
+  active             Boolean             @default(true)
+  createdAt          DateTime            @default(now()) @map("created_at")
+  createdBy          String?             @map("created_by")
+  updatedAt          DateTime            @updatedAt @map("updated_at")
+  updatedBy          String?             @map("updated_by")
+
+  branchTag         Location?          @relation(fields: [branchTagId], references: [id])
+  template          AccountTemplate?   @relation(fields: [templateId], references: [id])
+  journalLines      JournalLine[]
+  expenseDocs       ExpenseDoc[]       @relation("ExpenseAccount")
+  expensePaidFrom   ExpenseDoc[]       @relation("ExpensePaidFrom")
+  salesDocs         SalesDoc[]
+  payments          Payment[]
+  cashDeposits      CashDeposit[]
+  suppliers         Supplier[]
+  customers         Customer[]
+  agents            Agent[]
+  fixedAssets       FixedAsset[]       @relation("AssetAccount")
+  accumDepnFor      FixedAsset[]       @relation("AccumDepnAccount")
+  beginningBalances BeginningBalance[]
+
+  @@index([class])
+  @@index([branchTagId])
+  @@map("accounts")
+}
+
+enum Book {
+  BENTA
+  GENERAL
+  ADVANCES
+  GASTOS_OPEX
+  GASTOS_DC
+}
+
+model JournalVoucher {
+  id                 String    @id @default(uuid())
+  voucherNo          String    @unique @map("voucher_no") // A-2026-000001 / M-2026-000001 / OB-2026
+  date               DateTime  @db.Date
+  book               Book
+  reference          String?
+  remarks            String?
+  name               String? // payee / payor
+  sourceDocumentType String?   @map("source_document_type")
+  sourceDocumentId   String?   @map("source_document_id")
+  rule               String? // R1..R14 for auto entries
+  isReversal         Boolean   @default(false) @map("is_reversal")
+  reversesVoucherId  String?   @map("reverses_voucher_id")
+  postedAt           DateTime  @default(now()) @map("posted_at")
+  createdBy          String?   @map("created_by")
+  voidedAt           DateTime? @map("voided_at")
+  voidedBy           String?   @map("voided_by")
+  voidReason         String?   @map("void_reason")
+
+  lines JournalLine[]
+
+  @@index([date])
+  @@index([sourceDocumentType, sourceDocumentId])
+  @@map("journal_vouchers")
+}
+
+model JournalLine {
+  id        String  @id @default(uuid())
+  voucherId String  @map("voucher_id")
+  lineNo    Int     @map("line_no")
+  accountId String  @map("account_id")
+  debit     Decimal @default(0) @db.Decimal(14, 2)
+  credit    Decimal @default(0) @db.Decimal(14, 2)
+  memo      String?
+
+  voucher JournalVoucher @relation(fields: [voucherId], references: [id], onDelete: Cascade)
+  account Account        @relation(fields: [accountId], references: [id])
+
+  @@index([accountId])
+  @@map("journal_lines")
+}
+
+model BeginningBalance {
+  id                String   @id @default(uuid())
+  fiscalYear        Int      @map("fiscal_year")
+  accountId         String   @map("account_id")
+  debit             Decimal  @default(0) @db.Decimal(14, 2)
+  credit            Decimal  @default(0) @db.Decimal(14, 2)
+  approvalRequestId String?  @map("approval_request_id")
+  postedVoucherId   String?  @map("posted_voucher_id")
+  createdAt         DateTime @default(now()) @map("created_at")
+  createdBy         String?  @map("created_by")
+
+  account Account @relation(fields: [accountId], references: [id])
+
+  @@unique([fiscalYear, accountId])
+  @@map("beginning_balances")
+}
+
+model AccountingPeriod {
+  id                String    @id @default(uuid())
+  year              Int
+  month             Int
+  locked            Boolean   @default(false)
+  lockedAt          DateTime? @map("locked_at")
+  lockedBy          String?   @map("locked_by")
+  approvalRequestId String?   @map("approval_request_id")
+
+  @@unique([year, month])
+  @@map("accounting_periods")
+}
+
+model VoucherSequence {
+  id     String @id @default(uuid())
+  prefix String // A | M
+  year   Int
+  nextNo Int    @default(1) @map("next_no")
+
+  @@unique([prefix, year])
+  @@map("voucher_sequences")
+}
+
+model FixedAsset {
+  id                 String   @id @default(uuid())
+  name               String
+  assetAccountId     String   @map("asset_account_id")
+  accumDepnAccountId String   @map("accum_depn_account_id")
+  cost               Decimal  @db.Decimal(14, 2)
+  salvageValue       Decimal  @default(0) @map("salvage_value") @db.Decimal(14, 2)
+  usefulLifeMonths   Int      @map("useful_life_months")
+  startDate          DateTime @map("start_date") @db.Date
+  locationId         String?  @map("location_id")
+  active             Boolean  @default(true)
+  createdAt          DateTime @default(now()) @map("created_at")
+
+  assetAccount     Account             @relation("AssetAccount", fields: [assetAccountId], references: [id])
+  accumDepnAccount Account             @relation("AccumDepnAccount", fields: [accumDepnAccountId], references: [id])
+  depreciations    DepreciationEntry[]
+
+  @@map("fixed_assets")
+}
+
+model DepreciationEntry {
+  id        String   @id @default(uuid())
+  assetId   String   @map("asset_id")
+  year      Int
+  month     Int
+  amount    Decimal  @db.Decimal(14, 2)
+  voucherId String?  @map("voucher_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  asset FixedAsset @relation(fields: [assetId], references: [id])
+
+  @@unique([assetId, year, month])
+  @@map("depreciation_entries")
+}
+
+// ───────────────────────────── Payroll / HR (Phase 2) ─────────────────────────────
+
+model Employee {
+  id           String   @id @default(uuid())
+  employeeNo   String   @unique @map("employee_no")
+  fullName     String   @map("full_name")
+  locationId   String?  @map("location_id") // cost centre
+  position     String?
+  basicRate    Decimal  @default(0) @map("basic_rate") @db.Decimal(14, 2)
+  payFrequency String   @default("SEMI_MONTHLY") @map("pay_frequency")
+  sssNo        String?  @map("sss_no")
+  phicNo       String?  @map("phic_no")
+  hdmfNo       String?  @map("hdmf_no")
+  bankAccount  String?  @map("bank_account")
+  userId       String?  @unique @map("user_id")
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now()) @map("created_at")
+  createdBy    String?  @map("created_by")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  location          Location?              @relation(fields: [locationId], references: [id])
+  user              User?                  @relation(fields: [userId], references: [id])
+  payrollLines      PayrollLine[]
+  loans             EmployeeLoan[]
+  chargeAllocations ChargeFormAllocation[]
+
+  @@map("employees")
+}
+
+model EmployeeLoan {
+  id         String   @id @default(uuid())
+  employeeId String   @map("employee_id")
+  kind       String // SSS_LOAN | HDMF_LOAN | VALE | ADVANCE
+  principal  Decimal  @db.Decimal(14, 2)
+  balance    Decimal  @db.Decimal(14, 2)
+  perPeriod  Decimal  @map("per_period") @db.Decimal(14, 2)
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  employee Employee @relation(fields: [employeeId], references: [id])
+
+  @@map("employee_loans")
+}
+
+enum PayrollStatus {
+  DRAFT
+  FINALIZED
+  CLOSED
+}
+
+model PayrollRun {
+  id                String        @id @default(uuid())
+  periodFrom        DateTime      @map("period_from") @db.Date
+  periodTo          DateTime      @map("period_to") @db.Date
+  status            PayrollStatus @default(DRAFT)
+  finalizedAt       DateTime?     @map("finalized_at")
+  finalizedBy       String?       @map("finalized_by")
+  closedAt          DateTime?     @map("closed_at")
+  closedBy          String?       @map("closed_by")
+  paidFromAccountId String?       @map("paid_from_account_id")
+  finalizeVoucherId String?       @map("finalize_voucher_id")
+  closeVoucherId    String?       @map("close_voucher_id")
+  createdAt         DateTime      @default(now()) @map("created_at")
+  createdBy         String?       @map("created_by")
+
+  lines PayrollLine[]
+
+  @@map("payroll_runs")
+}
+
+model PayrollLine {
+  id                     String  @id @default(uuid())
+  runId                  String  @map("run_id")
+  employeeId             String  @map("employee_id")
+  basic                  Decimal @default(0) @db.Decimal(14, 2)
+  overtime               Decimal @default(0) @db.Decimal(14, 2)
+  incentives             Decimal @default(0) @db.Decimal(14, 2)
+  thirteenthMonthAccrual Decimal @default(0) @map("thirteenth_month_accrual") @db.Decimal(14, 2)
+  sssEe                  Decimal @default(0) @map("sss_ee") @db.Decimal(14, 2)
+  sssEr                  Decimal @default(0) @map("sss_er") @db.Decimal(14, 2)
+  phicEe                 Decimal @default(0) @map("phic_ee") @db.Decimal(14, 2)
+  phicEr                 Decimal @default(0) @map("phic_er") @db.Decimal(14, 2)
+  hdmfEe                 Decimal @default(0) @map("hdmf_ee") @db.Decimal(14, 2)
+  hdmfEr                 Decimal @default(0) @map("hdmf_er") @db.Decimal(14, 2)
+  loans                  Decimal @default(0) @db.Decimal(14, 2)
+  chargeDeductions       Decimal @default(0) @map("charge_deductions") @db.Decimal(14, 2)
+  otherDeductions        Decimal @default(0) @map("other_deductions") @db.Decimal(14, 2)
+  netPay                 Decimal @default(0) @map("net_pay") @db.Decimal(14, 2)
+
+  run      PayrollRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  employee Employee   @relation(fields: [employeeId], references: [id])
+
+  @@unique([runId, employeeId])
+  @@map("payroll_lines")
+}
+
+model ContributionTable {
+  id            String   @id @default(uuid())
+  kind          String // SSS | PHIC | HDMF
+  effectiveFrom DateTime @map("effective_from") @db.Date
+  rows          Json // [{from, to, ee, er}] or {rateEe, rateEr, min, max}
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@map("contribution_tables")
+}
+
+/// Branch cash fund (imprest / revolving fund): small expenses are paid from it and it is topped back up from the day's cash sales.
+model CashFund {
+  id            String   @id @default(uuid())
+  locationId    String   @unique @map("location_id")
+  imprestAmount Decimal  @map("imprest_amount") @db.Decimal(14, 2)
+  balance       Decimal  @db.Decimal(14, 2)
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now()) @map("created_at")
+  createdBy     String?  @map("created_by")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  location Location      @relation(fields: [locationId], references: [id])
+  txns     CashFundTxn[]
+
+  @@map("cash_funds")
+}
+
+model CashFundTxn {
+  controlNo    String?  @unique @map("control_no") // replenishment voucher number, e.g. WA-FR-000004
+  id           String   @id @default(uuid())
+  fundId       String   @map("fund_id")
+  locationId   String   @map("location_id")
+  businessDate DateTime @map("business_date") @db.Date
+  kind         String // SETUP | TOP_UP | EXPENSE | EXPENSE_VOID | REPLENISH | ADJUST
+  amount       Decimal  @db.Decimal(14, 2) // signed: + into the fund, − out of it
+  balanceAfter Decimal  @map("balance_after") @db.Decimal(14, 2)
+  expenseDocId String?  @map("expense_doc_id")
+  notes        String?
+  createdBy    String?  @map("created_by")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  fund CashFund @relation(fields: [fundId], references: [id])
+
+  @@index([locationId, businessDate])
+  @@map("cash_fund_txns")
+}
+
+/// Field Auditor's count of the cash fund actually found in the store vs the system balance.
+model CashFundCheck {
+  id            String   @id @default(uuid())
+  locationId    String   @map("location_id")
+  checkedAt     DateTime @default(now()) @map("checked_at")
+  countedAmount Decimal  @map("counted_amount") @db.Decimal(14, 2)
+  systemBalance Decimal  @map("system_balance") @db.Decimal(14, 2)
+  variance      Decimal  @db.Decimal(14, 2)
+  reason        String?
+  inspectionId  String?  @map("inspection_id")
+  checkedBy     String   @map("checked_by")
+
+  @@index([locationId, checkedAt])
+  @@map("cash_fund_checks")
+}
+
+/// Store Inspection Report (the Field Auditor's branch checklist: store, permits, stocks, staff) — submitted to HR, Admin and Head Auditor notified.
+model StoreInspection {
+  id                    String    @id @default(uuid())
+  controlNo             String    @unique @map("control_no")
+  locationId            String    @map("location_id")
+  inspectionDate        DateTime  @map("inspection_date") @db.Date
+  inspectorId           String    @map("inspector_id")
+  staffOnDutyEmployeeId String?   @map("staff_on_duty_employee_id")
+  staffOnDutyName       String?   @map("staff_on_duty_name")
+  items                 Json // [{key, status: COMPLIED|NO|NA, date?, amount?, reason?}]
+  comments              String?
+  cashFundCounted       Decimal?  @map("cash_fund_counted") @db.Decimal(14, 2)
+  cashFundSystem        Decimal?  @map("cash_fund_system") @db.Decimal(14, 2)
+  status                String    @default("DRAFT") // DRAFT | SUBMITTED | REVIEWED
+  submittedAt           DateTime? @map("submitted_at")
+  staffAcknowledgedAt   DateTime? @map("staff_acknowledged_at")
+  staffAcknowledgedBy   String?   @map("staff_acknowledged_by")
+  hrReviewedAt          DateTime? @map("hr_reviewed_at")
+  hrReviewedBy          String?   @map("hr_reviewed_by")
+  hrNotes               String?   @map("hr_notes")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  location Location @relation(fields: [locationId], references: [id])
+
+  @@index([locationId, inspectionDate])
+  @@map("store_inspections")
+}
+
+/// Every approved correction of someone's document (owner request 2026-09-26): who made the original, who asked, who approved, what
+/// changed. Used to see which staff have many errors in their reports.
+model DocumentRevision {
+  id           String   @id @default(uuid())
+  source       String // AUDIT_REVISION | POST_CLOSE_EDIT | WAREHOUSE_EDIT | COUNT_REVISION
+  documentType String   @map("document_type")
+  documentId   String   @map("document_id")
+  controlNo    String?  @map("control_no")
+  locationId   String?  @map("location_id")
+  staffUserId  String?  @map("staff_user_id") // the person whose document was corrected
+  requestedBy  String?  @map("requested_by")
+  approvedBy   String?  @map("approved_by")
+  reason       String?
+  changes      Json?
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([staffUserId, createdAt])
+  @@index([documentType, documentId])
+  @@map("document_revisions")
+}
+
+/// Monthly remittance of government contributions (EE share deducted + ER share) to SSS / PhilHealth / Pag-IBIG.
+model ContributionRemittance {
+  id                String   @id @default(uuid())
+  kind              String // SSS | PHIC | HDMF
+  year              Int
+  month             Int
+  amountEe          Decimal  @map("amount_ee") @db.Decimal(14, 2)
+  amountEr          Decimal  @map("amount_er") @db.Decimal(14, 2)
+  total             Decimal  @db.Decimal(14, 2)
+  referenceNo       String   @map("reference_no")
+  paidAt            DateTime @map("paid_at") @db.Date
+  paidFromAccountId String?  @map("paid_from_account_id")
+  voucherId         String?  @map("voucher_id")
+  createdBy         String?  @map("created_by")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  @@unique([kind, year, month])
+  @@map("contribution_remittances")
+}
+
+// Session store lives in Redis; this table records login devices for audit.
+model LoginSessionRecord {
+  id        String    @id @default(uuid())
+  userId    String    @map("user_id")
+  sessionId String    @unique @map("session_id")
+  ip        String?
+  userAgent String?   @map("user_agent")
+  createdAt DateTime  @default(now()) @map("created_at")
+  revokedAt DateTime? @map("revoked_at")
+
+  @@map("login_session_records")
+}
+
+/// Every selling price or supplier cost change, for the dashboard "Price updates" list (tier null = supplier cost).
+model PriceUpdateLog {
+  id            String   @id @default(uuid())
+  productId     String   @map("product_id")
+  productName   String   @map("product_name")
+  tier          String?
+  oldValue      Decimal? @map("old_value") @db.Decimal(14, 2)
+  newValue      Decimal? @map("new_value") @db.Decimal(14, 2)
+  effectiveFrom DateTime @map("effective_from") @db.Date
+  source        String
+  sourceRef     String?  @map("source_ref")
+  link          String?
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@index([createdAt])
+  @@map("price_update_logs")
+}
+
+/// Salary a franchise owner pays their own associate (not company payroll; HR has no access). Posted as a franchise expense.
+model FranchiseSalary {
+  id              String    @id @default(uuid())
+  locationId      String    @map("location_id")
+  userId          String    @map("user_id")
+  periodFrom      DateTime  @map("period_from") @db.Date
+  periodTo        DateTime  @map("period_to") @db.Date
+  basic           Decimal   @db.Decimal(14, 2)
+  allowances      Decimal   @default(0) @db.Decimal(14, 2)
+  otherDeductions Decimal   @default(0) @map("other_deductions") @db.Decimal(14, 2)
+  chargesDeducted Decimal   @default(0) @map("charges_deducted") @db.Decimal(14, 2)
+  netPay          Decimal   @map("net_pay") @db.Decimal(14, 2)
+  notes           String?
+  expenseId       String?   @map("expense_id")
+  createdBy       String?   @map("created_by")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  voidedAt        DateTime? @map("voided_at")
+
+  @@index([locationId, userId])
+  @@map("franchise_salaries")
+}
+
+/// Charge a franchise owner makes to their own associate (shortage, damage, discrepancy); deducted from the franchise salary.
+model FranchiseCharge {
+  id                 String    @id @default(uuid())
+  locationId         String    @map("location_id")
+  userId             String    @map("user_id")
+  kind               String    @default("OTHER")
+  reason             String
+  amount             Decimal   @db.Decimal(14, 2)
+  sourceChargeFormId String?   @map("source_charge_form_id")
+  salaryId           String?   @map("salary_id")
+  acknowledgedAt     DateTime? @map("acknowledged_at")
+  createdBy          String?   @map("created_by")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  voidedAt           DateTime? @map("voided_at")
+
+  @@index([locationId, userId])
+  @@map("franchise_charges")
+}
+
+/// A branch asks for more days to deposit one day's cash; the Head Auditor and Admin both approve (owner request 2026-09-27).
+model CashDepositExtension {
+  id                String    @id @default(uuid())
+  locationId        String    @map("location_id")
+  businessDate      DateTime  @map("business_date") @db.Date
+  requestedUntil    DateTime  @map("requested_until") @db.Date
+  reason            String
+  status            String    @default("PENDING") // PENDING | APPROVED | REJECTED
+  approvalRequestId String?   @map("approval_request_id")
+  requestedBy       String    @map("requested_by")
+  decidedAt         DateTime? @map("decided_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+
+  @@index([locationId, businessDate])
+  @@map("cash_deposit_extensions")
+}
+
+/// Something HR must act on, e.g. a Notice to Explain for cash not deposited on time (owner request 2026-09-27).
+model HrNotice {
+  id         String    @id @default(uuid())
+  kind       String // CASH_DEPOSIT_OVERDUE
+  dedupeKey  String    @unique @map("dedupe_key")
+  locationId String?   @map("location_id")
+  title      String
+  details    Json?
+  staffIds   Json?     @map("staff_ids") // users on duty at the branch
+  status     String    @default("OPEN") // OPEN | NTE_ISSUED | CLOSED
+  note       String?
+  createdAt  DateTime  @default(now()) @map("created_at")
+  resolvedAt DateTime? @map("resolved_at")
+  resolvedBy String?   @map("resolved_by")
+
+  @@index([status])
+  @@map("hr_notices")
+}
+
+/// The day's Daily Branch Sales Report as submitted by the branch ("true and correct"), or submitted automatically at the cut-off
+/// with whatever was entered by then (owner request 2026-09-27). Later changes go through post-close revision requests.
+model SalesReportSubmission {
+  id              String   @id @default(uuid())
+  locationId      String   @map("location_id")
+  businessDate    DateTime @map("business_date") @db.Date
+  status          String // SUBMITTED | AUTO_SUBMITTED
+  submittedBy     String?  @map("submitted_by")
+  submittedAt     DateTime @default(now()) @map("submitted_at")
+  acknowledgement String?
+  overallSales    Decimal  @default(0) @map("overall_sales") @db.Decimal(14, 2)
+  cashDeposit     Decimal  @default(0) @map("cash_deposit") @db.Decimal(14, 2)
+  snapshot        Json
+
+  @@unique([locationId, businessDate])
+  @@map("sales_report_submissions")
+}
+
+/// A customer who bought an item with a known consumption period: when it is probably used up, the store is reminded to call,
+/// and an SMS / email can be sent (owner request 2026-09-27).
+model CustomerFollowUp {
+  id           String    @id @default(uuid())
+  salesDocId   String    @map("sales_doc_id")
+  salesLineId  String    @unique @map("sales_line_id")
+  productId    String    @map("product_id")
+  locationId   String    @map("location_id")
+  customerName String?   @map("customer_name")
+  phone        String?
+  email        String?
+  qty          Int
+  dueDate      DateTime  @map("due_date") @db.Date
+  status       String    @default("PENDING") // PENDING | NOTIFIED | CONTACTED | DISMISSED
+  notifiedAt   DateTime? @map("notified_at")
+  smsSentAt    DateTime? @map("sms_sent_at")
+  emailSentAt  DateTime? @map("email_sent_at")
+  note         String?
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  @@index([status, dueDate])
+  @@index([locationId, status])
+  @@map("customer_follow_ups")
+}
+
+/// Every SMS / email sent to a customer, with its result.
+model CustomerMessage {
+  id         String   @id @default(uuid())
+  channel    String // SMS | EMAIL
+  to         String
+  subject    String?
+  body       String
+  status     String // SENT | FAILED | NOT_CONFIGURED
+  error      String?
+  followUpId String?  @map("follow_up_id")
+  sentBy     String?  @map("sent_by") // null = automatic
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([followUpId])
+  @@map("customer_messages")
+}
+
+// ───────────────────────────── E-commerce (TikTok, Shopee, Lazada — kept separate) ─────────────────────────────
+
+/// Platform SKU → GWS product, remembered after the E-comm Associate matches it once.
+model EcomSkuMap {
+  id          String   @id @default(uuid())
+  platform    String // TIKTOK | SHOPEE | LAZADA
+  platformSku String   @map("platform_sku")
+  productId   String   @map("product_id")
+  createdBy   String?  @map("created_by")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@unique([platform, platformSku])
+  @@map("ecom_sku_maps")
+}
+
+/// One platform order from the uploaded order / waybill file. Drives the pull-out, then the sale when the platform pays.
+model EcomOrder {
+  id           String    @id @default(uuid())
+  platform     String
+  orderId      String    @map("order_id")
+  trackingNo   String?   @map("tracking_no")
+  /// PENDING (on a draft pull-out) → SHIPPED (pull-out approved) → SETTLED (paid) | RETURNED | CANCELLED | REJECTED
+  status       String    @default("PENDING")
+  pullOutId    String?   @map("pull_out_id")
+  settlementId String?   @map("settlement_id")
+  salesDocId   String?   @map("sales_doc_id")
+  sourceFile   String?   @map("source_file")
+  shippedAt    DateTime? @map("shipped_at")
+  settledAt    DateTime? @map("settled_at")
+  returnedAt   DateTime? @map("returned_at")
+  createdBy    String?   @map("created_by")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  lines EcomOrderLine[]
+
+  @@unique([platform, orderId])
+  @@index([platform, status])
+  @@index([pullOutId])
+  @@map("ecom_orders")
+}
+
+model EcomOrderLine {
+  id          String  @id @default(uuid())
+  orderId     String  @map("order_id")
+  productId   String  @map("product_id")
+  platformSku String  @map("platform_sku")
+  productName String? @map("product_name")
+  qty         Int
+
+  order EcomOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@map("ecom_order_lines")
+}
+
+/// One uploaded settlement (payout) file: the sale, each platform fee, refunds, withholding tax and the payout. Accounting approves before it posts.
+model EcomSettlement {
+  id                String    @id @default(uuid())
+  controlNo         String    @unique @map("control_no")
+  platform          String
+  docDate           DateTime  @map("doc_date") @db.Date
+  /// DRAFT → SUBMITTED → POSTED | REJECTED
+  status            String    @default("DRAFT")
+  sourceFile        String?   @map("source_file")
+  orders            Int       @default(0)
+  grossSales        Decimal   @default(0) @map("gross_sales") @db.Decimal(14, 2)
+  sellerDiscounts   Decimal   @default(0) @map("seller_discounts") @db.Decimal(14, 2)
+  commission        Decimal   @default(0) @db.Decimal(14, 2)
+  transactionFee    Decimal   @default(0) @map("transaction_fee") @db.Decimal(14, 2)
+  shippingFee       Decimal   @default(0) @map("shipping_fee") @db.Decimal(14, 2)
+  affiliateFee      Decimal   @default(0) @map("affiliate_fee") @db.Decimal(14, 2)
+  otherFees         Decimal   @default(0) @map("other_fees") @db.Decimal(14, 2)
+  refunds           Decimal   @default(0) @db.Decimal(14, 2)
+  withholdingTax    Decimal   @default(0) @map("withholding_tax") @db.Decimal(14, 2)
+  adjustments       Decimal   @default(0) @db.Decimal(14, 2)
+  payout            Decimal   @default(0) @db.Decimal(14, 2)
+  /// payout total of the whole file (including orders not in GWS-ERP) for the reconciliation
+  filePayout        Decimal   @default(0) @map("file_payout") @db.Decimal(14, 2)
+  costOfSales       Decimal   @default(0) @map("cost_of_sales") @db.Decimal(14, 2)
+  includeUnmatched  Boolean   @default(false) @map("include_unmatched")
+  details           Json // per order: amounts, match status
+  approvalRequestId String?   @map("approval_request_id")
+  postedAt          DateTime? @map("posted_at")
+  createdBy         String?   @map("created_by")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  @@index([platform, docDate])
+  @@map("ecom_settlements")
+}
+
+/// A parcel that came back (failed delivery / return to seller, or a buyer return). The In-Charge receives it and marks each item good or damaged.
+model EcomReturn {
+  id          String    @id @default(uuid())
+  controlNo   String    @unique @map("control_no")
+  platform    String
+  ecomOrderId String    @map("ecom_order_id")
+  reason      String? // FAILED_DELIVERY | BUYER_RETURN | OTHER
+  notes       String?
+  /// PENDING (waiting for the warehouse) → RECEIVED
+  status      String    @default("PENDING")
+  lines       Json // [{ productId, qty, goodQty?, damagedQty? }]
+  writeoffId  String?   @map("writeoff_id")
+  receivedBy  String?   @map("received_by")
+  receivedAt  DateTime? @map("received_at")
+  createdBy   String?   @map("created_by")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  @@index([platform, status])
+  @@map("ecom_returns")
+}
+
+/// Advertising spend per platform and month (TikTok Ads / Shopee Ads / Lazada Sponsored Solutions): an expense.
+model EcomAdSpend {
+  id                String   @id @default(uuid())
+  platform          String
+  month             String // YYYY-MM
+  amount            Decimal  @db.Decimal(14, 2)
+  /// null = deducted from the platform balance (e.g. TikTok GMV Pay); otherwise the bank / card account that paid
+  paidFromAccountId String?  @map("paid_from_account_id")
+  reference         String?
+  notes             String?
+  sourceFile        String?  @map("source_file")
+  createdBy         String?  @map("created_by")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  @@index([platform, month])
+  @@map("ecom_ad_spend")
+}
+
+/// A difference between a transfer form and what the receiving branch actually got (owner request 2026-09-29).
+/// Steps: HEAD_AUDITOR review → SENDER confirms (2 days) → ADMIN when the sender disagrees or does not answer → RESOLVED.
+/// A confirmed difference creates adjustment forms numbered after the original (WA-PO-000012-002, -003…).
+model TransferDiscrepancy {
+  id               String    @id @default(uuid())
+  transferId       String    @unique @map("transfer_id")
+  controlNo        String    @map("control_no")
+  status           String    @default("HEAD_AUDITOR") // HEAD_AUDITOR | SENDER | ADMIN | RESOLVED
+  /// [{ productId, name, onForm, received, short, extra, note }]
+  lines            Json
+  receivedBy       String?   @map("received_by")
+  senderUserIds    String[]  @default([]) @map("sender_user_ids")
+  senderDueAt      DateTime? @map("sender_due_at")
+  senderRemindedAt DateTime? @map("sender_reminded_at")
+  /// [{ step, by, byName, decision, note, at }]
+  history          Json      @default("[]")
+  outcome          String? // RETURN_TO_SENDER | RECEIVED_AS_SENT | LOST_COMPANY | LOST_CHARGE
+  adjustmentDocIds String[]  @default([]) @map("adjustment_doc_ids")
+  chargeFormId     String?   @map("charge_form_id")
+  hrNoticeId       String?   @map("hr_notice_id")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  resolvedAt       DateTime? @map("resolved_at")
+
+  @@index([status])
+  @@map("transfer_discrepancies")
+}
+
+/// Monthly sales target per branch or per agent, set by the Sales Manager and approved by the Owner (owner request 2026-09-29).
+model SalesTarget {
+  id                String    @id @default(uuid())
+  month             String // YYYY-MM
+  kind              String // BRANCH | AGENT
+  locationId        String?   @map("location_id")
+  /// an agent is one person even when listed at several branches: the linked user, or the agent's name
+  agentKey          String?   @map("agent_key")
+  agentName         String?   @map("agent_name")
+  amount            Decimal   @db.Decimal(14, 2)
+  notes             String?
+  status            String    @default("PENDING") // PENDING | APPROVED | REJECTED | SUPERSEDED
+  approvalRequestId String?   @map("approval_request_id")
+  createdBy         String?   @map("created_by")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  decidedAt         DateTime? @map("decided_at")
+
+  @@index([month, kind, status])
+  @@map("sales_targets")
+}
+
+/// AR from before GWS-ERP (owner request 2026-09-29): entered by Accounting for any branch, approved by the Owner; on approval it becomes
+/// an AR/PDC sales document (no stock lines) in that branch's AR & Collections. No journal entry: the AR beginning balance is in Periods & Opening.
+model OpeningArEntry {
+  id                String    @id @default(uuid())
+  locationId        String    @map("location_id")
+  kind              String // DEALER | FRANCHISE | AGENT | OTHER
+  customerId        String?   @map("customer_id")
+  agentId           String?   @map("agent_id")
+  customerName      String?   @map("customer_name")
+  drSiNo            String    @map("dr_si_no")
+  docDate           DateTime  @map("doc_date") @db.Date
+  dueDate           DateTime  @map("due_date") @db.Date
+  amount            Decimal   @db.Decimal(14, 2)
+  pdcBank           String?   @map("pdc_bank")
+  pdcChequeNo       String?   @map("pdc_cheque_no")
+  pdcDate           DateTime? @map("pdc_date") @db.Date
+  notes             String?
+  status            String    @default("PENDING") // PENDING | APPROVED | REJECTED
+  salesDocId        String?   @map("sales_doc_id")
+  approvalRequestId String?   @map("approval_request_id")
+  decisionNote      String?   @map("decision_note")
+  createdBy         String    @map("created_by")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  decidedAt         DateTime? @map("decided_at")
+
+  @@index([status, locationId])
+  @@map("opening_ar_entries")
+}
+
+/// Agent incentive for one month (owner request 2026-09-30): the Sales Manager confirms the agent's total sales and the incentive; the
+/// Accounting Associate, the Accounting Head and the Owner approve; the approved form goes to HR for release; Accounting tags the payment.
+model AgentIncentive {
+  id                String    @id @default(uuid())
+  month             String // YYYY-MM
+  agentKey          String    @map("agent_key")
+  agentName         String    @map("agent_name")
+  agentUserId       String?   @map("agent_user_id")
+  branches          String[]  @default([])
+  transactions      Int       @default(0)
+  totalSales        Decimal   @map("total_sales") @db.Decimal(14, 2)
+  collected         Decimal   @db.Decimal(14, 2)
+  ratePct           Decimal?  @map("rate_pct") @db.Decimal(6, 3)
+  amount            Decimal   @db.Decimal(14, 2)
+  notes             String?
+  status            String    @default("PENDING") // PENDING | APPROVED (with HR) | SIGNED (agent signed, ready to pay) | RELEASED | REJECTED
+  formNo            String?   @unique @map("form_no")
+  approvalRequestId String?   @map("approval_request_id")
+  preparedBy        String    @map("prepared_by")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  approvedAt        DateTime? @map("approved_at")
+  decisionNote      String?   @map("decision_note")
+  hrSignedBy        String?   @map("hr_signed_by")
+  hrSignedAt        DateTime? @map("hr_signed_at")
+  releaseMode       String?   @map("release_mode") // BANK_TRANSFER | GCASH | CHEQUE | CASH
+  releaseAccountId  String?   @map("release_account_id")
+  releaseReference  String?   @map("release_reference")
+  releaseDate       DateTime? @map("release_date") @db.Date
+  releasedBy        String?   @map("released_by")
+  releasedAt        DateTime? @map("released_at")
+
+  @@index([month, agentKey])
+  @@map("agent_incentives")
+}
+
+// ── Franchise receivables (owner request 2026-09-30, memo 2026-07-31): goods billed to a franchise at the franchise price, due by terms;
+// 2% one-time penalty + 0.1% per day on the unpaid balance once overdue ──
+model FranchiseInvoice {
+  id                  String    @id @default(uuid())
+  controlNo           String    @unique @map("control_no")
+  source              String // TRANSFER | OPENING
+  transferId          String?   @unique @map("transfer_id")
+  franchiseLocationId String    @map("franchise_location_id")
+  fromLocationId      String?   @map("from_location_id")
+  issueDate           DateTime  @map("issue_date") @db.Date
+  originalDueDate     DateTime  @map("original_due_date") @db.Date
+  dueDate             DateTime  @map("due_date") @db.Date
+  originalAmount      Decimal   @map("original_amount") @db.Decimal(14, 2)
+  /// the goods now billed (changes when the received quantities change)
+  amount              Decimal   @db.Decimal(14, 2)
+  principalPaid       Decimal   @default(0) @map("principal_paid") @db.Decimal(14, 2)
+  penalty             Decimal   @default(0) @db.Decimal(14, 2)
+  penaltyPaid         Decimal   @default(0) @map("penalty_paid") @db.Decimal(14, 2)
+  interest            Decimal   @default(0) @db.Decimal(14, 2)
+  interestPaid        Decimal   @default(0) @map("interest_paid") @db.Decimal(14, 2)
+  waivedTotal         Decimal   @default(0) @map("waived_total") @db.Decimal(14, 2)
+  penaltyAppliedOn    DateTime? @map("penalty_applied_on") @db.Date
+  interestThrough     DateTime? @map("interest_through") @db.Date
+  status              String    @default("OPEN") // OPEN | PAID | CANCELLED
+  flaggedAt           DateTime? @map("flagged_at") // unpaid two months after the due date
+  remindedAt          DateTime? @map("reminded_at")
+  notes               String?
+  createdBy           String?   @map("created_by")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  payments    FranchisePayment[]
+  adjustments FranchiseArAdjustment[]
+  extensions  FranchiseArExtension[]
+
+  @@index([franchiseLocationId, status])
+  @@index([dueDate])
+  @@map("franchise_invoices")
+}
+
+model FranchisePayment {
+  id                String    @id @default(uuid())
+  receiptNo         String    @unique @map("receipt_no")
+  invoiceId         String    @map("invoice_id")
+  amount            Decimal   @db.Decimal(14, 2)
+  toPenalty         Decimal   @default(0) @map("to_penalty") @db.Decimal(14, 2)
+  toInterest        Decimal   @default(0) @map("to_interest") @db.Decimal(14, 2)
+  toPrincipal       Decimal   @default(0) @map("to_principal") @db.Decimal(14, 2)
+  paidOn            DateTime  @map("paid_on") @db.Date
+  mode              String
+  paymentAccountId  String?   @map("payment_account_id")
+  reference         String?
+  proofAttachmentId String?   @map("proof_attachment_id")
+  notes             String?
+  recordedBy        String    @map("recorded_by")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  voidedAt          DateTime? @map("voided_at")
+
+  invoice FranchiseInvoice @relation(fields: [invoiceId], references: [id])
+
+  @@index([invoiceId])
+  @@map("franchise_payments")
+}
+
+model FranchiseArAdjustment {
+  id         String   @id @default(uuid())
+  invoiceId  String   @map("invoice_id")
+  kind       String // TRANSFER_CHANGE | WAIVER | MANUAL | EXTENSION
+  delta      Decimal  @db.Decimal(14, 2)
+  reason     String
+  transferId String?  @map("transfer_id")
+  details    Json?
+  createdBy  String?  @map("created_by")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  invoice FranchiseInvoice @relation(fields: [invoiceId], references: [id])
+
+  @@index([invoiceId])
+  @@map("franchise_ar_adjustments")
+}
+
+model FranchiseArExtension {
+  id                String    @id @default(uuid())
+  invoiceId         String    @map("invoice_id")
+  requestedBy       String    @map("requested_by")
+  reason            String
+  previousDueDate   DateTime  @map("previous_due_date") @db.Date
+  requestedDueDate  DateTime  @map("requested_due_date") @db.Date
+  status            String    @default("PENDING") // PENDING | APPROVED | REJECTED
+  approvalRequestId String?   @map("approval_request_id")
+  decidedBy         String?   @map("decided_by")
+  decidedAt         DateTime? @map("decided_at")
+  decisionNote      String?   @map("decision_note")
+  createdAt         DateTime  @default(now()) @map("created_at")
+
+  invoice FranchiseInvoice @relation(fields: [invoiceId], references: [id])
+
+  @@index([invoiceId])
+  @@map("franchise_ar_extensions")
+}
+
+// ── Memorandums (owner request 2026-09-30): numbered YYYY-Qn-NNN, addressed to chosen people, signed by the people the memo names ──
+model Memo {
+  id          String    @id @default(uuid())
+  memoNo      String    @unique @map("memo_no")
+  subject     String
+  addressedTo String    @map("addressed_to")
+  fromText    String    @map("from_text")
+  memoDate    DateTime  @map("memo_date") @db.Date
+  body        String
+  table       Json?
+  signers     Json
+  audience    Json
+  status      String    @default("ISSUED") // ISSUED | VOIDED
+  createdBy   String    @map("created_by")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  voidedAt    DateTime? @map("voided_at")
+  voidedBy    String?   @map("voided_by")
+  voidReason  String?   @map("void_reason")
+
+  recipients MemoRecipient[]
+
+  @@index([memoDate])
+  @@map("memos")
+}
+
+model MemoRecipient {
+  id             String    @id @default(uuid())
+  memoId         String    @map("memo_id")
+  userId         String    @map("user_id")
+  acknowledgedAt DateTime? @map("acknowledged_at")
+
+  memo Memo @relation(fields: [memoId], references: [id], onDelete: Cascade)
+
+  @@unique([memoId, userId])
+  @@index([userId])
+  @@map("memo_recipients")
+}
+
+// ── 6-Pack Card (owner request 2026-09-30): a sticker per supplement bought (ticked on the DR, customer tagged); six stickers earn a card worth ₱300, booked as a branch expense ──
+model SixPackSticker {
+  id           String    @id @default(uuid())
+  saleId       String    @unique @map("sale_id")
+  locationId   String    @map("location_id")
+  customerName String    @map("customer_name")
+  phone        String
+  phoneKey     String    @map("phone_key")
+  email        String?
+  stickers     Int
+  businessDate DateTime  @map("business_date") @db.Date
+  issuedBy     String    @map("issued_by")
+  issuedAt     DateTime  @default(now()) @map("issued_at")
+  voidedAt     DateTime? @map("voided_at")
+
+  @@index([phoneKey])
+  @@index([locationId, businessDate])
+  @@map("six_pack_stickers")
+}
+
+model SixPackRedemption {
+  id                String    @id @default(uuid())
+  controlNo         String    @unique @map("control_no")
+  locationId        String    @map("location_id")
+  customerName      String    @map("customer_name")
+  phone             String
+  phoneKey          String    @map("phone_key")
+  email             String?
+  address           String?
+  stickersUsed      Int       @map("stickers_used")
+  amount            Decimal   @db.Decimal(14, 2)
+  expenseId         String?   @map("expense_id")
+  legacyCardNo      String?   @map("legacy_card_no")
+  proofAttachmentId String?   @map("proof_attachment_id")
+  businessDate      DateTime  @map("business_date") @db.Date
+  redeemedBy        String    @map("redeemed_by")
+  redeemedAt        DateTime  @default(now()) @map("redeemed_at")
+  flaggedNote       String?   @map("flagged_note")
+  voidedAt          DateTime? @map("voided_at")
+
+  @@index([phoneKey])
+  @@index([locationId, businessDate])
+  @@map("six_pack_redemptions")
+}
+
+/// One shipping label (waybill) uploaded by the E-comm Associate, Head Auditor or Owner: the report works out SRP, fees and order income from it.
+model EcomWaybill {
+  id         String    @id @default(uuid())
+  platform   String // TIKTOK | SHOPEE | LAZADA | UNKNOWN
+  orderId    String    @map("order_id")
+  trackingNo String?   @map("tracking_no")
+  qty        Int       @default(1)
+  weightG    Int?      @map("weight_g")
+  rtsDate    DateTime? @map("rts_date") @db.Date
+  productId  String?   @map("product_id")
+  /// the product was filled from what was chosen before for the same weight: confirm it
+  guessed    Boolean   @default(false)
+  sourceFile String?   @map("source_file")
+  uploadedBy String?   @map("uploaded_by")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  @@unique([platform, orderId])
+  @@index([createdAt])
+  @@map("ecom_waybills")
+}
+
+model EcomWaybillHint {
+  id        String   @id @default(uuid())
+  platform  String
+  weightG   Int      @map("weight_g")
+  productId String   @map("product_id")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([platform, weightG])
+  @@map("ecom_waybill_hints")
+}

@@ -1,0 +1,40 @@
+name: CI
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env: { POSTGRES_USER: gws, POSTGRES_PASSWORD: gws, POSTGRES_DB: gws }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U gws" --health-interval 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+    env:
+      DATABASE_URL: postgresql://gws:gws@localhost:5432/gws?schema=public
+      REDIS_URL: redis://localhost:6379
+      SESSION_SECRET: ci
+      CLAMAV_REQUIRED: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @gws/api prisma:generate
+      - run: pnpm --filter @gws/api prisma:deploy
+      - run: pnpm --filter @gws/api prisma:seed
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+      - name: Playwright smoke (daily close)
+        run: |
+          pnpm --filter @gws/web exec playwright install --with-deps chromium
+          pnpm --filter @gws/web test:e2e

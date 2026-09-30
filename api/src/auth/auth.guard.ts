@@ -42,7 +42,7 @@ export class AuthGuard implements CanActivate {
 
     // §5.4 HR_STAFF: every inventory/sales route returns 403
     // HR's own printable forms (charges, payslips, ledgers, contributions, store inspections) are the exception
-    const hrForm = /^\/api\/reports\/forms\/(charge-form|deduction-authorization|payslip|employee-ledger|contributions|inspection)\//.test(path);
+    const hrForm = /^\/api\/reports\/forms\/(charge-form|deduction-authorization|payslip|employee-ledger|contributions|inspection|agent-incentive)\//.test(path);
     if (NO_OPS_ROLES.includes(user.roleKey as never) && !hrForm && /^\/api\/(sales|stock|products|receiving|transfers|counts|reports|ar|expenses|batches|consignment)/.test(path)) {
       throw new ForbiddenException('This role has no access to inventory or sales');
     }

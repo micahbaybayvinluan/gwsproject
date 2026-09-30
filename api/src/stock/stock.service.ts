@@ -1,3 +1,5 @@
+import { addFlavor, batchLabel } from './flavors';
+import { randomUUID } from 'crypto';
 import { buildDailyInventory, dateRange, type DailyInventoryReport } from './daily-inventory';
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { MovementType, Prisma } from '@prisma/client';
@@ -29,7 +31,7 @@ export class StockService {
       });
       if (bal.qty < 0) {
         // stock may never go negative (owner rule): name the product and place so staff can act
-        const [p, l, b] = await Promise.all([tx.product.findUnique({ where: { id: r.productId }, select: { name: true } }), tx.location.findUnique({ where: { id: r.locationId }, select: { name: true } }), tx.batch.findUnique({ where: { id: r.batchId }, select: { batchNo: true, expiryDate: true } })]);
+        const [p, l, b] = await Promise.all([tx.product.findUnique({ where: { id: r.productId }, select: { name: true } }), tx.location.findUnique({ where: { id: r.locationId }, select: { name: true } }), tx.batch.findUnique({ where: { id: r.batchId }, select: { batchNo: true, expiryDate: true, flavor: true } })]);
         throw new BadRequestException(`Not enough stock: ${p?.name ?? r.productId} at ${l?.name ?? 'this location'}${b?.batchNo || b?.expiryDate ? ` (batch ${b.batchNo ?? ''}${b.expiryDate ? ` exp ${b.expiryDate.toISOString().slice(0, 10)}` : ''})` : ''} would go below zero by ${-bal.qty}. Quantities cannot be negative.`);
       }
     }
@@ -43,8 +45,46 @@ export class StockService {
   }
 
   /** FEFO batch picking (§7.6). Expired batches are excluded; consignment-in batches are eligible. */
-  async pickFefo(tx: Tx, locationId: string, productId: string, qty: number, opts: { preferBatchId?: string; allowExpired?: boolean } = {}): Promise<Pick[]> {
+  /**
+   * Set the flavor of stock that has none (or correct it), per batch at one location (owner request 2026-09-30). The quantities move to
+   * batches with the same expiry, batch no. and cost but the chosen flavor; the SKU's total count and value do not change.
+   */
+  async setFlavors(input: { locationId: string; batchId: string; parts: { flavor: string; qty: number }[] }, userId: string) {
+    const parts = input.parts.map((p) => ({ flavor: p.flavor.trim().replace(/\s+/g, ' '), qty: Math.trunc(p.qty) })).filter((p) => p.flavor && p.qty > 0);
+    if (!parts.length) throw new BadRequestException('Type at least one flavor and its quantity');
+    const docId = randomUUID();
+    return this.prisma.db.$transaction(async (tx) => {
+      const bal = await tx.stockBalance.findFirst({ where: { locationId: input.locationId, batchId: input.batchId }, include: { batch: true } });
+      if (!bal || bal.qty <= 0) throw new BadRequestException('This batch has no stock at this location');
+      const total = parts.reduce((t, p) => t + p.qty, 0);
+      if (total > bal.qty) throw new BadRequestException(`Only ${bal.qty} in this batch; the flavors add up to ${total}`);
+      const src = bal.batch; const moved: { flavor: string; qty: number; batchId: string }[] = [];
+      for (const p of parts) {
+        if ((src.flavor ?? '').toLowerCase() === p.flavor.toLowerCase()) continue;
+        const target = (await tx.batch.findFirst({ where: { productId: src.productId, batchNo: src.batchNo, expiryDate: src.expiryDate, unitCost: src.unitCost, isConsignmentIn: src.isConsignmentIn, flavor: { equals: p.flavor, mode: 'insensitive' } } }))
+          ?? (await tx.batch.create({ data: { productId: src.productId, batchNo: src.batchNo, expiryDate: src.expiryDate, flavor: p.flavor, receivedRef: src.receivedRef, unitCost: src.unitCost, originalUnitCost: src.originalUnitCost, supplierId: src.supplierId, isConsignmentIn: src.isConsignmentIn, createdBy: userId } }));
+        await this.post(tx, [
+          { locationId: input.locationId, productId: src.productId, batchId: src.id, qtyDelta: -p.qty, movementType: 'ADJUST_COUNT', documentType: 'FlavorSplit', documentId: docId, unitCost: src.unitCost, createdBy: userId },
+          { locationId: input.locationId, productId: src.productId, batchId: target.id, qtyDelta: p.qty, movementType: 'ADJUST_COUNT', documentType: 'FlavorSplit', documentId: docId, unitCost: src.unitCost, createdBy: userId },
+        ]);
+        await addFlavor(tx, src.productId, p.flavor);
+        moved.push({ flavor: p.flavor, qty: p.qty, batchId: target.id });
+      }
+      return { documentId: docId, moved, leftUnflavored: bal.qty - total };
+    });
+  }
+
+  async pickFefo(tx: Tx, locationId: string, productId: string, qty: number, opts: { preferBatchId?: string; exactBatchId?: string; allowExpired?: boolean } = {}): Promise<Pick[]> {
     const today = todayManila();
+    if (opts.exactBatchId) {
+      // the person chose this batch (flavor / expiry) on screen: take it from that batch only (owner request 2026-09-30)
+      const b = await tx.stockBalance.findUnique({ where: { locationId_productId_batchId: { locationId, productId, batchId: opts.exactBatchId } }, include: { batch: true } });
+      if (!b) throw new BadRequestException('The chosen batch is not at this location any more. Choose again.');
+      const label = batchLabel(b.batch);
+      if (!opts.allowExpired && b.batch.expiryDate && b.batch.expiryDate < today) throw new BadRequestException(`The chosen batch (${label}) is expired`);
+      if (b.qty < qty) throw new BadRequestException(`Only ${b.qty} left of ${label} at this location (requested ${qty}). Add the rest from another flavor / expiry.`);
+      return [{ batchId: b.batchId, qty, unitCost: b.batch.unitCost, expiryDate: b.batch.expiryDate, isConsignmentIn: b.batch.isConsignmentIn }];
+    }
     const balances = await tx.stockBalance.findMany({ where: { locationId, productId, qty: { gt: 0 } }, include: { batch: true } });
     const eligible = balances
       .filter((b) => opts.allowExpired || !b.batch.expiryDate || b.batch.expiryDate >= today)
@@ -93,11 +133,11 @@ export class StockService {
     const where: Prisma.StockBalanceWhereInput = locationId ? { locationId } : user.locationScoped ? { locationId: { in: user.locationIds } } : { locationId: { not: '' } };
     if (!opts.includeZero) where.qty = { not: 0 };
     if (opts.search) where.product = { OR: [{ name: { contains: opts.search, mode: 'insensitive' } }, { sku: { contains: opts.search, mode: 'insensitive' } }] };
-    const rows = await this.prisma.db.stockBalance.findMany({ where, include: { batch: { select: { id: true, batchNo: true, expiryDate: true, unitCost: true, isConsignmentIn: true } }, product: { select: { id: true, sku: true, name: true, categoryId: true, franchiseVisible: true, category: { select: { accountingClass: true } } } }, location: { select: { id: true, code: true, name: true } } } });
+    const rows = await this.prisma.db.stockBalance.findMany({ where, include: { batch: { select: { id: true, batchNo: true, expiryDate: true, flavor: true, unitCost: true, isConsignmentIn: true } }, product: { select: { id: true, sku: true, name: true, categoryId: true, franchiseVisible: true, category: { select: { accountingClass: true } } } }, location: { select: { id: true, code: true, name: true } } } });
     const franchise = user.roleKey.startsWith('FRANCHISE');
     return rows.filter((r) => !franchise || r.product.franchiseVisible).map((r) => ({
       locationId: r.locationId, location: r.location, productId: r.productId, product: { id: r.product.id, sku: r.product.sku, name: r.product.name, accountingClass: r.product.category.accountingClass },
-      batchId: r.batchId, batchNo: r.batch.batchNo, expiryDate: r.batch.expiryDate ? dateStr(r.batch.expiryDate) : null, isConsignmentIn: r.batch.isConsignmentIn, qty: r.qty,
+      batchId: r.batchId, batchNo: r.batch.batchNo, flavor: r.batch.flavor ?? null, expiryDate: r.batch.expiryDate ? dateStr(r.batch.expiryDate) : null, isConsignmentIn: r.batch.isConsignmentIn, qty: r.qty,
       unitCost: r.batch.unitCost, valueAtCost: r.batch.unitCost.mul(r.qty),
     }));
   }
@@ -116,7 +156,7 @@ export class StockService {
       productId: q.productId, locationId: q.locationId ?? (user.locationScoped ? { in: user.locationIds } : { not: '' }),
       businessDate: q.from || q.to ? { gte: q.from ? toDateOnly(q.from) : undefined, lte: q.to ? toDateOnly(q.to) : undefined } : undefined,
     };
-    return this.prisma.db.stockLedger.findMany({ where, include: { batch: { select: { batchNo: true, expiryDate: true } }, product: { select: { sku: true, name: true } }, location: { select: { code: true, name: true } } }, orderBy: { postedAt: 'desc' }, take: q.take ?? 500 }).then((rows) => this.withDocuments(rows));
+    return this.prisma.db.stockLedger.findMany({ where, include: { batch: { select: { batchNo: true, expiryDate: true, flavor: true } }, product: { select: { sku: true, name: true } }, location: { select: { code: true, name: true } } }, orderBy: { postedAt: 'desc' }, take: q.take ?? 500 }).then((rows) => this.withDocuments(rows));
   }
 
   /**

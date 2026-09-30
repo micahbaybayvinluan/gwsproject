@@ -7,7 +7,7 @@ import { useAuth } from '@/lib/auth';
 import { Badge, Button, Card, ErrorBox, Field, Input, Select, statusTone } from '@/components/ui/primitives';
 import { DataTable } from '@/components/ui/table';
 
-interface Product { id: string; consumptionDays?: number | null; sku: string; barcode: string | null; name: string; brand: string | null; unit: string; trackExpiry: boolean; active: boolean; isBundle: boolean; franchiseVisible: boolean; needsReview: boolean; category: { id: string; name: string; accountingClass: string }; supplier: { code: string; name?: string } | null; tierPrices: Record<string, string>; cost?: string | null }
+interface Product { id: string; flavors?: string[]; consumptionDays?: number | null; sku: string; barcode: string | null; name: string; brand: string | null; unit: string; trackExpiry: boolean; active: boolean; isBundle: boolean; franchiseVisible: boolean; needsReview: boolean; category: { id: string; name: string; accountingClass: string }; supplier: { code: string; name?: string } | null; tierPrices: Record<string, string>; cost?: string | null }
 
 export function ProductsPage() {
   const nav = useNavigate(); const { can } = useAuth(); const qc = useQueryClient();
@@ -50,6 +50,7 @@ export function ProductDetailPage() {
         <Field label="Name"><Input defaultValue={p.name} disabled={!canEdit} onChange={(e) => setPatch({ ...patch, name: e.target.value })} /></Field>
         <Field label="Category"><Select defaultValue={p.category.id} disabled={!canEdit} onChange={(e) => setPatch({ ...patch, categoryId: e.target.value })}>{cats.data?.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</Select></Field>
         <Field label="Barcode"><Input defaultValue={p.barcode ?? ''} disabled={!canEdit} onChange={(e) => setPatch({ ...patch, barcode: e.target.value || null })} /></Field>
+        <Field label="Flavors" hint="Separate with commas, e.g. Choco, Vanilla. Still one SKU; each flavor is chosen when selling or moving stock. New flavors typed at receiving are added here."><Input defaultValue={(p.flavors ?? []).join(', ')} disabled={!canEdit} placeholder="e.g. Choco, Vanilla, Cookies & Cream" onChange={(e) => setPatch({ ...patch, flavors: [...new Set(e.target.value.split(',').map((x) => x.trim()).filter(Boolean))] })} /></Field>
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" defaultChecked={p.trackExpiry} disabled={!canEdit} onChange={(e) => setPatch({ ...patch, trackExpiry: e.target.checked })} /> Track expiry</label>
         <Field label="Days to consume one unit" hint="The store is reminded to call the customer after qty × days"><Input type="number" min={1} disabled={!canEdit} defaultValue={p.consumptionDays ?? ''} onChange={(e) => setPatch({ ...patch, consumptionDays: e.target.value ? Number(e.target.value) : null })} /></Field>
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" defaultChecked={p.franchiseVisible} disabled={!canEdit} onChange={(e) => setPatch({ ...patch, franchiseVisible: e.target.checked })} /> Franchise visible</label>

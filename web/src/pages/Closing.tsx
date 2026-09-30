@@ -1,3 +1,4 @@
+import { PostCloseEditCard } from '@/components/PostCloseEditCard';
 import { locLabel } from '@/lib/utils';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
@@ -49,7 +50,8 @@ export function ClosingPage() {
       {!can('sale.create') && d.close?.countedCash != null && <p className="text-sm">Cash counted {peso(d.close.countedCash)} · variance <span className={Number(d.close.cashVariance) < 0 ? 'font-semibold text-red-700' : ''}>{peso(d.close.cashVariance)}</span></p>}
     </>}
     {can('charge.assign') && <ShortagesCard locationId={me!.locationScoped ? undefined : locationId || undefined} />}
-    {(can('sale.create') || can('revision.request')) && <Card title="Post-close edit requests"><DataTable data={edits.data ?? []} columns={[{ header: 'Requested', accessorFn: (r) => new Date(r.createdAt).toLocaleString() }, { header: 'Document', accessorFn: (r) => `${r.documentType} ${r.documentId.slice(0, 8)}` }, { header: 'Reason', accessorKey: 'reason' }, { header: 'Status', cell: (c) => <Badge tone={c.row.original.appliedAt ? 'green' : 'amber'}>{c.row.original.appliedAt ? 'APPLIED' : 'PENDING'}</Badge> }]} /></Card>}
+    {!can('sale.create') && can('revision.request') && <Card title="Post-close edit requests"><DataTable data={edits.data ?? []} columns={[{ header: 'Requested', accessorFn: (r) => new Date(r.createdAt).toLocaleString() }, { header: 'Document', accessorFn: (r) => `${r.documentType} ${r.documentId.slice(0, 8)}` }, { header: 'Reason', accessorKey: 'reason' }, { header: 'Status', cell: (c) => <Badge tone={c.row.original.appliedAt ? 'green' : 'amber'}>{c.row.original.appliedAt ? 'APPLIED' : 'PENDING'}</Badge> }]} /></Card>}
+    {can('sale.create') && locationId && <PostCloseEditCard locationId={locationId} date={date} isFranchise={me!.locations.find((l) => l.id === locationId)?.type === 'FRANCHISE'} />}
   </div>;
 }
 

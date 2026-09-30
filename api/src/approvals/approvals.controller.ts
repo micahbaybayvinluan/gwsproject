@@ -11,7 +11,7 @@ const Bulk = Decide.extend({ ids: z.array(z.string().uuid()).min(1) });
 @Controller('api/approvals')
 export class ApprovalsController {
   constructor(private approvals: ApprovalsService) {}
-  @Get('inbox') inbox(@CurrentUser() u: SessionUser, @Query('type') type?: string) { return this.approvals.inbox(u, type); }
+  @Get('inbox') inbox(@CurrentUser() u: SessionUser, @Query('type') type?: string, @Query('all') all?: string) { return this.approvals.inbox(u, type, all === '1'); }
   @Get('mine') mine(@CurrentUser() u: SessionUser) { return this.approvals.mine(u.id); }
   @Get('timeline/:type/:id') timeline(@Param('type') type: string, @Param('id') id: string) { return this.approvals.timeline(type, id); }
   @Get('document/:type/:id') forDoc(@Param('type') type: string, @Param('id') id: string) { return this.approvals.forDocument(type, id); }

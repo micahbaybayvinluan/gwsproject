@@ -9,7 +9,7 @@ import { toDateOnly, todayManila } from '../common/manila';
 
 const CashCount = z.object({ locationId: z.string().uuid().optional(), date: z.string().optional(), breakdown: z.record(z.number().int().min(0)) });
 const Shortage = z.object({ employeeIds: z.array(z.string().uuid()).min(1) });
-const Edit = z.object({ documentType: z.enum(['SalesDoc', 'ExpenseDoc', 'TransferDoc']), documentId: z.string().uuid(), reason: z.string().min(3), after: z.record(z.unknown()) });
+const Edit = z.object({ documentType: z.enum(['SalesDoc', 'ExpenseDoc', 'TransferDoc']), documentId: z.string().uuid(), reason: z.string().trim().min(5, 'Give the reason for the change'), after: z.record(z.unknown()) });
 
 @Controller('api/closing')
 export class ClosingController {

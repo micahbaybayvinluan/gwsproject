@@ -28,7 +28,7 @@ export class DashboardController {
     const today = todayManila();
     const locWhere = u.locationScoped ? { in: u.locationIds } : { not: '' };
     const out: Record<string, unknown> = { roleKey: u.roleKey, today: dateStr(today), unreadNotifications: await this.notify.unreadCount(u.id) };
-    if (u.permissions.has('approval.act.COST_ON_RECEIVING') || [...u.permissions].some((p) => p.startsWith('approval.act.'))) { const inbox = await this.approvals.inbox(u); out.approvals = { pending: inbox.count, oldestDays: inbox.oldestDays }; }
+    if (u.permissions.has('approval.act.COST_ON_RECEIVING') || [...u.permissions].some((p) => p.startsWith('approval.act.'))) { const inbox = await this.approvals.inbox(u); out.approvals = { pending: inbox.count, oldestDays: inbox.oldestDays, ...(u.roleKey === 'ADMIN' ? { withOthers: (await this.approvals.inbox(u, undefined, true)).count - inbox.count } : {}) }; }
     if (u.roleKey !== 'HR_STAFF') {
       if (u.permissions.has('report.sales.own') || u.permissions.has('report.sales.all')) {
         const sales = await this.prisma.db.salesDoc.findMany({ where: { locationId: locWhere, docDate: today, voidedAt: null }, select: { grandTotal: true, paymentMode: true, locationId: true } });
@@ -43,11 +43,23 @@ export class DashboardController {
       if (u.permissions.has('report.inventory.own') || u.permissions.has('report.inventory.all')) {
         out.criticalStock = (await this.alerts.criticalStock(u)).slice(0, 50);
         out.expiring = (await this.alerts.expiring(u)).summary;
-        out.incomingTransfers = await this.prisma.db.transferDoc.count({ where: { status: 'APPROVED', toLocationId: locWhere } });
+        // in transit and waiting for the receiver (owner report 2026-09-30): e-commerce pull-outs and consignments are never confirmed, and a
+        // receipt already entered by a warehouse associate waits for the In-Charge (in My Approvals), so neither counts here
+        const awaiting = { status: 'APPROVED' as const, pendingReceiptBy: null, transferType: { notIn: ['CONSIGNMENT_OUT' as const, 'ECOMMERCE' as const] }, toLocation: { type: { notIn: ['VIRTUAL' as const, 'CONSIGNEE' as const] } } };
+        if (u.locationScoped) {
+          // a franchise associate confirms only when the franchise owner allows it
+          const mine = u.roleKey === 'FRANCHISE_SALES_ASSOCIATE' ? (await this.prisma.db.location.findMany({ where: { id: { in: u.locationIds }, franchiseAssociateReceives: true }, select: { id: true } })).map((l) => l.id) : u.locationIds;
+          if (u.permissions.has('transfer.confirm')) out.incomingTransfers = await this.prisma.db.transferDoc.count({ where: { ...awaiting, toLocationId: { in: mine } } });
+        }
+        else {
+          const rows = await this.prisma.db.transferDoc.findMany({ where: awaiting, select: { toLocation: { select: { name: true, type: true } } } });
+          const by = new Map<string, number>(); for (const r of rows) { const n = r.toLocation.name + (r.toLocation.type === 'FRANCHISE' ? ' (franchise)' : ''); by.set(n, (by.get(n) ?? 0) + 1); }
+          out.transfersInTransit = { count: rows.length, branches: [...by.entries()].map(([name, count]) => ({ name, count })) };
+        }
       }
       if (u.permissions.has('discrepancy.view') || u.permissions.has('count.create')) out.openDiscrepancies = await this.prisma.db.discrepancyCase.count({ where: { status: 'OPEN', countDoc: { locationId: locWhere } } });
     }
-    if (u.roleKey === 'HR_STAFF' || u.permissions.has('charge_form.finalize')) out.chargeFormsPending = await this.prisma.db.chargeForm.count({ where: { finalizedByHrAt: null } });
+    if (u.roleKey === 'HR_STAFF' || u.permissions.has('charge_form.finalize')) out.chargeFormsPending = await this.prisma.db.chargeForm.count({ where: { finalizedByHrAt: null, location: { type: { not: 'FRANCHISE' } } } }); // franchise charges are the franchise owner's, not HR's
     // branch cash funds: every balance for Admin / auditors / Accounting (and the Field Auditor who checks them); own fund for branch staff
     if (['cashfund.view.all', 'cashfund.check', 'cashfund.use', 'cashfund.manage'].some((k) => u.permissions.has(k))) out.cashFunds = await this.cashFund.dashboard(u);
     // discrepancy countdown for branch staff: days left before an open case is charged (shown in bold red)

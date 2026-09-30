@@ -18,7 +18,8 @@ You run one branch: sales, expenses, stock received and sent, the weekly count, 
 **Recording a sale** (menu: New Sale)
 1. Type the **DR / SI number** from the paper receipt.
 2. Choose the **channel** (walk-in, delivery, franchise, dealer, agent, shipping) and the **payment mode**.
-3. Add the items: type the name or SKU, or scan the barcode. Freebies are added at ₱0.
+3. Add the items: type the name or SKU, or scan the barcode. Only items your branch has on hand are listed, with the quantity. Freebies are added at ₱0.
+   - If the item has more than one **flavor or expiry date**, choose the one you are giving the customer (the oldest is listed first). The line shows the flavor, expiry and how many are left of it.
 4. Payment details:
    - **Online (bank / GCash):** choose the account that received the money (for example **Gcash (GWS)**) and upload the screenshot.
    - **Credit card:** choose the account, then type MID, slip no., approval code and batch no., and upload the slip.
@@ -26,11 +27,12 @@ You run one branch: sales, expenses, stock received and sent, the weekly count, 
    - **Delivery:** choose the rider and type the delivery fee.
 5. **Incentive paid from the sale:** press **+ Add incentive expense**, choose the type (sales or rider/driver), who receives it and the amount. It is taken from the cash to deposit and recorded as your branch's expense.
 6. A price lower than the list price is a **special price**: it is saved, and the Owner approves it.
-7. Press **Save sale**. Stock is deducted at once.
+7. Press **Review sale**. Check every detail on the review screen (items, flavor / expiry, quantities, prices, payment, customer, total), then press **Confirm and save sale**, or **Go back and edit**. Stock is deducted at once.
 
 **Mistakes on a sale**
 - Before today's report is submitted: open the sale in **Sales List** and **Void** it with a reason, then record it again.
-- After the report is submitted (or on an earlier day): open the sale and request a **post-close edit** (the auditors approve). Every approved correction is logged against the person who made the document.
+- After the report is submitted (or on an earlier day): on **Daily Close & Deposit** or **Daily Sales Report**, use **Change a closed day**: choose the date, the sale or expense, then *Correct details* or *Void it*, and the **reason** (required). The card shows who approves it (the Head Auditor and the Asst Auditor; at a franchise, the owner).
+- HR and the Head Auditor are told of every post-close edit. **Three in one month, or three days in a row, is flagged** and may be referred to the Owner as negligence of duty, so review the report well before submitting. Every approved correction is logged against the person who made the document.
 
 **Expenses** (menu: Expenses)
 1. Choose the account (for example Meralco, Water), the payee and the amount.
@@ -58,7 +60,8 @@ You run one branch: sales, expenses, stock received and sent, the weekly count, 
    4. Press **Confirm receipt**. Only what you received goes into your stock.
    5. If there is a difference, the steps start by themselves (see **When the received quantity is different** below). You are told of each step.
    - **Finding a transfer:** use **View** (Outgoing pull-outs or Incoming transfer-ins) and **Branches** (tick the branches to see; none ticked = all). Franchises are marked "(franchise)" in every list.
-3. **Returning stock:** prepare a pull-out to the warehouse. The "From" is always your branch.
+3. **Returning stock:** prepare a pull-out to the warehouse. The "From" is always your branch. Choose the flavor / expiry of each item.
+   - **Stock without a flavor** (from before flavors were recorded): Stock on Hand → Batches → **Set flavors**, split the quantity by flavor and save. The item's total does not change.
 4. **Expired or damaged items:** keep them apart and tell the auditors (or return them to the warehouse on a pull-out). Write-offs are decided by the auditors, not the branch.
 
 **When the received quantity is different**
@@ -84,8 +87,8 @@ You run one branch: sales, expenses, stock received and sent, the weekly count, 
 
 **End of the day** (before 8 PM)
 1. **Daily Close & Deposit:** count the money by denomination and save the count. A shortage may be charged to the staff on duty.
-2. **Daily Sales Report:** check every number.
-3. Press **Submit today's report…**, tick **"I acknowledge that this Daily Sales Report is true and correct"** and press **I agree — submit**. Today is then closed for your branch; later changes need a revision request.
+2. **Daily Sales Report:** review every number on the screen, or open **Review report (Excel)** / **Review report (PDF)**, and compare it with your DR/SI slips, card slips, receipts and the cash you counted.
+3. Press **Submit today's report…**. Tick each item of the review list (sales, card and online payments, expenses, money breakdown), tick **"I acknowledge that this Daily Sales Report is true and correct"** and press **I agree — submit**. Today is then closed for your branch; later changes need a revision request.
 4. You are reminded at **7:30 PM**. If the report is not submitted by **9 PM**, it is submitted as it stands, and the Head Auditor, Asst Auditor, Audit Associate and HR are notified.
 
 **Bank deposit of the cash** (menu: Cash on Hand)
@@ -127,8 +130,8 @@ You enter what comes into and goes out of the warehouse. You never see supplier 
 2. For each item, type:
    - **Qty** (bought);
    - **Free (freebie)**: items the supplier gave free, which are recorded as Other Income;
-   - **Expiry** and **Batch #**.
-3. Same item with two expiry dates: press **+ another expiry** and split the quantity.
+   - **Flavor** (choose from the list or type a new one), **Expiry** and **Batch #**.
+3. Same item in two flavors or with two expiry dates: press **+ another flavor / expiry** and split the quantity. The item is still counted as one SKU; each flavor is chosen when it is sold or moved.
 4. Under **Upload Supplier Delivery Receipt**, take a photo (or choose the PDF) of the supplier's DR / invoice, then press **Create draft** and **Submit**. The receipt is kept with the delivery; more files can be added on its page.
 5. Approval steps:
    1. The **In-Charge** checks the goods against the supplier's delivery receipt and approves ("1. Waiting for the In-Charge to check the goods").
@@ -136,7 +139,7 @@ You enter what comes into and goes out of the warehouse. You never see supplier 
    3. Only then is the stock added to the warehouse.
 
 **Sending stock out** (menu: Transfers & Pull-outs)
-1. Prepare a pull-out to a branch or franchise. The oldest expiry is picked first.
+1. Prepare a pull-out to a branch or franchise. Only items the warehouse has are listed. For an item with several flavors or expiry dates, choose which one to send (the oldest is listed first).
 2. Print the draft if needed, then **Submit**.
 3. Approval steps: the In-Charge approves first, then the auditors (between company locations) or the Owner (to a franchise). The receiver confirms what arrived.
 4. **Branch requests:** when a branch asks for stock, the notification opens the transfer with that branch already chosen.
@@ -198,6 +201,8 @@ You are responsible for the warehouse stock. You check your associates' entries,
   1. Open each parcel and type how many items are **good** and how many are **damaged or expired**.
   2. Press **Receive**. Good items go back to Warehouse stock. Damaged items come in and a write-off goes to the Head Auditor.
 
+**Flavors:** set the flavor of old warehouse stock on Stock on Hand → Batches → **Set flavors**. Deliveries record the flavor per line.
+
 **Finding transfers:** Transfers & Pull-outs → **View** (pull-outs or transfer-ins) and **Branches**: tick the branches to see, for example only the franchises you send to. Franchises show "(franchise)" beside the name.
 
 **Reports:** Stock on Hand, Inventory Reports (quantities only).
@@ -212,7 +217,7 @@ You approve costs and most corrections, audit the branches, and watch the cash.
   2. Open the delivery and check or type the unit cost of each line (freebies included). **New products need a cost before you approve**; if one is missing, the system tells you and the delivery stays in your list.
   3. Approve: the stock is added. An unchanged cost approves by itself after 24 hours.
 - **Transfers between company locations:** you or the Asst Auditor (either one).
-- **Post-close edits of company branches:** you **and** the Asst Auditor (both).
+- **Post-close edits of company branches:** you **and** the Asst Auditor (both). You are also told of every request with the person's count this month; three in a month (or three days in a row) is flagged for HR to refer to the Owner.
 - **Transfer received with a different quantity:** open it (the transfer page shows the form quantity, what was received and the note). **Confirm the difference** sends it to the sending branch; **Receiver miscounted** gives the receiving branch the items as on the form.
 - **Write-offs, discrepancy resolutions, count revisions and discrepancy explanations:** you alone.
   - Explanation accepted → the stock is adjusted and nobody is charged.
@@ -226,6 +231,7 @@ You approve costs and most corrections, audit the branches, and watch the cash.
 - You may edit products and suppliers.
 - **Cost:** open a product → **Edit cost** → new cost, effective date and reason → **Send for approval**. The Owner approves it, then the cost-access roles are notified.
 - **Days to consume one unit:** set it on the product. It drives the customer re-order reminders.
+- **Flavors:** list the flavors of a SKU on the product (for example Choco, Vanilla). New flavors typed at receiving are added by themselves.
 - New products and suppliers you create wait for the Owner's approval.
 - Only the Owner deletes.
 
@@ -333,17 +339,18 @@ You keep the books.
 4. **AR payments** entered by branches wait for you or the Accounting Associate in **My Approvals**. Each one shows the customer, the amount, how it was paid, the **account it was deposited to**, the invoices and the **proof of payment** (click the picture to enlarge it).
    - **Approve** when the money is in the account.
    - **Reject** asks for the reason: wrong amount, wrong proof, proof unclear, money not received, wrong account, wrong customer or invoice, duplicate, wrong date, cheque bounced or not cleared, or another reason you type. The branch sees it.
-5. **Opening AR (credit from before GWS-ERP)** (menu: AR & Collections → Opening AR):
+5. **Agent incentives** (menu: Agent Incentives): approve the monthly incentive the Sales Manager confirmed (in My Approvals, with the Accounting Associate; the Owner approves last). When HR has the agent's signature, press **Tag as released**: how it was paid (bank transfer, GCash, cheque or cash), the account, the reference and the date.
+6. **Opening AR (credit from before GWS-ERP)** (menu: AR & Collections → Opening AR):
    1. Press **+ Enter opening AR**. Choose the branch, the customer type (Dealer, Franchisee, Agent or Other) and the customer.
    2. Type the DR / SI no., the invoice date, the due date and the balance still owed. Tick **There is a PDC** only if there is a cheque, then type the bank, cheque no. and date.
    3. Press **Send for the Owner's approval**. Enter the next one; the branch, type and date stay filled in.
    4. After the Owner approves, it appears in that branch's AR & Collections and the branch is notified. Rejected entries show the Owner's reason.
    - Many invoices at once: Imports → **Open AR** (same approval).
    - It is not posted to the books again: the AR beginning balance is already in Periods & Opening.
-6. **Payroll:** close HR's finalized runs by choosing the paying bank account.
-7. **Bank & Office:** record main bank transactions, with the bank or **Gcash (GWS)** account and the book they belong to.
-8. You are notified of supplier cost changes.
-9. **E-commerce payouts** (TikTok, Shopee, Lazada) come to you in Approvals.
+7. **Payroll:** close HR's finalized runs by choosing the paying bank account.
+8. **Bank & Office:** record main bank transactions, with the bank or **Gcash (GWS)** account and the book they belong to.
+9. You are notified of supplier cost changes.
+10. **E-commerce payouts** (TikTok, Shopee, Lazada) come to you in Approvals.
    1. Check that gross sales − seller discounts − fees − refunds − withholding tax = the payout. **Open full document** shows the order list and any orders left out.
    2. Compare the payout with the platform wallet or the bank, then **Approve**.
    3. The sale, each fee, the creditable withholding tax and the payout (to the platform's cash account) are posted, together with the cost of goods sold.
@@ -353,10 +360,11 @@ You keep the books.
 ## Accounting Associate
 <!-- role: ACCOUNTING_ASSOCIATE -->
 1. **AR payments** entered by branches: approve or reject them in My Approvals.
-2. **Opening AR (credit from before GWS-ERP):** AR & Collections → Opening AR → **+ Enter opening AR** for any branch (branch, customer, DR / SI, invoice date, due date, balance, PDC if any) → **Send for the Owner's approval**. Once approved it shows in the branch's AR.
-3. **Journal Vouchers:** view entries and correct them with **Edit entry** (balanced, no negatives, open period). The people involved and the Owner are notified.
-4. **Bank & Office:** record bank transactions and see balance-sheet account balances.
-5. **Payroll:** you see totals only. Record government contribution payments.
+2. **Agent incentives:** approve them in My Approvals, and **Tag as released** on Agent Incentives once paid (mode, account, reference, date).
+3. **Opening AR (credit from before GWS-ERP):** AR & Collections → Opening AR → **+ Enter opening AR** for any branch (branch, customer, DR / SI, invoice date, due date, balance, PDC if any) → **Send for the Owner's approval**. Once approved it shows in the branch's AR.
+4. **Journal Vouchers:** view entries and correct them with **Edit entry** (balanced, no negatives, open period). The people involved and the Owner are notified.
+5. **Bank & Office:** record bank transactions and see balance-sheet account balances.
+6. **Payroll:** you see totals only. Record government contribution payments.
 
 ## HR Staff
 <!-- role: HR_STAFF -->
@@ -380,9 +388,11 @@ You handle people: employees, accounts, pay, charges and notices. You have no ac
    - Print the Charge Form and the Salary Deduction Authorization.
 6. **HR Notices (NTE):** when a branch did not deposit its cash on time, a notice lists the amount, the dates and the staff on duty.
    - Issue the NTE, then **Mark NTE issued**; **Close** it when settled.
-7. **Transfer differences:** every confirmed difference between a transfer form and what arrived comes to HR Notices with the person answerable (who prepared the form, or the receiver who miscounted) and how many cases they had in 30 days. The Owner decides any action.
+7. **Post-close edits:** each one a branch person asks for comes to HR Notices (one notice per person per month, with the list and the reasons). From the **third in a month, or three days in a row**, it is marked red: press **Refer to the Owner**.
+8. **Transfer differences:** every confirmed difference between a transfer form and what arrived comes to HR Notices with the person answerable (who prepared the form, or the receiver who miscounted) and how many cases they had in 30 days. The Owner decides any action.
    - From the **third** case of the same person in 30 days, the notice is marked in red: press **Refer to the Owner** for a more serious consideration.
-8. **Watching:**
+9. **Agent incentives** (menu: Agent Incentives): when the Owner approves an incentive, its release form (AI-000001…) comes to you. **Print form**, have the agent sign it, then press **Agent signed**. Accounting then releases the payment and tags it.
+10. **Watching:**
    - Weekly Count Check shows who did not submit a count sheet.
    - You are notified of count discrepancies, explanations and Daily Sales Reports not submitted by the cut-off.
    - The Error Log shows errors per staff member.
@@ -418,6 +428,8 @@ You see and can do everything. You are the final approver.
    - **Transfer differences** the sending branch disagrees with or did not answer in 2 days: open the transfer and choose: the difference stands (-002 form back to the sender), received after all, lost as a company expense, or lost and charged to staff.
    - **Sales targets** set by the Sales Manager.
    - **Opening AR** (credit from before GWS-ERP) entered by Accounting: check branch, customer, DR / SI, dates and amount, then approve. It then appears in that branch's AR and the branch is notified.
+   - **Anything waiting with someone else:** tick **Show everything waiting**. As the Owner you may approve any request; your decision is final (the workflow shows "Owner (final)").
+   - **Agent incentives** after the Accounting Associate and the Accounting Head.
    - **Faster approvals:** every group has **Tick all** and **Approve all**; **Select all** at the top ticks everything, then **Approve selected**. Each item still shows its own result (for example a delivery whose new product needs a cost stays in the list).
 2. **Users & Roles:** create accounts (one per person), change roles and branches, tick extra permissions, reset passwords. Your own new records are created at once.
 3. **Deleting:** only you delete products and back-office data. A record already used is archived instead.
@@ -499,6 +511,11 @@ You follow the sales of every branch, agent and e-commerce platform, and you set
 - The dark line on each bar is how much of the month has gone. **Green** = on track, **amber** = slightly behind, **red** = behind.
 - An agent listed at several branches counts as one person: all their sales add up.
 
+**Agent incentives** (menu: Agent Incentives)
+1. Choose the month. Each agent's total sales (every branch), what is collected and what is unpaid are listed.
+2. Type the incentive as a % of sales or as an amount and press **Confirm**.
+3. It goes to the Accounting Associate, the Accounting Head and the Owner. After the Owner approves, the release form goes to HR, and Accounting tags the payment. You are told at each step.
+
 **Agent accounts** (menu: Sales Targets → Agent accounts)
 - Link each agent to their **Agent** user account (the Owner creates it in Users & Roles). The agent then sees their own sales and target.
 
@@ -516,8 +533,9 @@ You see only your own sales, wherever the items came from, and your own target. 
    - **My target** and **Achieved**: green when you are on track for the days gone, red when behind.
    - **Customers who have not paid yet**: nearest due date first; red = overdue. Follow them up and remind them of their PDC dates.
    - **This year, month by month**: your sales per month.
-3. If My Sales says your account is not linked, ask the Sales Manager to link it.
-4. **Products & Prices:** retail and agent prices.
+3. **Agent Incentives:** your incentive per month, its status (waiting for approval, with HR to sign, released) and how it was paid.
+4. If My Sales says your account is not linked, ask the Sales Manager to link it.
+5. **Products & Prices:** retail and agent prices.
 
 ## Other users (custom permissions)
 <!-- role: CUSTOM -->

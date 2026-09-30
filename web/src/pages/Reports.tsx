@@ -1,3 +1,4 @@
+import { PostCloseEditCard } from '@/components/PostCloseEditCard';
 import { locLabel } from '@/lib/utils';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
@@ -9,11 +10,19 @@ import { DataTable } from '@/components/ui/table';
 import type { ColumnDef } from '@tanstack/react-table';
 
 /** §8.5 Daily Sales Report — on-screen FRONT view + xlsx/PDF exports in the sample layout. */
+// the reminder to review every detail before the report is submitted (owner request 2026-09-30)
+const REVIEW_ITEMS = [
+  'Every sale of the day is recorded, and the totals per channel and payment (cash, card, online, AR) match the DR/SI slips.',
+  'Card slips and online / GCash payments match the amounts and the accounts shown.',
+  'Every expense and incentive is recorded, with its receipt.',
+  'The money breakdown equals the cash I counted, and the cash to deposit is correct.',
+];
+
 export function DailySalesReportPage() {
   const { me, can } = useAuth(); const [sp] = useSearchParams(); const qc = useQueryClient();
   const [locationId, setLocationId] = useState(sp.get('locationId') ?? me!.locations[0]?.id ?? ''); const [date, setDate] = useState(sp.get('date') ?? today()); const [audit, setAudit] = useState(false);
   const sub = useQuery({ queryKey: ['dsr-submission', locationId, date], queryFn: () => api.get<{ submitted: boolean; status?: string; submittedAt?: string; submittedByName?: string | null; acknowledgementText: string }>(`/api/reports/daily-sales/submission?locationId=${locationId}&date=${date}`), enabled: !!locationId });
-  const [confirmOpen, setConfirmOpen] = useState(false); const [ack, setAck] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false); const [ack, setAck] = useState(false); const [checked, setChecked] = useState<Set<number>>(new Set());
   const submit = useMutation({ mutationFn: () => api.post('/api/reports/daily-sales/submit', { locationId, date, acknowledged: true }), onSuccess: () => { setConfirmOpen(false); setAck(false); void qc.invalidateQueries({ queryKey: ['dsr-submission'] }); void qc.invalidateQueries({ queryKey: ['dashboard'] }); } });
   const canSubmit = can('sale.create') && me!.locationScoped && date === today() && sub.data && !sub.data.submitted;
   const locations = useQuery({ queryKey: ['locations'], queryFn: () => api.get<{ id: string; name: string; isSelling: boolean }[]>('/api/locations'), enabled: !me!.locationScoped });
@@ -21,15 +30,18 @@ export function DailySalesReportPage() {
   const r = q.data as unknown as { header: { branch: string; date: string }; cash: Record<string, string>; creditCard: Record<string, string>; onlineWalkIn: Record<string, string>; onlineDelivery: Record<string, string>; shipping: Record<string, string>; onlineCcShippingTotal: string; ar: string; channelTotals: { channel: string; amount: string; products: number }[]; productCounts: Record<string, number>; riders: { rider: string; productAmount: string; deliveryFee: string; subtotal: string; incentives: string; total: string }[]; moneyBreakdown: Record<string, number> | null; cashCount: { counted: string; expected: string; variance: string } | null; expenses: { accountTitle: string; payee: string | null; amount: string; group: string }[]; expenseTotals: { major: string; other: string; total: string; riderExpense: string; shippingExpense: { orders: string; marketing: string } }; freebies: { item: string; qty: number }[]; byPaymentAccount?: { account: string; mode: string; count: number; amount: string }[]; bankDeposit: { cash: string; expenses: string; total: string }; overallSales: string; totalProducts: number; audit?: { costOfSales: string; grossProfit: string; grossMarginPct: number } } | undefined;
   const KV = ({ rows }: { rows: [string, unknown][] }) => <table className="w-full text-sm"><tbody>{rows.map(([k, v]) => <tr key={k} className="border-t"><td className="py-1">{k}</td><td className="num">{typeof v === 'number' ? v : peso(v)}</td></tr>)}</tbody></table>;
   return <div className="space-y-4">
-    <div className="flex flex-wrap items-end gap-2"><h1 className="mr-auto text-2xl font-bold tracking-tight text-navy">Daily Sales Report</h1>{!me!.locationScoped && <Field label="Branch"><Select value={locationId} onChange={(e) => setLocationId(e.target.value)}><option value="">—</option>{locations.data?.filter((l) => l.isSelling).map((l) => <option key={l.id} value={l.id}>{locLabel(l)}</option>)}</Select></Field>}<Field label="Date"><Input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>{can('cost.view') && <label className="flex items-center gap-1 pb-2 text-sm"><input type="checkbox" checked={audit} onChange={(e) => setAudit(e.target.checked)} /> Audit summary (margin)</label>}<Button variant="outline" disabled={!locationId} onClick={() => api.download(`/api/reports/daily-sales.xlsx?locationId=${locationId}&date=${date}`, `DailySalesReport_${date}.xlsx`)}>Export xlsx</Button><Button variant="outline" disabled={!locationId} onClick={() => api.download(`/api/reports/daily-sales.pdf?locationId=${locationId}&date=${date}`, `DailySalesReport_${date}.pdf`)}>PDF</Button></div>
+    <div className="flex flex-wrap items-end gap-2"><h1 className="mr-auto text-2xl font-bold tracking-tight text-navy">Daily Sales Report</h1>{!me!.locationScoped && <Field label="Branch"><Select value={locationId} onChange={(e) => setLocationId(e.target.value)}><option value="">—</option>{locations.data?.filter((l) => l.isSelling).map((l) => <option key={l.id} value={l.id}>{locLabel(l)}</option>)}</Select></Field>}<Field label="Date"><Input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>{can('cost.view') && <label className="flex items-center gap-1 pb-2 text-sm"><input type="checkbox" checked={audit} onChange={(e) => setAudit(e.target.checked)} /> Audit summary (margin)</label>}<Button variant="outline" disabled={!locationId} onClick={() => api.download(`/api/reports/daily-sales.xlsx?locationId=${locationId}&date=${date}`, `DailySalesReport_${date}.xlsx`)}>Review report (Excel)</Button><Button variant="outline" disabled={!locationId} onClick={() => api.download(`/api/reports/daily-sales.pdf?locationId=${locationId}&date=${date}`, `DailySalesReport_${date}.pdf`)}>Review report (PDF)</Button></div>
     {sub.data && (sub.data.submitted
       ? <div className={`rounded-xl border p-3 text-sm ${sub.data.status === 'AUTO_SUBMITTED' ? 'border-amber-300 bg-amber-50 text-amber-900' : 'border-emerald-200 bg-emerald-50 text-emerald-900'}`}>{sub.data.status === 'AUTO_SUBMITTED' ? 'Not submitted by the branch — submitted automatically at the cut-off as it stood.' : <>Submitted as true and correct by <b>{sub.data.submittedByName}</b> on {new Date(sub.data.submittedAt!).toLocaleString()}.</>} The day is closed; changes need a revision request (Daily Close → post-close edit).</div>
-      : canSubmit && <div className="flex flex-wrap items-center gap-3 rounded-xl border border-brand/30 bg-brand-soft p-3 text-sm"><span className="flex-1"><b>Review today's report below</b>, then submit it before 8 PM (store closing). If it is not submitted by the cut-off, it is submitted as it stands and the auditors and HR are notified.</span><Button onClick={() => setConfirmOpen(true)} disabled={!r}>Submit today's report…</Button></div>)}
+      : canSubmit && <div className="flex flex-wrap items-center gap-3 rounded-xl border border-brand/30 bg-brand-soft p-3 text-sm"><span className="flex-1"><b>Review every detail of today's report below</b> (or open <i>Review report</i> in Excel / PDF) and compare it with your DR/SI slips, card slips, receipts and the cash you counted. Then submit it before 8 PM (store closing). If it is not submitted by the cut-off, it is submitted as it stands and the auditors and HR are notified.</span><Button onClick={() => setConfirmOpen(true)} disabled={!r}>Submit today's report…</Button></div>)}
     {confirmOpen && <Modal title="Submit today's Daily Sales Report" onClose={() => setConfirmOpen(false)}>
       {r && <p className="mb-3 text-sm text-slate-600">{r.header.branch} · {r.header.date} · overall sales <b>{peso(r.overallSales)}</b> · cash to deposit <b>{peso(r.bankDeposit.total)}</b></p>}
+      <div className="mb-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm" data-testid="dsr-review-list"><div className="mb-1 font-semibold text-amber-900">Before submitting, check each one:</div>
+        {REVIEW_ITEMS.map((t, i) => <label key={i} className="flex items-start gap-2 py-0.5"><input type="checkbox" className="mt-0.5" checked={checked.has(i)} onChange={() => { const n = new Set(checked); n.has(i) ? n.delete(i) : n.add(i); setChecked(n); }} /><span>{t}</span></label>)}
+      </div>
       <label className="flex items-start gap-2 rounded-xl border border-slate-200 p-3 text-sm"><input type="checkbox" className="mt-0.5" checked={ack} onChange={(e) => setAck(e.target.checked)} /><span>{sub.data?.acknowledgementText ?? 'I acknowledge that this Daily Sales Report is true and correct.'}</span></label>
       <p className="mt-2 text-xs text-slate-500">After submitting, today is closed for this branch. Any change afterwards follows the revision protocol (post-close edit approved by the auditors).</p>
-      <div className="mt-4 flex justify-end gap-2"><Button variant="ghost" onClick={() => setConfirmOpen(false)}>Cancel</Button><Button disabled={!ack || submit.isPending} onClick={() => submit.mutate()}>I agree — submit</Button></div>
+      <div className="mt-4 flex justify-end gap-2"><Button variant="ghost" onClick={() => setConfirmOpen(false)}>Cancel</Button><Button disabled={!ack || checked.size < REVIEW_ITEMS.length || submit.isPending} onClick={() => submit.mutate()}>I agree — submit</Button></div>
       <ErrorBox error={submit.error} />
     </Modal>}
     {r && <div className="grid gap-4 lg:grid-cols-2">
@@ -48,6 +60,7 @@ export function DailySalesReportPage() {
         <Card title="Summary for bank deposit"><KV rows={[['Cash', r.bankDeposit.cash], ['Less: cash expenses', r.bankDeposit.expenses], ['Total cash deposit', r.bankDeposit.total], ['Overall sales', r.overallSales], ['Total products', r.totalProducts]]} />{r.audit && <div className="mt-3 rounded bg-amber-50 p-2 text-sm"><div className="text-xs uppercase text-slate-500">Audit (cost.view only)</div>Cost of sales {peso(r.audit.costOfSales)} · Gross profit {peso(r.audit.grossProfit)} ({r.audit.grossMarginPct}%)</div>}</Card>
       </div>
     </div>}
+    {can('sale.create') && locationId && <PostCloseEditCard locationId={locationId} date={date} isFranchise={me!.locations.find((l) => l.id === locationId)?.type === 'FRANCHISE'} />}
   </div>;
 }
 

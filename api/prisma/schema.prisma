@@ -203,6 +203,8 @@ model Product {
   categoryId       String   @map("category_id")
   brand            String?
   unit             String   @default("pc")
+  /// flavors this SKU comes in (owner request 2026-09-30); receiving suggests them and adds new ones
+  flavors          String[] @default([])
   supplierId       String?  @map("supplier_id")
   trackExpiry      Boolean  @default(true) @map("track_expiry")
   active           Boolean  @default(true)
@@ -317,6 +319,8 @@ model Batch {
   productId        String    @map("product_id")
   batchNo          String?   @map("batch_no")
   expiryDate       DateTime? @map("expiry_date") @db.Date
+  /// flavor of this batch (owner request 2026-09-30): a SKU is one item; its flavors are told apart per batch, like expiry
+  flavor           String?
   receivedRef      String?   @map("received_ref") // receiving doc id / opening stock ref
   unitCost         Decimal   @map("unit_cost") @db.Decimal(14, 2)
   originalUnitCost Decimal?  @map("original_unit_cost") @db.Decimal(14, 2) // kept when revalued (R12)
@@ -479,6 +483,7 @@ model ReceivingLine {
   freeQty       Int       @default(0) @map("free_qty")
   expiryDate    DateTime? @map("expiry_date") @db.Date
   batchNo       String?   @map("batch_no")
+  flavor        String?
   unitCost      Decimal?  @map("unit_cost") @db.Decimal(14, 2) // entered by Head Auditor; hidden from warehouse roles
   costUnchanged Boolean   @default(false) @map("cost_unchanged")
   isNewProduct  Boolean   @default(false) @map("is_new_product")
@@ -2137,4 +2142,39 @@ model OpeningArEntry {
 
   @@index([status, locationId])
   @@map("opening_ar_entries")
+}
+
+/// Agent incentive for one month (owner request 2026-09-30): the Sales Manager confirms the agent's total sales and the incentive; the
+/// Accounting Associate, the Accounting Head and the Owner approve; the approved form goes to HR for release; Accounting tags the payment.
+model AgentIncentive {
+  id                String    @id @default(uuid())
+  month             String // YYYY-MM
+  agentKey          String    @map("agent_key")
+  agentName         String    @map("agent_name")
+  agentUserId       String?   @map("agent_user_id")
+  branches          String[]  @default([])
+  transactions      Int       @default(0)
+  totalSales        Decimal   @map("total_sales") @db.Decimal(14, 2)
+  collected         Decimal   @db.Decimal(14, 2)
+  ratePct           Decimal?  @map("rate_pct") @db.Decimal(6, 3)
+  amount            Decimal   @db.Decimal(14, 2)
+  notes             String?
+  status            String    @default("PENDING") // PENDING | APPROVED (with HR) | SIGNED (agent signed, ready to pay) | RELEASED | REJECTED
+  formNo            String?   @unique @map("form_no")
+  approvalRequestId String?   @map("approval_request_id")
+  preparedBy        String    @map("prepared_by")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  approvedAt        DateTime? @map("approved_at")
+  decisionNote      String?   @map("decision_note")
+  hrSignedBy        String?   @map("hr_signed_by")
+  hrSignedAt        DateTime? @map("hr_signed_at")
+  releaseMode       String?   @map("release_mode") // BANK_TRANSFER | GCASH | CHEQUE | CASH
+  releaseAccountId  String?   @map("release_account_id")
+  releaseReference  String?   @map("release_reference")
+  releaseDate       DateTime? @map("release_date") @db.Date
+  releasedBy        String?   @map("released_by")
+  releasedAt        DateTime? @map("released_at")
+
+  @@index([month, agentKey])
+  @@map("agent_incentives")
 }

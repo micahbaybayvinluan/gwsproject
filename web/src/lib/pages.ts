@@ -9,6 +9,7 @@ export const PAGES: Record<string, PageInfo> = {
   '/approvals': { label: 'My Approvals', summary: 'Documents other people sent for your approval. Open one to see the details, then approve or reject it.' },
   '/notifications': { label: 'Notifications', summary: 'Every message the system sent you, newest first. Click one to open the document it is about.' },
   '/my-sales': { label: 'My Sales', summary: 'Your own sales at every branch, your monthly target and how much of it is done, and your customers who have not paid yet (nearest due first).' },
+  '/incentives': { label: 'Agent Incentives', summary: 'Each agent’s total sales for the month and the incentive: the Sales Manager confirms, Accounting and the Owner approve, HR has the agent sign the release form, and Accounting tags how it was paid.' },
   '/targets': { label: 'Sales Targets', summary: 'Monthly sales targets per branch and per agent, and how much is achieved so far. The Sales Manager sets them; the Owner approves.' },
   '/sales/new': { label: 'New Sale', summary: 'Record a sale from the paper DR/SI: channel, payment, items and, if allowed, an incentive paid from the sale. Stock is deducted at once.' },
   '/sales': { label: 'Sales List', summary: 'All recorded sales for the chosen dates and branch. Open a sale to print the DR, void it or request a correction.' },

@@ -12,9 +12,10 @@ interface Item { productId: string; name: string; qty: number; unitPrice?: strin
 const BASIS: Record<string, string> = { SRP: 'Retail price (SRP)', CONSIGNEE_PRICE: 'Consignee price list', COST: 'Agreed price (cost based)' };
 
 /** Product search + a list of items with quantities (and prices when `withPrice`). */
-function ItemPicker({ items, setItems, withPrice, onAdd }: { items: Item[]; setItems: (x: Item[]) => void; withPrice?: boolean; onAdd?: (productId: string) => void }) {
+function ItemPicker({ items, setItems, withPrice, onAdd, inStockAt }: { items: Item[]; setItems: (x: Item[]) => void; withPrice?: boolean; onAdd?: (productId: string) => void; inStockAt?: string }) {
   const [search, setSearch] = useState('');
-  const products = useQuery({ queryKey: ['products', search], queryFn: () => api.get<{ id: string; name: string; sku: string }[]>(`/api/products?search=${encodeURIComponent(search)}&take=20`), enabled: search.length >= 2 });
+  // sending goods out: only what the branch has on hand (owner request 2026-09-30)
+  const products = useQuery({ queryKey: ['products', search, inStockAt ?? ''], queryFn: () => api.get<{ id: string; name: string; sku: string; onHand?: number }[]>(`/api/products?search=${encodeURIComponent(search)}&take=20${inStockAt ? `&inStockAt=${inStockAt}` : ''}`), enabled: search.length >= 2 });
   return <div>
     <Input placeholder="Add an item: type the name or SKU…" value={search} onChange={(e) => setSearch(e.target.value)} />
     {search.length >= 2 && <ul className="mt-1 max-h-48 divide-y overflow-auto rounded-xl border bg-white text-sm">{products.data?.map((p) => <li key={p.id}><button className="w-full px-3 py-2 text-left hover:bg-slate-50" onClick={() => { if (!items.some((i) => i.productId === p.id)) { setItems([...items, { productId: p.id, name: p.name, qty: 1 }]); onAdd?.(p.id); } setSearch(''); }}>{p.name} <span className="text-xs text-slate-500">{p.sku}</span></button></li>)}</ul>}
@@ -63,7 +64,7 @@ export function ConsignmentPage() {
         {tab === 'sales' && <><Field label="Sold from"><Input type="date" value={period.from} onChange={(e) => setPeriod({ ...period, from: e.target.value })} /></Field><Field label="Sold until"><Input type="date" value={period.to} onChange={(e) => setPeriod({ ...period, to: e.target.value })} /></Field></>}
       </div>
       {c && <p className="mt-2 text-xs text-slate-500">{c.name}{c.priceBasis ? ` · pays at ${BASIS[c.priceBasis] ?? c.priceBasis}` : ''}{c.settlementTerms ? ` · ${c.settlementTerms}` : ''}</p>}
-      {cn && (tab !== 'sales' ? loc : true) && !draftId && <div className="mt-4"><ItemPicker items={items} setItems={setItems} withPrice={tab === 'sales'} onAdd={tab === 'sales' ? (id) => void prefill([id]) : undefined} /></div>}
+      {cn && (tab !== 'sales' ? loc : true) && !draftId && <div className="mt-4"><ItemPicker items={items} setItems={setItems} inStockAt={tab === 'send' ? loc : undefined} withPrice={tab === 'sales'} onAdd={tab === 'sales' ? (id) => void prefill([id]) : undefined} /></div>}
       {tab === 'sales' && items.length > 0 && <p className="mt-2 text-sm">Prices are filled in from the agreement; you may change them.{hasPrice ? <> Total <b>{peso(total)}</b>.</> : ''}</p>}
       {tab !== 'sales' && !draftId && items.length > 0 && <div className="mt-4 flex gap-2"><Button disabled={!loc || saveDraft.isPending} onClick={() => saveDraft.mutate()}>Save draft</Button></div>}
       {draftId && <div className="mt-4 flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 p-3 text-sm"><Badge tone="amber">Draft {draftId.controlNo}</Badge><Button variant="outline" onClick={() => api.download(`/api/reports/forms/pull-out/${draftId.id}.pdf`, `Consignment-${draftId.controlNo}-DRAFT.pdf`)}>Print draft</Button><Button disabled={submitDraft.isPending} onClick={() => submitDraft.mutate()}>Submit for approval</Button><span className="text-xs text-slate-500">{approvalNote}</span></div>}

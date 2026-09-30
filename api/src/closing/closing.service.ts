@@ -130,8 +130,39 @@ export class ClosingService implements OnModuleInit {
     });
     await this.audit.log({ action: 'EDIT_REQUEST', entityType: input.documentType, entityId: input.documentId, before, after: input.after });
     const staffId = (before as { createdBy?: string | null; preparedBy?: string | null }).createdBy ?? (before as { preparedBy?: string | null }).preparedBy ?? null;
+    if (user.roleKey !== 'AUDIT_ASSOCIATE') await this.flagPostCloseEdits(user, loc, (before as { controlNo?: string }).controlNo ?? '', input.documentType, input.reason);
     if (staffId && staffId !== user.id) await this.notify.toUsers([staffId], { type: 'REVISION_REQUESTED', title: `${user.fullName} asked to correct your ${input.documentType.replace(/Doc$/, '').toLowerCase()} ${(before as { controlNo?: string }).controlNo ?? ''}`, body: input.reason, link: '/closing' });
     return edit;
+  }
+  /**
+   * Every post-close edit a branch person asks for is reported to HR and the Head Auditor (owner request 2026-09-30). From the third in
+   * one month, or on three days in a row, the HR notice is flagged and HR is advised to refer it to the Owner (negligence of duty).
+   */
+  private async flagPostCloseEdits(user: SessionUser, loc: { id: string; name: string }, controlNo: string, documentType: string, reason: string) {
+    const month = dateStr(todayManila()).slice(0, 7);
+    const since = new Date(`${month}-01T00:00:00+08:00`);
+    const mine = await this.prisma.db.postCloseEdit.findMany({ where: { requestedBy: user.id, createdAt: { gte: since } }, orderBy: { createdAt: 'asc' } });
+    const count = mine.length;
+    const days = [...new Set(mine.map((m) => dateStr(new Date(m.createdAt.getTime() + 8 * 3600e3))))].sort();
+    const last3 = days.slice(-3);
+    const inARow = last3.length === 3 && last3.every((d, i) => i === 0 || (new Date(`${d}T00:00:00Z`).getTime() - new Date(`${last3[i - 1]}T00:00:00Z`).getTime()) === 864e5);
+    const refer = count >= 3 || inARow;
+    const docs = await Promise.all(mine.map(async (m) => ({ controlNo: (m.before as { controlNo?: string }).controlNo ?? '', documentType: m.documentType, reason: m.reason, at: m.createdAt.toISOString() })));
+    const details = { staffUserId: user.id, staffName: user.fullName, branch: loc.name, month, countInMonth: count, inARow, recommendReferral: refer, edits: docs } as Prisma.InputJsonValue;
+    const title = `Post-close edits by ${user.fullName} (${loc.name}), ${month}`;
+    await this.prisma.db.hrNotice.upsert({
+      where: { dedupeKey: `POST_CLOSE_EDITS:${user.id}:${month}` },
+      create: { kind: 'POST_CLOSE_EDITS', dedupeKey: `POST_CLOSE_EDITS:${user.id}:${month}`, locationId: loc.id, title, details, staffIds: [{ id: user.id, name: user.fullName }] as Prisma.InputJsonValue },
+      update: { title, details },
+    });
+    const what = `${documentType.replace(/Doc$/, '').toLowerCase()} ${controlNo}`.trim();
+    const n = {
+      type: 'POST_CLOSE_EDIT_REPORTED',
+      title: refer ? `${user.fullName} (${loc.name}): ${count} post-close edit${count === 1 ? '' : 's'} in ${month}${inARow ? ', 3 days in a row' : ''} — flagged; HR is advised to refer it to the Owner (negligence of duty)` : `Post-close edit asked by ${user.fullName} (${loc.name}) on ${what} (${count} this month)`,
+      body: `Reason: ${reason}`,
+    };
+    await this.notify.toRoles(['HR_STAFF'], { ...n, link: '/hr-notices' });
+    await this.notify.toRoles(['HEAD_AUDITOR'], { ...n, link: '/approvals?type=POST_CLOSE_EDIT' });
   }
   listEdits(user: SessionUser) { return this.prisma.db.postCloseEdit.findMany({ where: user.locationScoped ? { locationId: { in: user.locationIds } } : {}, orderBy: { createdAt: 'desc' }, take: 200 }); }
 

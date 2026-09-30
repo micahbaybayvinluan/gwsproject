@@ -69,8 +69,23 @@ export class MasterService {
   createCategory(data: Prisma.CategoryCreateInput) { return this.prisma.db.category.create({ data }); }
 
   // ── Products ──
-  async listProducts(user: SessionUser, q: { search?: string; categoryId?: string; includeInactive?: boolean; take?: number }) {
+  async listProducts(user: SessionUser, q: { search?: string; categoryId?: string; includeInactive?: boolean; take?: number; inStockAt?: string; includeExpired?: boolean }) {
     const where: Prisma.ProductWhereInput = {};
+    // New Sale / Transfers (owner request 2026-09-30): only what the branch actually has; 0 on hand is not offered
+    let onHand: Map<string, number> | null = null;
+    if (q.inStockAt) {
+      const today = todayManila();
+      const bal = await this.prisma.db.stockBalance.groupBy({ by: ['productId'], where: { locationId: q.inStockAt, qty: { gt: 0 }, ...(q.includeExpired ? {} : { batch: { OR: [{ expiryDate: null }, { expiryDate: { gte: today } }] } }) }, _sum: { qty: true } });
+      onHand = new Map(bal.map((b) => [b.productId, b._sum.qty ?? 0]));
+      const bundles = await this.prisma.db.bundleComponent.findMany({ select: { bundleProductId: true, componentProductId: true, qty: true } });
+      const byBundle = new Map<string, { componentProductId: string; qty: number }[]>();
+      for (const c of bundles) byBundle.set(c.bundleProductId, [...(byBundle.get(c.bundleProductId) ?? []), c]);
+      for (const [bundleId, comps] of byBundle) {
+        const can = Math.min(...comps.map((c) => Math.floor((onHand!.get(c.componentProductId) ?? 0) / c.qty)));
+        if (can > 0) onHand.set(bundleId, can);
+      }
+      where.id = { in: [...onHand.keys()] };
+    }
     if (!q.includeInactive) where.active = true;
     if (q.categoryId) where.categoryId = q.categoryId;
     if (user.roleKey.startsWith('FRANCHISE')) where.franchiseVisible = true;
@@ -79,7 +94,7 @@ export class MasterService {
     const ids = products.map((p) => p.id);
     const prices = await this.currentPrices(ids);
     const costs = user.permissions.has('cost.view') ? await this.currentCosts(ids) : new Map<string, string>();
-    return products.map((p) => ({ ...p, tierPrices: prices.get(p.id) ?? {}, cost: costs.get(p.id) ?? null }));
+    return products.map((p) => ({ ...p, tierPrices: prices.get(p.id) ?? {}, cost: costs.get(p.id) ?? null, ...(onHand ? { onHand: onHand.get(p.id) ?? 0 } : {}) }));
   }
   async getProduct(id: string, user: SessionUser) {
     const p = await this.prisma.db.product.findUnique({ where: { id }, include: { category: true, supplier: { select: { id: true, code: true, name: true } }, bundleComponents: { include: { component: { select: { id: true, sku: true, name: true } } } } } });

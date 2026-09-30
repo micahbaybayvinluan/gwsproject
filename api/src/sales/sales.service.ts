@@ -20,7 +20,7 @@ import { ScopeService } from '../common/scope.service';
 import { ExpensesService } from '../expenses/expenses.service';
 import { CustomerFollowUpsService } from './customer-followups.service';
 
-export interface SalesLineInput { productId: string; qty: number; unitPrice?: number | null; batchId?: string | null; isFreebie?: boolean; lineRemarks?: string; priceTier?: string }
+export interface SalesLineInput { productId: string; qty: number; unitPrice?: number | null; batchId?: string | null; exactBatch?: boolean; isFreebie?: boolean; lineRemarks?: string; priceTier?: string }
 export interface SalesInput {
   locationId?: string; docDate?: string; channel: SalesChannel; channelSub?: string | null; customerId?: string | null; agentId?: string | null; riderId?: string | null; customerName?: string | null; customerPhone?: string | null; customerEmail?: string | null; drSiNo: string;
   paymentMode: PaymentMode; paymentAccountId?: string | null; proofOfPaymentAttachmentId?: string | null; cardMid?: string; cardSlipNo?: string; cardApprovalCode?: string; cardBatchNo?: string;
@@ -40,7 +40,7 @@ export class SalesService implements OnModuleInit {
     this.approvals.register('AR_PAYMENT', (req, outcome, actor) => this.onPaymentDecision(req.documentId, outcome, actor?.id ?? null, actor?.note));
   }
 
-  private include = { location: { select: { id: true, code: true, name: true, type: true } }, customer: { select: { id: true, code: true, name: true, type: true } }, agent: { select: { id: true, name: true } }, rider: { select: { id: true, name: true } }, paymentAccount: { select: { id: true, title: true, paymentAccountType: true } }, lines: { include: { product: { select: { id: true, sku: true, name: true, category: { select: { accountingClass: true, name: true } } } }, batch: { select: { id: true, batchNo: true, expiryDate: true, isConsignmentIn: true } } } }, payments: { include: { payment: true } } } as const;
+  private include = { location: { select: { id: true, code: true, name: true, type: true } }, customer: { select: { id: true, code: true, name: true, type: true } }, agent: { select: { id: true, name: true } }, rider: { select: { id: true, name: true } }, paymentAccount: { select: { id: true, title: true, paymentAccountType: true } }, lines: { include: { product: { select: { id: true, sku: true, name: true, category: { select: { accountingClass: true, name: true } } } }, batch: { select: { id: true, batchNo: true, expiryDate: true, flavor: true, isConsignmentIn: true } } } }, payments: { include: { payment: true } } } as const;
 
   list(user: SessionUser, q: { locationId?: string; from?: string; to?: string; channel?: string; paymentMode?: string; open?: boolean; take?: number }) {
     const where: Prisma.SalesDocWhereInput = { locationId: this.scope.locationFilter(user, q.locationId) as never, channel: q.channel as SalesChannel | undefined, paymentMode: q.paymentMode as PaymentMode | undefined, voidedAt: null, docDate: q.from || q.to ? { gte: q.from ? toDateOnly(q.from) : undefined, lte: q.to ? toDateOnly(q.to) : undefined } : undefined };
@@ -110,7 +110,7 @@ export class SalesService implements OnModuleInit {
         const consume = product.isBundle && product.bundleComponents.length ? product.bundleComponents.map((c) => ({ productId: c.componentProductId, qty: c.qty * l.qty })) : [{ productId: product.id, qty: l.qty }];
         let first = true;
         for (const c of consume) {
-          const picks = await this.stock.pickFefo(tx, locationId, c.productId, c.qty, { preferBatchId: l.batchId ?? undefined });
+          const picks = await this.stock.pickFefo(tx, locationId, c.productId, c.qty, { preferBatchId: l.batchId ?? undefined, exactBatchId: l.exactBatch && l.batchId && !product.isBundle ? l.batchId : undefined });
           for (const p of picks) {
             const near = !!p.expiryDate && daysBetween(todayManila(), p.expiryDate) <= nearExpiryDays;
             const lineQty = product.isBundle ? (first ? l.qty : 0) : p.qty;

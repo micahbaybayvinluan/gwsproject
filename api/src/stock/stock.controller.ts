@@ -1,10 +1,14 @@
-import { Controller, Get, Param, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { z } from 'zod';
+import { Z } from '../common/zod.pipe';
 import { StockService } from './stock.service';
-import { CurrentUser, RequireAnyPermission } from '../common/decorators';
+import { Audited, CurrentUser, RequireAnyPermission, RequirePermission } from '../common/decorators';
 import type { SessionUser } from '../common/request-context';
 import { ScopeService } from '../common/scope.service';
 import { PrismaService } from '../common/prisma.service';
-import { manilaDateStr } from '../common/manila';
+import { manilaDateStr, todayManila } from '../common/manila';
+
+const FlavorSplit = z.object({ locationId: z.string().uuid(), batchId: z.string().uuid(), parts: z.array(z.object({ flavor: z.string().trim().min(1).max(60), qty: z.number().int().positive() })).min(1).max(30) });
 
 @Controller('api/stock')
 export class StockController {
@@ -33,10 +37,17 @@ export class StockController {
     const loc = this.scope.resolveLocation(u, locationId); const day = manilaDateStr();
     return this.stock.dailyInventory(loc, from || day, to || from || day);
   }
-  @Get('batches/:productId') @RequireAnyPermission('report.inventory.all', 'report.inventory.own', 'sale.create')
+  @Get('batches/:productId') @RequireAnyPermission('report.inventory.all', 'report.inventory.own', 'sale.create', 'transfer.create')
   async batches(@CurrentUser() u: SessionUser, @Param('productId') productId: string, @Query('locationId') locationId: string) {
     this.scope.assertLocation(u, locationId);
     const rows = await this.prisma.db.stockBalance.findMany({ where: { locationId, productId, qty: { gt: 0 } }, include: { batch: true }, orderBy: { batch: { expiryDate: 'asc' } } });
-    return rows.map((r) => ({ batchId: r.batchId, batchNo: r.batch.batchNo, expiryDate: r.batch.expiryDate, qty: r.qty, unitCost: r.batch.unitCost, isConsignmentIn: r.batch.isConsignmentIn }));
+    return rows.map((r) => ({ batchId: r.batchId, batchNo: r.batch.batchNo, expiryDate: r.batch.expiryDate, flavor: r.batch.flavor, expired: !!r.batch.expiryDate && r.batch.expiryDate < todayManila(), qty: r.qty, unitCost: r.batch.unitCost, isConsignmentIn: r.batch.isConsignmentIn }));
+  }
+
+  /** Set the flavor of stock that has none, per batch (owner request 2026-09-30). The SKU's total does not change. */
+  @Post('flavors') @RequirePermission('stock.flavor.set') @Audited('StockBalance', 'SET_FLAVOR')
+  setFlavors(@CurrentUser() u: SessionUser, @Body(Z(FlavorSplit)) b: z.infer<typeof FlavorSplit>) {
+    this.scope.assertLocation(u, b.locationId);
+    return this.stock.setFlavors(b, u.id);
   }
 }

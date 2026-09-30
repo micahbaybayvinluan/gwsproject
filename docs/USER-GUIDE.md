@@ -492,6 +492,41 @@ On **Transfers & Pull-outs**, **View** shows all, only pull-outs (sent) or only 
 
 In every list of branches, a franchise shows **(franchise)** beside its name (and a consignee **(consignee)**).
 
+## Flavors and expiry dates: choosing the right item
+<!-- for: sale.create, transfer.create, receiving.create, stock.flavor.set, product.edit -->
+A SKU is **one item** in the inventory, counted once. Its **flavors** and **expiry dates** are told apart per batch:
+
+- **Receiving:** each line has a **Flavor** (choose from the product's list or type a new one) and an **Expiry**. Same item in two flavors or dates: **+ another flavor / expiry**.
+- **New Sale and Transfers:** only items the branch has on hand are listed, with the quantity. When an item has more than one flavor or expiry, a list opens: choose the one you are selling or sending (the oldest is first). The line shows the flavor, expiry and how many are left of it; asking for more than that is refused.
+- **Stock on Hand:** the Flavors column shows how many of each flavor. Old stock without a flavor: Batches → **Set flavors** (Head Auditor, Asst Auditor, Warehouse In-Charge, the branch). The total does not change.
+- **Products:** the Owner or the Head Auditor keeps the list of flavors on the product.
+
+## Checking a sale before it is saved
+<!-- for: sale.create -->
+**Review sale** opens a check of everything: branch, DR / SI, channel, customer, payment and account, every item with its flavor and expiry, quantities, prices, special prices, fees, incentive and total. Press **Confirm and save sale** when it is right, or **Go back and edit**.
+
+## Agent incentives
+<!-- for: incentive.view, incentive.prepare, agent.self -->
+1. **Sales Manager** (menu: Agent Incentives): choose the month; each agent's total sales at every branch is listed. Type the incentive (% of sales or an amount) and press **Confirm**.
+2. **Accounting Associate, Accounting Head, then the Owner** approve it in My Approvals.
+3. The **release form** (AI-000001…) is made and goes to **HR**: print it, have the agent sign, press **Agent signed**.
+4. **Accounting** presses **Tag as released**: bank transfer, GCash, cheque or cash, the account, the reference and the date.
+The agent sees their own incentive and its status on the same page.
+
+## The Owner may approve anything
+<!-- for: approval.act.SALES_TARGET -->
+The Owner is the highest authority. In My Approvals, **Show everything waiting** lists every request waiting with anyone; the Owner may approve or reject any of them, and the decision is final. The dashboard's "Pending your approval" shows how many more are waiting with others.
+
+## Changing a closed day (post-close edit)
+<!-- for: sale.create, hr.notice, approval.act.POST_CLOSE_EDIT -->
+After the Daily Sales Report is submitted, or for an earlier day, a sale or an expense can only be changed by request:
+
+1. **Daily Close & Deposit** or **Daily Sales Report** → **Change a closed day** → choose the date and the sale or expense.
+2. Choose **Correct details** (DR / SI no., payment mode, customer, delivery fee; for an expense: amount, payee, notes) or **Void it**.
+3. Choose the **reason** (required) and add details → **Send post-close edit request**. The card shows who approves it: the Head Auditor and the Asst Auditor (both), or the franchise owner. Nothing changes until it is approved.
+
+HR and the Head Auditor are told of every request. **Three in one month, or three days in a row, is flagged**; HR is advised to refer it to the Owner as negligence of duty. Review the report carefully before submitting so that edits are rarely needed.
+
 ## Page names and what each page is for
 <!-- for: all -->
 - Every menu item has a descriptive name (for example **Supplier Deliveries** or **Transfers & Pull-outs**).

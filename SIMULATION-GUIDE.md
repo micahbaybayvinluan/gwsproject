@@ -207,6 +207,21 @@ As `acct.assoc`: AR & Collections → Opening AR → **+ Enter opening AR** → 
 **52. Transfers per branch** — `admin`, `wh.incharge`
 Transfers & Pull-outs → **Branches** → tick Mayon (franchise) → Done: only Mayon's transfers remain; View → Incoming shows only what Mayon received. Every branch list marks franchises "(franchise)".
 
+**53. Flavors and expiry** — `wh.incharge`, `head.auditor`, `sales.westave`
+As `wh.incharge`: Supplier Deliveries → New → one item, 5 **Choco** (expiry next year) and **+ another flavor / expiry** 4 **Vanilla** (later expiry) → Submit; `head.auditor` approves the cost. Transfers: send 2 Vanilla to West Ave: the list asks which flavor / expiry. As `sales.westave`: New Sale → search: only items West Ave has are listed, with the quantity → choose Vanilla → **Review sale** → **Confirm and save sale**. Stock on Hand → Batches → **Set flavors** on old stock.
+
+**54. Owner approves anything** — `admin`
+My Approvals → tick **Show everything waiting** → approve an internal transfer waiting for the auditors: it is approved at once and the workflow shows "Owner (final)".
+
+**55. Agent incentives** — `sales.manager`, `acct.assoc`, `acct.head`, `admin`, `hr.staff`, `agent.jerick`
+As `sales.manager`: Agent Incentives → this month → Jerick Quinto → 5 (%) → Confirm. `acct.assoc`, `acct.head` and `admin` approve in My Approvals. As `hr.staff`: Agent Incentives → **Print form** → **Agent signed**. As `acct.head`: **Tag as released** → GCash, reference, date. As `agent.jerick`: Agent Incentives shows it released.
+
+**56. Daily Sales Report review** — `sales.csr`
+Daily Sales Report → **Review report (Excel)** → Submit today's report…: tick the four review items and the acknowledgement → I agree — submit.
+
+**57. Change a closed day** — `sales.westave`, `hr.staff`, `head.auditor`
+After submitting the Daily Sales Report: Daily Close & Deposit → **Change a closed day** → choose a sale → Correct details (DR / SI no.) → reason "Wrong DR / SI number" → Send. The card shows the approvers. Do it three times: `hr.staff` sees HR Notices → "Post-close edits by …" marked red with **Refer to the Owner**; `head.auditor` is told of each one.
+
 ## Where the files come out
 
 All exports download through the browser: Daily Sales Report (xlsx/PDF), Daily Inventory Report (xlsx, one sheet per day plus Summary and Per-day sheets), every paper form (Pull-Out, Transfer-In, DR-Sales, Supplier's Form, Count sheet, Discrepancy Report, Charge Form, Credit Note, Journal Voucher), every list (Export xlsx / CSV buttons), Trial Balance and the financial statements.

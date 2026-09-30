@@ -9,7 +9,7 @@ import { CurrentUser, RequirePermission, RequireAnyPermission, Audited } from '.
 import { Z } from '../common/zod.pipe';
 import type { SessionUser } from '../common/request-context';
 
-const Line = z.object({ productId: z.string().uuid(), qty: z.number().int().positive(), unitPrice: z.number().nonnegative().nullable().optional(), batchId: z.string().uuid().nullable().optional(), isFreebie: z.boolean().optional(), lineRemarks: z.string().optional(), priceTier: z.string().optional() });
+const Line = z.object({ productId: z.string().uuid(), qty: z.number().int().positive(), unitPrice: z.number().nonnegative().nullable().optional(), batchId: z.string().uuid().nullable().optional(), exactBatch: z.boolean().optional(), isFreebie: z.boolean().optional(), lineRemarks: z.string().optional(), priceTier: z.string().optional() });
 const Create = z.object({
   locationId: z.string().uuid().optional(), docDate: z.string().optional(), channel: z.enum(['WALK_IN', 'DELIVERY', 'SHIPPING_COURIER', 'SHIPPING_MARKETPLACE', 'FRANCHISE', 'DEALER', 'AGENT', 'PERSONAL', 'OTHER']), channelSub: z.string().nullable().optional(),
   customerId: z.string().uuid().nullable().optional(), agentId: z.string().uuid().nullable().optional(), riderId: z.string().uuid().nullable().optional(), customerName: z.string().nullable().optional(), customerPhone: z.string().trim().max(40).nullable().optional(), customerEmail: z.string().trim().email().or(z.literal('')).nullable().optional(), drSiNo: z.string().min(1),

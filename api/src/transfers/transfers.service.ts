@@ -19,7 +19,7 @@ import type { ApprovalType } from '../common/permissions';
 
 /** An item that arrived but is not on the form (or more than the form says). */
 export interface ExtraItem { productId: string; qty: number; note?: string }
-export interface TransferLineInput { productId: string; qty: number; batchId?: string | null; checkerRemarks?: string }
+export interface TransferLineInput { productId: string; qty: number; batchId?: string | null; exactBatch?: boolean; checkerRemarks?: string }
 export interface TransferEditInput { toLocationId?: string; transferType?: TransferType; returnReason?: string | null; docDate?: string; notes?: string | null; lines: TransferLineInput[] }
 export interface TransferInput { fromLocationId?: string; toLocationId: string; transferType: TransferType; returnReason?: string; docDate?: string; notes?: string; lines: TransferLineInput[] }
 
@@ -45,7 +45,7 @@ export class TransfersService implements OnModuleInit {
   /** Called after an e-commerce pull-out is approved or rejected (the e-commerce module updates its orders). */
   onEcomPulloutDecided(fn: (docId: string, outcome: 'APPROVED' | 'REJECTED') => Promise<void>) { this.ecomHooks.push(fn); }
 
-  static readonly INCLUDE = { fromLocation: { select: { id: true, code: true, name: true, type: true } }, toLocation: { select: { id: true, code: true, name: true, type: true } }, lines: { include: { product: { select: { id: true, sku: true, name: true, category: { select: { accountingClass: true } } } }, batch: { select: { id: true, batchNo: true, expiryDate: true, unitCost: true, isConsignmentIn: true } } } } } as const;
+  static readonly INCLUDE = { fromLocation: { select: { id: true, code: true, name: true, type: true } }, toLocation: { select: { id: true, code: true, name: true, type: true } }, lines: { include: { product: { select: { id: true, sku: true, name: true, category: { select: { accountingClass: true } } } }, batch: { select: { id: true, batchNo: true, expiryDate: true, flavor: true, unitCost: true, isConsignmentIn: true } } } } } as const;
 
   async list(user: SessionUser, q: { direction?: 'out' | 'in'; status?: string; locationId?: string; branchIds?: string[]; from?: string; to?: string }) {
     const scope = user.locationScoped ? user.locationIds : null;
@@ -123,7 +123,7 @@ export class TransfersService implements OnModuleInit {
         lines.push({ productId: l.productId, batchId, qtySent: l.qty, checkerRemarks: l.checkerRemarks });
         continue;
       }
-      const picks = await this.stock.pickFefo(tx, fromLoc.id, l.productId, l.qty, { preferBatchId: l.batchId ?? undefined, allowExpired: transferType === 'RETURN' });
+      const picks = await this.stock.pickFefo(tx, fromLoc.id, l.productId, l.qty, { preferBatchId: l.batchId ?? undefined, exactBatchId: l.exactBatch && l.batchId ? l.batchId : undefined, allowExpired: transferType === 'RETURN' });
       for (const p of picks) lines.push({ productId: l.productId, batchId: p.batchId, qtySent: p.qty, checkerRemarks: l.checkerRemarks });
     }
     return lines;
@@ -438,7 +438,7 @@ export class TransfersService implements OnModuleInit {
     await this.audit.log({ action: 'SET_CHARGE_TO', entityType: 'ExpiryWriteoffDoc', entityId: id, before: { chargeTo: doc.chargeTo, employees: doc.chargeEmployeeIds }, after: { chargeTo, employees: staff.map((e) => e.fullName) } });
     return after;
   }
-  listWriteoffs(user: SessionUser) { return this.prisma.db.expiryWriteoffDoc.findMany({ where: { locationId: user.locationScoped ? { in: user.locationIds } : { not: '' } }, include: { location: { select: { code: true, name: true } }, lines: { include: { product: { select: { name: true, sku: true } }, batch: { select: { batchNo: true, expiryDate: true, unitCost: true } } } } }, orderBy: { createdAt: 'desc' } }); }
+  listWriteoffs(user: SessionUser) { return this.prisma.db.expiryWriteoffDoc.findMany({ where: { locationId: user.locationScoped ? { in: user.locationIds } : { not: '' } }, include: { location: { select: { code: true, name: true } }, lines: { include: { product: { select: { name: true, sku: true } }, batch: { select: { batchNo: true, expiryDate: true, flavor: true, unitCost: true } } } } }, orderBy: { createdAt: 'desc' } }); }
   private async onWriteoffDecision(docId: string, outcome: 'APPROVED' | 'REJECTED', actorId: string | null) {
     await requestContext.runSystem(async () => {
       const doc = await this.prisma.db.expiryWriteoffDoc.findUniqueOrThrow({ where: { id: docId }, include: { lines: { include: { batch: true, product: { include: { category: true } } } } } });

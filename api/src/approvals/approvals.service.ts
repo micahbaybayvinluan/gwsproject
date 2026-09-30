@@ -65,13 +65,15 @@ export class ApprovalsService implements OnApplicationBootstrap {
   }
 
   /** Inbox for the current approver: pending requests where one of their roles is required and they have not decided yet. */
-  async inbox(user: SessionUser, type?: string) {
+  async inbox(user: SessionUser, type?: string, all = false) {
     const byRole: Prisma.ApprovalRequestWhereInput = { requiredApproverRoles: { has: user.roleKey }, requiredApproverUserIds: { isEmpty: true } };
     if (user.roleKey === 'FRANCHISE_OWNER') {
       // franchise owner only sees requests for their own franchise (summary.locationId)
       byRole.summary = { path: ['locationId'], string_contains: user.locationIds[0] ?? '∅' } as never;
     }
-    const where: Prisma.ApprovalRequestWhereInput = { status: 'PENDING', type: type || undefined, decisions: { none: { userId: user.id } }, OR: [byRole, { requiredApproverUserIds: { has: user.id } }] };
+    // the Owner is the highest authority (owner request 2026-09-30): with "all" they see every pending request and may decide any of them
+    const ownerAll = all && user.roleKey === 'ADMIN';
+    const where: Prisma.ApprovalRequestWhereInput = { status: 'PENDING', type: type || undefined, decisions: { none: { userId: user.id } }, ...(ownerAll ? {} : { OR: [byRole, { requiredApproverUserIds: { has: user.id } }] }) };
     const rows = await this.prisma.db.approvalRequest.findMany({ where, include: { decisions: { include: { user: { select: { fullName: true } } } } }, orderBy: { createdAt: 'desc' } });
     const oldest = rows.length ? Math.floor((Date.now() - Math.min(...rows.map((r) => r.createdAt.getTime()))) / 86400000) : 0;
     const requesterIds = [...new Set(rows.map((r) => r.requestedBy))];
@@ -115,6 +117,9 @@ export class ApprovalsService implements OnApplicationBootstrap {
       if (r.requiredApproverUserIds.length) for (const u of r.requiredApproverUserIds) steps.push(await stepFor(names.get(u) ?? 'named person', (d) => d.userId === u, [names.get(u) ?? '']));
       else if (r.anyOf) steps.push(await stepFor(r.requiredApproverRoles.map(roleName).join(' or '), (d) => r.requiredApproverRoles.includes(d.roleKey), (await Promise.all(r.requiredApproverRoles.map(peopleFor))).flat()));
       else for (const role of r.requiredApproverRoles) steps.push(await stepFor(roleName(role), (d) => d.roleKey === role, await peopleFor(role)));
+      // the Owner decided a request that was not theirs: shown as its own, final step
+      const ownerD = r.decisions.find((d) => d.roleKey === 'ADMIN' && !r.requiredApproverRoles.includes('ADMIN') && !r.requiredApproverUserIds.includes(d.userId));
+      if (ownerD) steps.push({ who: 'Owner (final)', status: ownerD.decision === 'APPROVE' ? 'approved' : 'rejected', by: ownerD.user.fullName, at: ownerD.decidedAt, note: ownerD.note });
       const summary = (r.summary ?? {}) as { controlNo?: string; nextSteps?: string[]; locationName?: string };
       out.push({ id: r.id, type: r.type, label: humanType(r.type), documentType: r.documentType, documentId: r.documentId, link: documentLink(r.documentType, r.documentId), controlNo: summary.controlNo ?? null, locationName: summary.locationName ?? null, status: r.status, createdAt: r.createdAt, decidedAt: r.decidedAt, requestedBy: names.get(r.requestedBy) ?? '', steps, nextSteps: r.status === 'PENDING' || r.status === 'APPROVED' || r.status === 'AUTO_APPROVED' ? summary.nextSteps ?? [] : [] });
     }
@@ -128,7 +133,9 @@ export class ApprovalsService implements OnApplicationBootstrap {
     const req = await this.get(id);
     if (req.status !== 'PENDING') throw new BadRequestException('Request already decided');
     const targeted = (req.requiredApproverUserIds ?? []).length > 0;
-    if (targeted) {
+    // the Owner may decide any request, and their decision is final (owner request 2026-09-30)
+    const owner = user.roleKey === 'ADMIN';
+    if (owner) { /* highest authority */ } else if (targeted) {
       // person-targeted request: only the named person decides (their role does not matter)
       if (!req.requiredApproverUserIds.includes(user.id)) throw new ForbiddenException('This request is addressed to another person');
     } else {
@@ -141,6 +148,7 @@ export class ApprovalsService implements OnApplicationBootstrap {
     const decisions = [...req.decisions.map((d) => ({ roleKey: d.roleKey, decision: d.decision })), { roleKey: user.roleKey, decision }];
     let final: ApprovalStatus | null = null;
     if (decision === 'REJECT') final = 'REJECTED';
+    else if (owner) final = 'APPROVED';
     else if (targeted) { const approvedUsers = new Set([...req.decisions.filter((d) => d.decision === 'APPROVE').map((d) => d.userId), user.id]); if (req.anyOf || req.requiredApproverUserIds.every((u) => approvedUsers.has(u))) final = 'APPROVED'; }
     else if (req.anyOf) final = 'APPROVED';
     else {
@@ -223,6 +231,7 @@ export function humanType(t: string) { return t.replace(/_/g, ' ').toLowerCase()
 function summaryLine(s: unknown) { if (!s || typeof s !== 'object') return ''; const o = s as Record<string, unknown>; return [o.controlNo, o.locationName, o.total != null ? `₱${o.total}` : null].filter(Boolean).join(' · '); }
 export function documentLink(type: string, id: string) {
   if (type === 'OpeningArEntry') return `/ar?opening=${id}`;
+  if (type === 'AgentIncentive') return `/incentives?id=${id}`;
   const map: Record<string, string> = { ReceivingDoc: '/receiving', TransferDoc: '/transfers', SalesDoc: '/sales', ExpiryWriteoffDoc: '/writeoffs', PriceChangeDoc: '/price-changes', PostCloseEdit: '/post-close-edits', CountDoc: '/counts', DiscrepancyCase: '/discrepancies', AccountingPeriod: '/accounting/periods', BeginningBalance: '/accounting/beginning-balances', SalesTarget: '/targets', EcomSettlement: '/ecommerce' };
   return `${map[type] ?? '/'}/${id}`;
 }

@@ -32,9 +32,9 @@ export function Empty({ children = 'Nothing here yet.' }: { children?: ReactNode
 export function ErrorBox({ error }: { error: unknown }) { if (!error) return null; const e = error as { message?: string; body?: { issues?: { path: string[]; message: string }[] } }; return <div role="alert" className="mt-2 rounded-xl border border-red-200 bg-brand-soft p-3 text-sm text-brand-dark">{e.message}{e.body?.issues && <ul className="mt-1 list-disc pl-5 text-xs">{e.body.issues.map((i, k) => <li key={k}>{i.path.join('.')}: {i.message}</li>)}</ul>}</div>; }
 
 /** Centered dialog over a dimmed page; closes on Escape or the backdrop. */
-export function Modal({ title, children, onClose }: { title: ReactNode; children: ReactNode; onClose: () => void }) {
+export function Modal({ title, children, onClose, wide }: { title: ReactNode; children: ReactNode; onClose: () => void; wide?: boolean }) {
   return <div className="fixed inset-0 z-50 flex items-center justify-center bg-navy/40 p-4" role="dialog" aria-modal="true" onKeyDown={(e) => { if (e.key === 'Escape') onClose(); }} onClick={onClose}>
-    <div className="w-full max-w-lg rounded-2xl bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
+    <div className={cn('w-full rounded-2xl bg-white shadow-2xl', wide ? 'max-w-3xl' : 'max-w-lg')} onClick={(e) => e.stopPropagation()}>
       <header className="border-b border-slate-100 px-5 py-4"><h2 className="text-lg font-semibold tracking-tight text-navy">{title}</h2></header>
       <div className="p-5">{children}</div>
     </div>

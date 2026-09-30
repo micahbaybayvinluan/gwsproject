@@ -4,6 +4,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
 import { SequenceService } from '../common/sequence.service';
 import { StockService } from '../stock/stock.service';
+import { addFlavor } from '../stock/flavors';
 import { ApprovalsService } from '../approvals/approvals.service';
 import { MasterService } from '../master/master.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -18,7 +19,7 @@ import { D } from '../common/money';
 import type { SessionUser } from '../common/request-context';
 import { requestContext } from '../common/request-context';
 
-export interface ReceivingLineInput { productId: string; qty: number; freeQty?: number; expiryDate?: string | null; batchNo?: string | null; unitCost?: number | null; remarks?: string }
+export interface ReceivingLineInput { productId: string; qty: number; freeQty?: number; expiryDate?: string | null; batchNo?: string | null; flavor?: string | null; unitCost?: number | null; remarks?: string }
 export interface ReceivingEditInput { supplierId?: string; supplierRef?: string | null; docDate?: string; notes?: string | null; lines: ReceivingLineInput[] }
 export interface ReceivingInput { locationId?: string; supplierId: string; supplierRef?: string; docDate?: string; isConsignmentIn?: boolean; paidOnReceipt?: boolean; paymentAccountId?: string | null; notes?: string; lines: ReceivingLineInput[] }
 
@@ -61,7 +62,7 @@ export class ReceivingService implements OnModuleInit {
         data: {
           controlNo, docDate: input.docDate ? toDateOnly(input.docDate) : today, locationId: wh.id, supplierId: supplier.id, supplierRef: input.supplierRef, isConsignmentIn: input.isConsignmentIn ?? supplier.isConsignor,
           paidOnReceipt: !!input.paidOnReceipt, paymentAccountId: input.paymentAccountId ?? null, notes: input.notes, preparedBy: user.id, createdBy: user.id,
-          lines: { create: input.lines.map((l) => ({ productId: l.productId, qty: l.qty, freeQty: l.freeQty ?? 0, expiryDate: l.expiryDate ? toDateOnly(l.expiryDate) : null, batchNo: l.batchNo ?? null, unitCost: l.unitCost != null ? D(l.unitCost).toFixed(2) : null, remarks: l.remarks })) },
+          lines: { create: input.lines.map((l) => ({ productId: l.productId, qty: l.qty, freeQty: l.freeQty ?? 0, expiryDate: l.expiryDate ? toDateOnly(l.expiryDate) : null, batchNo: l.batchNo ?? null, flavor: l.flavor?.trim() || null, unitCost: l.unitCost != null ? D(l.unitCost).toFixed(2) : null, remarks: l.remarks })) },
         }, include: this.include,
       });
     });
@@ -92,7 +93,7 @@ export class ReceivingService implements OnModuleInit {
   /** Snapshot used for edit proposals (what the associate sees before accepting). No cost fields. */
   async editSnapshot(id: string) {
     const d = await this.prisma.db.receivingDoc.findUniqueOrThrow({ where: { id }, include: this.include });
-    return { id: d.id, controlNo: d.controlNo, status: d.status, locationId: d.locationId, locationName: d.location.name, createdBy: d.createdBy ?? d.preparedBy, header: { supplier: d.supplier.code, supplierRef: d.supplierRef ?? '', docDate: dateStr(d.docDate), notes: d.notes ?? '' }, lines: d.lines.map((l) => ({ productId: l.productId, product: l.product.name, qty: l.qty, freeQty: l.freeQty, expiryDate: l.expiryDate ? dateStr(l.expiryDate) : '', batchNo: l.batchNo ?? '', remarks: l.remarks ?? '' })) };
+    return { id: d.id, controlNo: d.controlNo, status: d.status, locationId: d.locationId, locationName: d.location.name, createdBy: d.createdBy ?? d.preparedBy, header: { supplier: d.supplier.code, supplierRef: d.supplierRef ?? '', docDate: dateStr(d.docDate), notes: d.notes ?? '' }, lines: d.lines.map((l) => ({ productId: l.productId, product: l.product.name, qty: l.qty, freeQty: l.freeQty, expiryDate: l.expiryDate ? dateStr(l.expiryDate) : '', batchNo: l.batchNo ?? '', flavor: l.flavor ?? '', remarks: l.remarks ?? '' })) };
   }
 
   /**
@@ -115,7 +116,7 @@ export class ReceivingService implements OnModuleInit {
         data: {
           supplierId: input.supplierId ?? undefined, supplierRef: input.supplierRef === undefined ? undefined : input.supplierRef, notes: input.notes === undefined ? undefined : input.notes,
           docDate: input.docDate ? toDateOnly(input.docDate) : undefined, status: 'DRAFT', approvalRequestId: null, updatedBy: actorId,
-          lines: { create: input.lines.map((l) => ({ productId: l.productId, qty: l.qty, freeQty: l.freeQty ?? 0, expiryDate: l.expiryDate ? toDateOnly(l.expiryDate) : null, batchNo: l.batchNo ?? null, unitCost: l.unitCost != null ? D(l.unitCost).toFixed(2) : keptCost.get(l.productId) ?? null, remarks: l.remarks })) },
+          lines: { create: input.lines.map((l) => ({ productId: l.productId, qty: l.qty, freeQty: l.freeQty ?? 0, expiryDate: l.expiryDate ? toDateOnly(l.expiryDate) : null, batchNo: l.batchNo ?? null, flavor: l.flavor?.trim() || null, unitCost: l.unitCost != null ? D(l.unitCost).toFixed(2) : keptCost.get(l.productId) ?? null, remarks: l.remarks })) },
         },
       });
     });
@@ -214,8 +215,9 @@ export class ReceivingService implements OnModuleInit {
       const businessDate = doc.docDate;
       for (const l of doc.lines) {
         const cost = D(l.unitCost ?? stdCosts.get(l.productId)!);
-        const batch = await tx.batch.create({ data: { productId: l.productId, batchNo: l.batchNo, expiryDate: l.expiryDate, receivedRef: doc.controlNo, unitCost: cost.toFixed(2), supplierId: doc.supplierId, isConsignmentIn: doc.isConsignmentIn, createdBy: actorId } });
+        const batch = await tx.batch.create({ data: { productId: l.productId, batchNo: l.batchNo, expiryDate: l.expiryDate, flavor: l.flavor, receivedRef: doc.controlNo, unitCost: cost.toFixed(2), supplierId: doc.supplierId, isConsignmentIn: doc.isConsignmentIn, createdBy: actorId } });
         await tx.receivingLine.update({ where: { id: l.id }, data: { batchId: batch.id, unitCost: cost.toFixed(2) } });
+        if (l.flavor) await addFlavor(tx, l.productId, l.flavor);
         await this.stock.post(tx, [{ locationId: doc.locationId, productId: l.productId, batchId: batch.id, qtyDelta: l.qty + l.freeQty, movementType: 'RECEIVE', documentType: 'ReceivingDoc', documentId: doc.id, unitCost: cost.toFixed(2), businessDate, createdBy: actorId ?? undefined }]);
         // standard cost: record when new or changed (approved by Head Auditor)
         const std = stdCosts.get(l.productId);

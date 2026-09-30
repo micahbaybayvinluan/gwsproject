@@ -49,6 +49,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
   ] },
   { group: 'Reports', items: [
     { to: '/targets', label: 'Sales Targets', any: ['target.view', 'target.manage'] },
+    { to: '/incentives', label: 'Agent Incentives', any: ['incentive.view', 'incentive.prepare', 'agent.self'] },
     { to: '/reports/sales', label: 'Sales Report', any: ['report.sales.own', 'report.sales.all'] },
     { to: '/reports/performance', label: 'Sales Graphs', any: ['report.sales.own', 'report.sales.all'] },
     { to: '/reports/daily-sales', label: 'Daily Sales Report', any: ['report.sales.own', 'report.sales.all'] },

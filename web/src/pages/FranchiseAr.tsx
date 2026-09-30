@@ -31,7 +31,9 @@ export function FranchiseArPage() {
   const list = useQuery({ queryKey: ['franchise-ar', showPaid], queryFn: () => api.get<{ asOf: string; rules: Rules; franchises: Franchise[] }>(`/api/franchise-ar?status=${showPaid ? 'ALL' : 'OPEN'}`) });
   const refresh = () => { void qc.invalidateQueries({ queryKey: ['franchise-ar'] }); void qc.invalidateQueries({ queryKey: ['franchise-ar-detail'] }); };
   const hold = useMutation({ mutationFn: (v: { id: string; hold: boolean; note?: string }) => api.put(`/api/franchise-ar/locations/${v.id}/credit-hold`, { hold: v.hold, note: v.note }), onSuccess: refresh });
-  const rules = list.data?.rules; const fr = list.data?.franchises ?? [];
+  const rules = list.data?.rules; const all = list.data?.franchises ?? [];
+  // franchises with nothing owed are folded into one line so the page stays short
+  const fr = all.filter((f) => f.invoices.length || f.creditHold || all.length === 1); const quiet = all.filter((f) => !fr.includes(f));
   const owner = me?.roleKey === 'FRANCHISE_OWNER';
   return <div className="space-y-4">
     <div className="flex flex-wrap items-end gap-2"><h1 className="mr-auto text-2xl font-bold tracking-tight text-navy">Franchise AR</h1><label className="flex items-center gap-1 text-sm"><input type="checkbox" checked={showPaid} onChange={(e) => setShowPaid(e.target.checked)} /> show paid invoices too</label></div>
@@ -58,6 +60,7 @@ export function FranchiseArPage() {
           : <Empty>No open invoices.</Empty>}
       </Card>;
     })}
+    {quiet.length > 0 && <p className="text-sm text-slate-500">Nothing owed by: {quiet.map((f) => f.name).join(', ')}.</p>}
     {modal?.kind === 'pay' && <PayModal inv={modal.inv} onClose={() => setModal(null)} onDone={() => { setModal(null); refresh(); }} />}
     {modal?.kind === 'extend' && <ExtendModal inv={modal.inv} onClose={() => setModal(null)} onDone={() => { setModal(null); refresh(); }} />}
     {modal?.kind === 'waive' && <WaiveModal inv={modal.inv} onClose={() => setModal(null)} onDone={() => { setModal(null); refresh(); }} />}

@@ -222,6 +222,24 @@ Daily Sales Report → **Review report (Excel)** → Submit today's report…: t
 **57. Change a closed day** — `sales.westave`, `hr.staff`, `head.auditor`
 After submitting the Daily Sales Report: Daily Close & Deposit → **Change a closed day** → choose a sale → Correct details (DR / SI no.) → reason "Wrong DR / SI number" → Send. The card shows the approvers. Do it three times: `hr.staff` sees HR Notices → "Post-close edits by …" marked red with **Refer to the Owner**; `head.auditor` is told of each one.
 
+**58. Credit-card and e-commerce prices** — `admin`, `sales.westave`, `ecomm.assoc`
+As `admin`: E-com & Card Prices → the card fee is 4% (SRP ÷ 0.96); type a TikTok price for a product → Save prices (or **Import the masterlist**). As `sales.westave`: New Sale → pay by credit card: the line shows the credit-card price by itself. `ecomm.assoc` sees the platform prices; `sales.westave` cannot change them.
+
+**59. Franchise AR** — `wh.incharge`, `fr.mayon.owner`, `head.auditor`, `acct.head`, `franchise.coord`, `admin`
+`wh.incharge` sends goods to Mayon; `admin` approves; `fr.mayon.owner` receives all of it. Franchise AR shows invoice FAR-… at the franchise price, due in 30 days, and `franchise.coord`, `acct.head`, `head.auditor` and `admin` are notified. Receive less than was sent: the Head Auditor rules the receiver miscounted → the invoice goes up by itself and everyone (and the sales associate involved) is told. `acct.head`: **Record payment**. After the due date (set it back in the database or wait): penalty 2% and 0.1% a day appear. `fr.mayon.owner`: **Ask for extension** → `admin` decides in My Approvals; `admin` may **Waive charges** or **Put on cash-before-delivery**.
+
+**60. Memorandums** — `admin`, `hr.staff`, `franchise.coord`, `fr.mayon.owner`, `fr.mayon.assoc`
+As `admin`: Memorandums → Write a memo → franchise owners and associates, subject, text, a table → **Issue the memo**: it is numbered 2026-Q3-001 and signed by AL MARVIN VINLUAN (President) and MICAH VINLUAN (Manager). The owner and associate are notified; they open it and press **I have read this memo**. **Print / download PDF** gives the company layout.
+
+**61. 6-Pack Card** — `sales.westave`
+New Sale → add supplements → tick **6-Pack sticker given** → type the customer's name and mobile number. Do it until the number has six stickers, then 6-Pack Card → **Redeem a card** (type the number → Find → email and address → Redeem). Expenses now shows the ₱300 "6-Pack Card".
+
+**62. Deposit slip** — `sales.westave`, `audit.assoc`, `acct.assoc`
+Daily Close & Deposit → press a coloured day on the calendar → bank, **Attach deposit slip**, **Record deposit**. `audit.assoc` opens My Approvals and sees the slip beside the amount → **Slip checked** (or **Not accepted** with a reason: the branch fixes and sends it again). Then `acct.assoc` does the same.
+
+**63. E-commerce margin and waybills** — `admin`, `ecomm.assoc`, `head.auditor`
+Waybill Report → **Choose waybill PDF files** (TikTok or Shopee labels) → pick each order's product → the SRP, fees and order income appear; set the platform fee rates at the bottom. `admin`: E-com Margin Analysis shows fees, ads and the price that keeps the target margin; add ad expenses at the bottom.
+
 ## Where the files come out
 
 All exports download through the browser: Daily Sales Report (xlsx/PDF), Daily Inventory Report (xlsx, one sheet per day plus Summary and Per-day sheets), every paper form (Pull-Out, Transfer-In, DR-Sales, Supplier's Form, Count sheet, Discrepancy Report, Charge Form, Credit Note, Journal Voucher), every list (Export xlsx / CSV buttons), Trial Balance and the financial statements.

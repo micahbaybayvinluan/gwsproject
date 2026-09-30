@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Attachments } from '@/components/Attachments';
+import { CalendarCard } from '@/components/ui/widgets';
 import { api, peso, today } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { Badge, Button, Card, Empty, ErrorBox, Field, Input, Select, Stat } from '@/components/ui/primitives';
@@ -16,7 +17,7 @@ interface Summary { businessDate: string; cashSalesOnly: string; cashCollections
 /** §8.4 Daily close: summary, Money Breakdown cash count (variance recorded, not blocking), post-close edit requests, deposit. */
 export function ClosingPage() {
   const { me, can } = useAuth(); const qc = useQueryClient();
-  const [locationId, setLocationId] = useState(me!.locations[0]?.id ?? ''); const [date, setDate] = useState(today());
+  const [locationId, setLocationId] = useState(me!.locations[0]?.id ?? ''); const [sp0] = useSearchParams(); const [date, setDate] = useState(/^\d{4}-\d{2}-\d{2}$/.test(sp0.get('date') ?? '') ? sp0.get('date')! : today());
   const [bd, setBd] = useState<Record<string, number>>({});
   const locations = useQuery({ queryKey: ['locations'], queryFn: () => api.get<{ id: string; name: string; isSelling: boolean }[]>('/api/locations'), enabled: !me!.locationScoped });
   const s = useQuery({ queryKey: ['closing', locationId, date], queryFn: () => api.get<Summary>(`/api/closing/summary?locationId=${locationId}&date=${date}`), enabled: !!locationId });
@@ -48,10 +49,11 @@ export function ClosingPage() {
           <ErrorBox error={count.error} />
         </Card>
         <Card title="Bank deposit">
-          {can('sale.create') && <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-2" data-testid="pending-days">
+          {can('sale.create') && <div className="mb-4 grid gap-4"><div className="rounded-2xl bg-amber-50 p-3" data-testid="pending-days">
             <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-amber-900">Cash still to deposit: {cash.data ? peso(cash.data.cashOnHand) : '…'}</div>
-            {pendingDays.length ? <div className="flex flex-wrap gap-2">{pendingDays.map((x) => <button key={x.businessDate} type="button" onClick={() => { setDate(x.businessDate); setDep({ ...dep, amount: x.outstanding }); }} className={`rounded-lg border px-3 py-1.5 text-left text-sm transition hover:shadow ${x.businessDate === date ? 'ring-2 ring-navy' : ''} ${x.status === 'OVERDUE' ? 'border-red-300 bg-brand-soft text-brand-dark' : x.status === 'DUE_TODAY' ? 'border-amber-300 bg-white text-amber-900' : 'border-slate-300 bg-white'}`}><div className="font-semibold">{x.businessDate}</div><div>{peso(x.outstanding)}</div><div className="text-[11px]">{x.status === 'OVERDUE' ? `${-x.daysLeft} day(s) overdue` : x.status === 'DUE_TODAY' ? 'deposit today' : `${x.daysLeft} day(s) left`}</div></button>)}</div> : <p className="text-sm text-slate-600">Nothing waiting: every day’s cash has been deposited.</p>}
-            <p className="mt-1 text-[11px] text-slate-600">Press a date to deposit that day’s cash.</p></div>}
+            {pendingDays.length ? <div className="flex flex-wrap gap-2">{pendingDays.map((x) => <button key={x.businessDate} type="button" onClick={() => { setDate(x.businessDate); setDep({ ...dep, amount: x.outstanding }); }} className={`rounded-2xl px-3.5 py-2 text-left text-sm shadow-soft transition hover:shadow-md ${x.businessDate === date ? 'ring-2 ring-brand' : ''} ${x.status === 'OVERDUE' ? 'bg-brand-soft text-brand-dark' : 'bg-white text-navy'}`}><div className="font-semibold">{x.businessDate}</div><div>{peso(x.outstanding)}</div><div className="text-[11px]">{x.status === 'OVERDUE' ? `${-x.daysLeft} day(s) overdue` : x.status === 'DUE_TODAY' ? 'deposit today' : `${x.daysLeft} day(s) left`}</div></button>)}</div> : <p className="text-sm text-slate-600">Nothing waiting: every day’s cash has been deposited.</p>}
+            <p className="mt-1 text-[11px] text-slate-600">Press a date (or a coloured day on the calendar) to deposit that day’s cash.</p></div>
+            <CalendarCard value={date} max={today()} onSelect={(day) => { setDate(day); const x = pendingDays.find((p) => p.businessDate === day); setDep({ ...dep, amount: x ? x.outstanding : '' }); }} marks={Object.fromEntries(pendingDays.map((x) => [x.businessDate, { tone: x.status === 'OVERDUE' ? 'red' as const : 'amber' as const, hint: `${peso(x.outstanding)} to deposit` }]))} /></div>}
           <p className="mb-2 text-sm text-slate-600">Depositing the cash of <b>{date}</b>. Attach the <b>bank deposit slip</b>: the Audit Associate checks it, then the Accounting Associate.</p>
           <div className="grid gap-3 md:grid-cols-3"><Field label="Amount"><Input type="number" inputMode="decimal" value={dep.amount || d.totalCashDeposit} onChange={(e) => setDep({ ...dep, amount: e.target.value })} /></Field><Field label="Bank account"><Select value={dep.bankAccountId} onChange={(e) => setDep({ ...dep, bankAccountId: e.target.value })}><option value="">—</option>{banks.data?.filter((b) => b.paymentAccountType === 'BANK').map((b) => <option key={b.id} value={b.id}>{b.title}</option>)}</Select></Field><Field label="Deposited on"><Input type="date" value={dep.depositedAt} onChange={(e) => setDep({ ...dep, depositedAt: e.target.value })} /></Field></div>
           <div className="mt-3"><Attachments key={slip.draft} type="CashDeposit" id={slip.draft} title="Deposit slip (required)" uploadLabel="Attach deposit slip" onUploaded={(a) => setSlip({ ...slip, id: a.id })} /></div>
@@ -103,7 +105,7 @@ function DepositsCard({ locationId, canFix }: { locationId: string; canFix: bool
   return <Card title="Deposits recorded by this branch">
     {rows.length ? <div className="overflow-x-auto"><table className="w-full text-sm"><thead className="text-left text-xs uppercase tracking-wide text-slate-500"><tr><th className="py-1 pr-3">Cash of</th><th className="pr-3">Deposited on</th><th className="num pr-3">Amount</th><th className="pr-3">Bank</th><th className="pr-3">Slip</th><th className="pr-3">By</th><th>Status</th></tr></thead>
       <tbody>{rows.map((r) => <tr key={r.id} className={`border-t align-top ${sp.get('deposit') === r.id ? 'bg-amber-50' : ''}`}>
-        <td className="py-1.5 pr-3">{r.businessDate}</td><td className="pr-3">{r.depositedAt}</td><td className="num pr-3">{peso(r.amount)}</td><td className="pr-3">{r.bankAccount.title}</td>
+        <td className="py-1.5 pr-3">{String(r.businessDate).slice(0, 10)}</td><td className="pr-3">{String(r.depositedAt).slice(0, 10)}</td><td className="num pr-3">{peso(r.amount)}</td><td className="pr-3">{r.bankAccount.title}</td>
         <td className="pr-3">{r.slip ? <button className="text-brand underline" onClick={() => api.download(`/api/attachments/file/${r.slip!.id}`, r.slip!.fileName)}>View slip</button> : <span className="text-xs text-slate-500">no slip (before slips were required)</span>}</td><td className="pr-3">{r.enteredBy}</td>
         <td><Badge tone={DEP_STATUS[r.status]?.tone}>{DEP_STATUS[r.status]?.label ?? r.status}</Badge>
           {r.auditVerifiedByName && <div className="text-xs text-slate-500">Audit: {r.auditVerifiedByName}</div>}{r.accountingVerifiedByName && <div className="text-xs text-slate-500">Accounting: {r.accountingVerifiedByName}</div>}

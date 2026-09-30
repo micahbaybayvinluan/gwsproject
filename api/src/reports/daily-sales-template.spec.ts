@@ -24,6 +24,14 @@ describe('Daily Sales Report rendered into the sample workbook (§8.5, §19)', (
     expect(classifySale(sales[0], idx)).toBe('walkinCash'); expect(classifySale(sales[1], idx)).toBe('rider1Online'); expect(classifySale(sales[2], idx)).toBe('franchiseCash');
     expect(classifySale(sales[3], idx)).toBe('ccWalkin'); expect(classifySale(sales[4], idx)).toBe('shipMarketplace'); expect(classifySale(sales[5], idx)).toBeNull();
   });
+  it('keeps the template\'s own colour palette in the finished file (pale yellow / gold instead of Excel\'s red)', async () => {
+    const JSZip = (await import('jszip')).default;
+    const out = await JSZip.loadAsync(await fillDailySalesTemplate(rep, templatePath()!));
+    const styles = await out.file('xl/styles.xml')!.async('string');
+    expect(styles).toContain('<indexedColors>'); expect(styles).toContain('FFFFD966'); expect(styles).toContain('FFFFF2CC');
+    const wb = new ExcelJS.Workbook(); await wb.xlsx.load((await out.generateAsync({ type: 'nodebuffer' })) as unknown as ArrayBuffer); // still a valid workbook
+    expect(wb.worksheets.length).toBeGreaterThan(3);
+  });
   it('fills the template and keeps every FRONT formula', async () => {
     const tpl = templatePath(); expect(tpl).toBeTruthy();
     const buf = await fillDailySalesTemplate(rep, tpl!);

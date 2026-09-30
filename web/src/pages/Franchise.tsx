@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { Toggle } from '@/components/ui/widgets';
 import { api, peso, today } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { Badge, Button, Card, Empty, ErrorBox, Field, Input, Select, Stat, Textarea } from '@/components/ui/primitives';
@@ -34,7 +35,7 @@ export function FranchisePage() {
         <Stat label="Expiring / expired" value={d.expiring.reduce((s, b) => s + b.qty, 0)} tone={d.expiring.find((b) => b.bucket === 'EXPIRED')?.qty ? 'red' : undefined} />
       </div>
       {d.isOwner && <Card title="Who receives incoming stock">
-        <label className="flex items-start gap-3 text-sm"><input type="checkbox" className="mt-1 size-4 accent-[#c8102e]" checked={d.associateReceives} onChange={(e) => setting.mutate(e.target.checked)} /><span><b className="text-navy">Let my franchise associate receive transfers from GWS.</b><br /><span className="text-slate-500">When on, your associate checks and confirms deliveries (without seeing the franchise cost) and you are notified. When off, only you confirm.</span></span></label>
+        <div className="flex flex-wrap items-center gap-4 text-sm"><Toggle checked={d.associateReceives} onChange={(v) => setting.mutate(v)} disabled={setting.isPending} /><span><b className="text-navy">Let my franchise associate receive transfers from GWS.</b><br /><span className="text-slate-500">When on, your associate checks and confirms deliveries (without seeing the franchise cost) and you are notified. When off, only you confirm.</span></span></div>
         <ErrorBox error={setting.error} />
       </Card>}
       <Card title="Incoming transfers">{d.incoming.length ? <ul className="divide-y divide-slate-100 text-sm">{d.incoming.map((t) => <li key={t.id} className="flex items-center justify-between py-2.5"><span><b className="text-navy">{t.controlNo}</b> from {t.from} · {t.lines} line(s)</span>{(d.isOwner || d.associateReceives) ? <Link to={`/transfers/${t.id}`}><Button size="sm">Check & receive</Button></Link> : <Badge>the owner receives</Badge>}</li>)}</ul> : <Empty>None pending.</Empty>}</Card>

@@ -24,6 +24,8 @@ export const api = {
   /** A file (e.g. a proof-of-payment image) as a Blob, sent with the sign-in token. */
   blob: (p: string) => req<Blob>('GET', p, undefined, { raw: true }),
   upload: <T,>(p: string, file: File) => { const f = new FormData(); f.append('file', file); return req<T>('POST', p, undefined, { form: f }); },
+  /** Several files under one field name (e.g. waybill PDFs). */
+  uploadMany: <T,>(p: string, files: File[], field = 'files') => { const f = new FormData(); files.forEach((x) => f.append(field, x)); return req<T>('POST', p, undefined, { form: f }); },
   download: async (p: string, fileName: string) => { const blob = await req<Blob>('GET', p, undefined, { raw: true }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = fileName; a.click(); URL.revokeObjectURL(a.href); },
   downloadPost: async (p: string, body: unknown, fileName: string) => { const headers: Record<string, string> = { 'Content-Type': 'application/json' }; if (token) headers.Authorization = `Bearer ${token}`; const res = await fetch(`${BASE}${p}`, { method: 'POST', headers, credentials: 'include', body: JSON.stringify(body) }); const blob = await res.blob(); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = fileName; a.click(); },
 };

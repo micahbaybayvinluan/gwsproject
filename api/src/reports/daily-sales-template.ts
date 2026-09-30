@@ -7,6 +7,7 @@
  * ("+N more lines, see RECEIPT TRACKER") so the FRONT totals stay exact.
  */
 import ExcelJS from 'exceljs';
+import JSZip from 'jszip';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { DailySalesReport, RSale } from './daily-sales-report';
@@ -98,6 +99,20 @@ function writeBlock(wb: ExcelJS.Workbook, b: Block, rows: LineRow[], header: { d
 const clear = (ws: ExcelJS.Worksheet, addrs: string[]) => addrs.forEach((a) => (ws.getCell(a).value = null));
 const range = (col: string, from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => `${col}${from + i}`);
 
+/**
+ * ExcelJS drops the workbook's own colour palette when it saves, so cells that use palette slots fall back to Excel's default red, brown and dark grey.
+ * The template's palette (pale yellow, gold, soft orange, light grey: owner request 2026-09-30) is put back into the finished file.
+ */
+export async function restorePalette(templateFile: string, out: Buffer): Promise<Buffer> {
+  const src = await JSZip.loadAsync(fs.readFileSync(templateFile)); const colors = /<colors>[\s\S]*?<\/colors>/.exec((await src.file('xl/styles.xml')?.async('string')) ?? '')?.[0];
+  if (!colors) return out;
+  const dst = await JSZip.loadAsync(out); const f = dst.file('xl/styles.xml'); if (!f) return out;
+  let xml = (await f.async('string')).replace(/<colors>[\s\S]*?<\/colors>/, '');
+  xml = xml.includes('<extLst') ? xml.replace('<extLst', `${colors}<extLst`) : xml.replace('</styleSheet>', `${colors}</styleSheet>`);
+  dst.file('xl/styles.xml', xml);
+  return Buffer.from(await dst.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }));
+}
+
 export async function fillDailySalesTemplate(rep: DailySalesReport, file: string): Promise<Buffer> {
   const wb = new ExcelJS.Workbook(); await wb.xlsx.readFile(file);
   const date = new Date(`${rep.header.date}T00:00:00`); const branch = rep.header.branch;
@@ -157,7 +172,7 @@ export async function fillDailySalesTemplate(rep: DailySalesReport, file: string
   pa.getRow(1).font = { bold: true };
   for (const a of rep.byPaymentAccount) pa.addRow({ account: a.account, mode: a.mode, count: a.count, amount: asNum(a.amount) });
   if (rep.byPaymentAccount.length) { const last = pa.rowCount; pa.addRow({ account: 'TOTAL', count: { formula: `SUM(C2:C${last})` }, amount: { formula: `SUM(D2:D${last})` } }).font = { bold: true }; }
-  return Buffer.from(await wb.xlsx.writeBuffer());
+  return restorePalette(file, Buffer.from(await wb.xlsx.writeBuffer()));
 }
 function compactExp<T extends { accountTitle: string; payee: string | null; amount: unknown }>(rows: T[], cap: number): T[] {
   if (rows.length <= cap) return rows;

@@ -531,6 +531,37 @@ After the Daily Sales Report is submitted, or for an earlier day, a sale or an e
 
 HR and the Head Auditor are told of every request. **Three in one month, or three days in a row, is flagged**; HR is advised to refer it to the Owner as negligence of duty. Review the report carefully before submitting so that edits are rarely needed.
 
+## Your password
+<!-- for: all -->
+Your account is personal and you answer for everything done under it. Press the **key icon** at the top right (**Change my password**) any time: type the current password and a new one of 10 or more characters. Never tell your password to anyone, including co-workers, supervisors, HR or the Owner; nobody can see it. If you forget it, the Owner can only give you a new temporary one. HR is notified whenever the Owner or anyone opens a new user account or employee record.
+
+## Credit-card and e-commerce prices
+<!-- for: sale.create, ecom.price.edit, ecom.manage -->
+A sale paid by **credit card** uses the credit-card price: SRP ÷ 0.96, for example ₱1,250.00 becomes ₱1,302.08 (the price memo of September 21, 2026 shows whole pesos; the system keeps the centavos). A TikTok, Shopee or Lazada sale uses that platform's price list. The Owner sets both in **E-com & Card Prices**: the card fee %, how it is applied, and each platform price (or imports the masterlist again). Lazada follows Shopee until it has its own prices.
+
+## 6-Pack Card
+<!-- for: sixpack.issue, sixpack.view.all -->
+1. On **New Sale** tick **6-Pack sticker given** and type the customer's full name and mobile number. One sticker is recorded for each supplement on the DR.
+2. At six stickers (from any branch) the customer earns a ₱300 card. Open **6-Pack Card → Redeem a card**: type the number → **Find** (shows the balance) → complete name, email and address → **Redeem**.
+3. The ₱300 is booked as your branch's **6-Pack Card** expense, paid from the cash on hand, tagged to the customer.
+4. An old paper card: tick the box, type its number and attach a photo; the auditors and the Owner are told.
+
+## Franchise AR (what franchises owe GWS)
+<!-- for: franchise.ar.view, franchise.ar.own, franchise.ar.pay, franchise.ar.manage -->
+Goods sent to a franchise are billed at the franchise price when it receives them and are due 30 days later. After the due date a **2% penalty (once) and 0.1% a day** on the unpaid goods are added (memo of July 31, 2026; for ₱100,000: 1 day ₱2,100, 5 days ₱2,500, 10 days ₱3,000, 30 days ₱5,000). Payments settle the penalty first, then the interest, then the goods. If the received quantities change (a transfer difference is resolved), the invoice changes by itself and the Owner, auditors, Accounting, Franchise Coordinators, the sales associates involved and the franchise owner are told. The franchise owner asks for an extension on the page; the Owner decides and the others are flagged. Unpaid two months after the due date, the account is flagged and the page shows the recommended actions; the Owner may put the franchise on cash-before-delivery or waive charges.
+
+## Memorandums
+<!-- for: all -->
+**Memorandums** lists the memos addressed to you: open one and press **I have read this memo**. HR, the Owner, the Franchise Coordinators and the Head Auditor can **Write a memo**: choose who it is for (everyone, franchise owners, franchise associates, a role, a branch or named people), the subject, the text, an optional table and the people who sign. It is numbered by itself (2026-Q3-046), everyone addressed and every signer is notified, and **Print / download PDF** gives the company layout. The Owner's memos always carry AL MARVIN VINLUAN (President) and MICAH VINLUAN (Manager).
+
+## Bank deposit slip and verification
+<!-- for: sale.create, approval.act.CASH_DEPOSIT_AUDIT, approval.act.CASH_DEPOSIT_ACCOUNTING -->
+On **Daily Close & Deposit** the coloured days on the calendar (and the boxes beside it) are the days whose cash is not deposited yet: press one, choose the bank, **attach the deposit slip** (required) and **Record deposit**. The Audit Associate checks the slip against the amount, bank and date in My Approvals, then the Accounting Associate does the same. If either does not accept it (a reason is required) the branch, the Head Auditor, the Accounting Head and the Owner are told; fix it under **Deposits recorded by this branch** and send it again.
+
+## E-commerce margin analysis and waybill report
+<!-- for: ecom.analysis, ecom.waybill -->
+**Waybill Report** (E-comm Associate, Head Auditor, Owner): upload the TikTok, Shopee or Lazada shipping labels (PDF). Each label gives the order, tracking number, quantity and weight; choose the product once (the same platform and weight are filled in next time, to confirm). The report shows the SRP from the platform price list, the platform fees at the rates you set (or copy from posted payouts) and the total order income. **E-com Margin Analysis** (Owner): each platform's fees, ads and cost of goods, the margin against the target and the price that keeps it; add ad expenses at the bottom.
+
 ## Page names and what each page is for
 <!-- for: all -->
 - Every menu item has a descriptive name (for example **Supplier Deliveries** or **Transfers & Pull-outs**).

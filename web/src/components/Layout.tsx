@@ -33,6 +33,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
   ] },
   { group: 'E-commerce', items: [
     { to: '/ecommerce', label: 'E-commerce', any: ['ecom.manage', 'ecom.view', 'ecom.receive'] },
+    { to: '/ecom-waybills', label: 'Waybill Report', any: ['ecom.waybill'] },
     { to: '/ecom-analysis', label: 'E-com Margin Analysis', any: ['ecom.analysis'] },
   ] },
   { group: 'Inventory', items: [

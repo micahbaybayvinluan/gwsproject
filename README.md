@@ -114,6 +114,8 @@ All seeded users share the password `ChangeMe!2026` (override with `SEED_PASSWOR
 | `exec.assistant` | EXECUTIVE_ASSISTANT | Main-office bank entries, supplier payables, office expenses, balance-sheet accounts (no cost, no reports) | |
 | `sales.manager` | SALES_MANAGER | Sales of all branches, agents and platforms; targets per branch and agent (Owner approves); AR of dealers, franchises and agents (no cost) | |
 | `agent.jerick` | AGENT | Own sales at every branch, own target, own customers' unpaid balances (no cost) | |
+| `franchise.coord` | FRANCHISE_COORDINATOR | Franchise AR (invoices, penalty, interest, extension requests), franchise transfers, memorandums (no cost) | |
+| `asst.franchise.coord` | ASST_FRANCHISE_COORDINATOR | Same screens as the Franchise Coordinator (no cost) | |
 | `ecomm.assoc` | ECOMM_ASSOCIATE | E-commerce (TikTok, Shopee, Lazada separate): order uploads → Warehouse pull-outs, payouts, returns, ads, e-commerce report (no cost) | |
 
 ## Tests

@@ -68,6 +68,7 @@ It checks the settings file, Docker (database and Redis), the app server and the
 - `docs/ROLE-GUIDES.md`: one step-by-step guide per role (Help page, "My guide").
 - **Picture guide** (`web/public/picture-guide/`, and Help → **Picture guide (screenshots)**): screenshots with numbered red boxes showing where to click, per role, plus a printable PDF. Re-make it after screen changes with `node scripts/picture-guide.mjs` on the demo data while `pnpm dev` runs.
 - **Acceptance test** (`docs/acceptance-test/`): the checklist per user as Word and PDF (all accounts, each on its own pages) and one PDF and Word file per account in `per-user/`. Each check says what to do and what you should see, with Pass / Fail / N/A boxes, notes and a sign-off; the front pages list the flows to run in order.
+- **Printable guides** (`docs/printable/`): the full User Guide as PDF and Word (guide for everyone, then one guide per role, with the sample accounts) and the Picture Guide PDF. They are made from `docs/USER-GUIDE.md` and `docs/ROLE-GUIDES.md`.
 - `docs/ECOMMERCE-PROPOSAL.md`: the e-commerce (TikTok / Shopee / Lazada) process, entries and reports, now built (menu: E-commerce).
 
 ## Help & Guide and the AI assistant

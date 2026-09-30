@@ -23,13 +23,17 @@ Each section below starts with a hidden line that says which roles it is for. Th
 
 ## Menus by role (quick start)
 <!-- for: all -->
-- **Sales Associate:** New Sale, Sales, AR / Credit, Expenses, Daily Close, Cash Fund, Transfers (request stock and receive), Inventory Count (weekly sheet), Discrepancies, Stock on Hand, My Pay & Charges.
+- **Sales Associate:** New Sale, Sales List, AR & Collections, Expenses, Daily Close & Deposit, Cash on Hand, Petty Cash Fund, Transfers & Pull-outs (request stock and receive), Stock Counts (weekly sheet), Count Discrepancies, Stock on Hand, Daily Sales Report, My Pay & Charges.
 - **Warehouse Associate / In-Charge:** Receiving, Transfers (send stock), Stock on Hand, Inventory Count, Write-offs, Expiry & Alerts.
 - **Head Auditor / Asst Auditor:** Approvals, Receiving costs, Discrepancies, Inventory Count, Revision Log, Cash Fund, Store Inspections, all reports with cost.
 - **Audit Associate:** branch reports with cost, correction requests (approved by the Head Auditor), Revision Log.
 - **Field Auditor:** Inventory Count (audit sheets), Cash Fund (confirm the cash found), Store Inspections, Stock on Hand and expiries of every branch and franchise. No cost, no sales.
-- **HR Staff:** Charge Forms, Payroll & Contributions, Weekly Count Check, Store Inspections, Revision Log.
-- **Accounting Head / Associate:** AR approvals, Accounting menus, Inventory Cost, cash funds, payroll (the Associate sees totals only).
+- **HR Staff:** Staff Charges, Payroll, Weekly Count Check, HR Notices (NTE), Agent Incentives (release forms), Store Inspections, Revision Log.
+- **Accounting Head / Associate:** AR approvals, opening AR entry, Agent Incentives (release tagging), Accounting menus, Inventory Cost, cash funds, payroll (the Associate sees totals only).
+- **Sales Manager:** Sales Targets, Agent Incentives, Sales Report and Graphs, AR of dealers, franchises and agents. No cost.
+- **Agent:** My Sales and Agent Incentives: own sales at every branch, target and incentive. No cost.
+- **E-comm Associate:** E-commerce (TikTok, Shopee, Lazada).
+- **Executive Assistant:** Bank & Office.
 - **Franchise Owner / Associate:** Franchise Portal, sales and stock of their franchise.
 - **Admin (Owner):** everything, including Users & Roles, Settings and final approvals.
 
@@ -47,9 +51,9 @@ Each section below starts with a hidden line that says which roles it is for. Th
 2. Type the **DR / SI number** from the paper receipt.
 3. Choose the **channel**: Walk in, Delivery, Shipping, Online marketplace, Prothin Dealer, Agent, Franchise.
 4. Choose the **payment**: Cash, Online (GCash / bank), Credit card, or AR/PDC (on credit).
-5. Search the product by name or SKU, click it, and set the quantity. The price for the channel fills in by itself.
+5. Search the product by name or SKU and click it. Only items your branch has on hand are listed, with the quantity. If the item comes in more than one **flavor or expiry date**, a list opens: choose the one you are selling. Then set the quantity. The price for the channel fills in by itself.
 6. Optional: customer name, **contact number** and **email** (these build the Customer Contacts list).
-7. Press **Save**. The stock is deducted at once, from the batch with the earliest expiry first.
+7. Press **Review sale**, check every detail on the review screen, then **Confirm and save sale** (or **Go back and edit**). The stock is deducted at once, from the flavor / expiry you chose.
 - A red "near expiry" tag means the batch expires soon; sell it first.
 - Freebies and plastic bags go in at zero price.
 
@@ -118,7 +122,7 @@ Each section below starts with a hidden line that says which roles it is for. Th
 
 ## Daily Sales Report
 <!-- for: report.sales.own, report.sales.all -->
-- **Reports → Daily Sales Report**, or the buttons on Daily Close: choose the branch and date, then **xlsx** (the same layout as the paper Sales Report) or **PDF**.
+- **Reports → Daily Sales Report**, or the buttons on Daily Close: choose the branch and date, then **Review report (Excel)** (the same layout as the paper Sales Report) or **Review report (PDF)**.
 - Branch staff get the report without cost. Admin, the auditors and Accounting can switch on the audit view with cost of sales.
 - Every sale is counted once. Cash subtotal plus online, card and shipping equals all sales of the day except AR / PDC.
 - **Credit Card** shows the number of card transactions and the products sold on card; card sales are counted in "Number of products".
@@ -126,8 +130,8 @@ Each section below starts with a hidden line that says which roles it is for. Th
 
 ## Submitting today's Daily Sales Report (branch staff)
 <!-- for: sale.create -->
-1. Before 8 PM, open **Daily Sales Report** (the dashboard reminds you) and check every number.
-2. Press **Submit today's report…**, tick **"I acknowledge that this Daily Sales Report is true and correct"** and press **I agree — submit**.
+1. Before 8 PM, open **Daily Sales Report** (the dashboard reminds you) and review every detail: on screen, or in **Review report (Excel / PDF)**. Compare it with your DR/SI slips, card slips, receipts and the cash you counted.
+2. Press **Submit today's report…**, tick the four review items (sales, card and online payments, expenses, money breakdown), tick **"I acknowledge that this Daily Sales Report is true and correct"** and press **I agree — submit**.
 3. Today is then closed for your branch. Any later change follows the revision protocol: a post-close edit approved by the auditors.
 - You are reminded at 7:30 PM. A report not submitted by 9 PM is submitted automatically **as it stands**, and the Head Auditor, Asst Auditor, Audit Associate and HR are notified.
 

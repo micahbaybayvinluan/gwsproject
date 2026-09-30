@@ -20,6 +20,23 @@ export const SETTING_DEFAULTS: Record<string, unknown> = {
   // customer re-order follow-ups (owner request 2026-09-27): messages the Owner can edit; {customer} {product} {store} {storePhone} are filled in
   // e-commerce: shipped orders neither paid nor returned after this many days are overdue; the warehouse the pull-outs come from
   'ecom.overdue_days': 30,
+  // the margin the Owner wants to keep on e-commerce sales after platform fees, ads and cost of goods
+  'ecom.target_margin_pct': 20,
+  // company letterhead as on the company memo (the Owner uploads the logo in Settings)
+  'company.letterhead': { name: 'Get Wheysted Supplements', address: '9050 NIA Rd. Sitio Niyugan Paliparan 1 Dasmarinas Cavite', contact: '+63 967 493 9363 / www.getwheystedsupplements.ph', tin: '', logoDataUrl: null },
+  // credit-card price (owner request 2026-09-30, memo 2026-09-21): the card fee percent and how it is applied (GROSS_UP = SRP ÷ (1 − %), ADD = SRP × (1 + %))
+  'pricing.cc_markup_pct': 4,
+  // franchise receivables (memo 2026-07-31): days to pay after receiving, one-time penalty and daily interest on the unpaid balance once overdue, from when the memo takes effect; flagged after this many days overdue (two months)
+  'franchise.ar.terms_days': 30,
+  'franchise.ar.penalty_pct': 2,
+  'franchise.ar.daily_interest_pct': 0.1,
+  'franchise.ar.effective_from': '2026-08-01',
+  'franchise.ar.flag_days': 60,
+  'franchise.ar.remind_days_before': 3,
+  // 6-Pack Card: stickers for one card, the discount booked as an expense
+  'sixpack.stickers_per_card': 6,
+  'sixpack.card_value': 300,
+  'pricing.cc_method': 'GROSS_UP',
   'ecom.warehouse_code': 'WH',
   'followup.auto_sms': false,
   'followup.auto_email': false,

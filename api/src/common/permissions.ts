@@ -4,7 +4,8 @@
  * This file is pure (no Nest / Prisma imports) so it can be shared by the seed script and tests.
  */
 
-export const PRICE_TIERS = ['RETAIL', 'DEALER', 'FRANCHISE', 'AGENT', 'WHOLESALE'] as const;
+/** CC = credit card price (SRP + a percentage, default 4%); TIKTOK / SHOPEE / LAZADA = the e-commerce price lists the Owner edits (owner request 2026-09-30). */
+export const PRICE_TIERS = ['RETAIL', 'DEALER', 'FRANCHISE', 'AGENT', 'WHOLESALE', 'CC', 'TIKTOK', 'SHOPEE', 'LAZADA'] as const;
 
 export const APPROVAL_TYPES = [
   'COST_ON_RECEIVING',
@@ -43,12 +44,15 @@ export const APPROVAL_TYPES = [
   'SALES_TARGET',
   'OPENING_AR',
   'AGENT_INCENTIVE',
+  'FRANCHISE_AR_EXTENSION',
+  'CASH_DEPOSIT_AUDIT',
+  'CASH_DEPOSIT_ACCOUNTING',
 ] as const;
 export type ApprovalType = (typeof APPROVAL_TYPES)[number];
 
 const BASE_KEYS = [
   'product.view', 'product.edit', 'product.create',
-  'price.edit', 'cost.view', 'cost.edit',
+  'price.edit', 'ecom.price.edit', 'cost.view', 'cost.edit',
   'supplier.view.code', 'supplier.view.name', 'supplier.edit',
   'location.view.all', 'location.view.own', 'location.edit',
   'receiving.create', 'receiving.approve_cost', 'warehouse.edit_others',
@@ -91,6 +95,16 @@ const BASE_KEYS = [
   'ecom.manage', 'ecom.view', 'ecom.receive',
   // sales targets per branch and per agent: set (Sales Manager; the Owner approves) and follow; an agent's own sales at every branch
   'target.manage', 'target.view', 'agent.self',
+  // franchise receivables (memo 2026-07-31): everyone's / own franchise's invoices, record payments (Accounting), waive charges and credit hold (Owner), request an extension (franchise owner)
+  'franchise.ar.view', 'franchise.ar.own', 'franchise.ar.pay', 'franchise.ar.manage', 'franchise.ar.extend',
+  // memorandums: write and issue (HR, Owner, Franchise Coordinators, Head Auditor)
+  'memo.create',
+  // 6-Pack Card stickers (Sales Associate), view all branches' stickers and redemptions
+  'sixpack.issue', 'sixpack.view.all',
+  // Owner's e-commerce margin analysis
+  'ecom.analysis',
+  // upload waybills and read the SRP / fees / order income report (E-comm Associate, Head Auditor, Owner)
+  'ecom.waybill',
 ] as const;
 
 export const PERMISSION_KEYS: readonly string[] = [
@@ -103,7 +117,7 @@ export const ROLE_KEYS = [
   'ADMIN', 'EXTERNAL_AUDITOR', 'HEAD_AUDITOR', 'ASST_AUDITOR', 'AUDIT_ASSOCIATE',
   'WAREHOUSE_IN_CHARGE', 'WAREHOUSE_ASSOCIATE', 'SALES_ASSOCIATE', 'FRANCHISE_SALES_ASSOCIATE',
   'FRANCHISE_OWNER', 'CUSTOM', 'ACCOUNTING_HEAD', 'ACCOUNTING_ASSOCIATE', 'HR_STAFF', 'FIELD_AUDITOR', 'EXECUTIVE_ASSISTANT',
-  'ECOMM_ASSOCIATE', 'SALES_MANAGER', 'AGENT',
+  'ECOMM_ASSOCIATE', 'SALES_MANAGER', 'AGENT', 'FRANCHISE_COORDINATOR', 'ASST_FRANCHISE_COORDINATOR',
 ] as const;
 export type RoleKey = (typeof ROLE_KEYS)[number];
 
@@ -148,7 +162,7 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
     key: 'EXTERNAL_AUDITOR',
     name: 'External Auditor',
     description: 'Read-only everything incl. balance sheet, payroll, supplier names. No edits, no approvals.',
-    permissions: [
+    permissions: ['franchise.ar.view', 'sixpack.view.all', 
       ...READ_ALL, ...COST_BUNDLE, 'gl.view', 'fs.income_statement', 'fs.balance_sheet',
       'payroll.view.summary', 'payroll.view.detail', 'audit_log.view', 'cashfund.view.all', 'inspection.view', 'revision.view', 'ecom.view',
     ],
@@ -157,7 +171,7 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
     key: 'HEAD_AUDITOR',
     name: 'Head Auditor',
     description: 'Edits/inputs anything; master data with Admin approval; enters/approves costs; approves internal transfers, post-close edits, write-offs.',
-    permissions: ['stock.flavor.set', 
+    permissions: ['ecom.waybill', 'approval.act.CASH_DEPOSIT_AUDIT', 'franchise.ar.view', 'memo.create', 'sixpack.view.all', 'stock.flavor.set', 
       ...READ_ALL, ...COST_BUNDLE, 'product.edit', 'product.create', 'price.edit', 'cost.edit', 'supplier.edit',
       'receiving.create', 'receiving.approve_cost', 'transfer.create', 'transfer.confirm', 'transfer.approve.internal', 'transfer.resolve_discrepancy',
       'sale.create', 'sale.edit.sameday', 'sale.edit.postclose', 'sale.void', 'ar.collect', 'expense.create.branch',
@@ -171,7 +185,7 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
     key: 'ASST_AUDITOR',
     name: 'Assistant Auditor',
     description: 'Edits/inputs transactions with Admin + Head Auditor approval. No master data edits. Approves internal transfers and post-close edits.',
-    permissions: ['stock.flavor.set', 
+    permissions: ['approval.act.CASH_DEPOSIT_AUDIT', 'franchise.ar.view', 'sixpack.view.all', 'stock.flavor.set', 
       ...READ_ALL, ...COST_BUNDLE, 'receiving.create', 'transfer.create', 'transfer.confirm', 'transfer.approve.internal',
       'sale.create', 'sale.edit.sameday', 'ar.collect', 'expense.create.branch', 'count.create', 'writeoff.create', 'gl.view',
       'cashfund.view.all', 'cashfund.check', 'inspection.view', 'inspection.create', 'revision.view', 'cashdeposit.view.all', 'sale.incentive',
@@ -182,7 +196,7 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
     key: 'AUDIT_ASSOCIATE',
     name: 'Audit Associate',
     description: 'Views branch reports including supplier cost. Requests corrections (revisions) of branch documents; the Head Auditor approves; the staff involved are notified and the revision is logged.',
-    permissions: [...READ_ALL, ...COST_BUNDLE, 'inspection.view', 'revision.request', 'revision.view', 'cashdeposit.view.all'],
+    permissions: ['approval.act.CASH_DEPOSIT_AUDIT', 'franchise.ar.view', 'sixpack.view.all', ...READ_ALL, ...COST_BUNDLE, 'inspection.view', 'revision.request', 'revision.view', 'cashdeposit.view.all'],
   },
   {
     key: 'WAREHOUSE_IN_CHARGE',
@@ -203,8 +217,8 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
     key: 'SALES_ASSOCIATE',
     name: 'Sales Associate',
     description: 'Sales, expenses, pull-outs/transfers for own branch. Own branch reports only. Locked at midnight.',
-    permissions: ['stock.flavor.set', 
-      'product.view', 'location.view.own', 'price.view.RETAIL', 'price.view.DEALER', 'price.view.AGENT',
+    permissions: ['sixpack.issue', 'stock.flavor.set', 
+      'product.view', 'location.view.own', 'price.view.RETAIL', 'price.view.DEALER', 'price.view.AGENT', 'price.view.CC',
       'transfer.create', 'transfer.confirm', 'sale.create', 'sale.edit.sameday', 'ar.view', 'ar.collect',
       'expense.create.branch', 'expense.view', 'count.create', 'report.sales.own', 'report.inventory.own', 'dashboard.view', 'notification.view', 'cashfund.use', 'discrepancy.explain',
       'sale.incentive', 'consignment.request', 'approval.act.TRANSFER_DIFF_SENDER',
@@ -214,14 +228,14 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
     key: 'FRANCHISE_SALES_ASSOCIATE',
     name: 'Franchise Sales Associate',
     description: 'Receives stock, enters sales for one franchise. Same-day edits only.',
-    permissions: ['product.view', 'location.view.own', 'price.view.RETAIL', 'transfer.confirm', 'sale.create', 'sale.edit.sameday', 'ar.view', 'ar.collect', 'report.sales.own', 'report.inventory.own', 'franchise.portal', 'franchise.expense', 'dashboard.view', 'notification.view'],
+    permissions: ['sixpack.issue', 'product.view', 'location.view.own', 'price.view.RETAIL', 'price.view.CC', 'transfer.confirm', 'sale.create', 'sale.edit.sameday', 'ar.view', 'ar.collect', 'report.sales.own', 'report.inventory.own', 'franchise.portal', 'franchise.expense', 'dashboard.view', 'notification.view'],
   },
   {
     key: 'FRANCHISE_OWNER',
     name: 'Franchise Owner',
     description: 'Receives stock, approves associate edits, own P&L, own expenses. Sees franchise price tier only.',
-    permissions: ['stock.flavor.set', 
-      'product.view', 'location.view.own', 'price.view.RETAIL', 'price.view.FRANCHISE', 'transfer.confirm', 'sale.create', 'sale.edit.sameday', 'sale.edit.postclose',
+    permissions: ['franchise.ar.own', 'franchise.ar.extend', 'sixpack.issue', 'stock.flavor.set', 
+      'product.view', 'location.view.own', 'price.view.RETAIL', 'price.view.CC', 'price.view.FRANCHISE', 'transfer.confirm', 'sale.create', 'sale.edit.sameday', 'sale.edit.postclose',
       'ar.view', 'ar.collect', 'count.create', 'report.sales.own', 'report.inventory.own', 'franchise.portal', 'franchise.expense', 'franchise.pnl',
       'dashboard.view', 'notification.view', ...approvals('POST_CLOSE_EDIT_FRANCHISE', 'TRANSFER_DIFF_SENDER'),
     ],
@@ -236,7 +250,7 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
     key: 'ACCOUNTING_HEAD',
     name: 'Accounting Head',
     description: 'Ledger, vouchers, main expenses, payroll (per employee), closes payroll. TB and ledgers; no IS/BS pages.',
-    permissions: [
+    permissions: ['approval.act.CASH_DEPOSIT_ACCOUNTING', 'franchise.ar.view', 'franchise.ar.pay', 'sixpack.view.all', 
       ...READ_ALL, ...COST_BUNDLE, ...ACCOUNTING_BASE, 'gl.period.lock', 'gl.beginning_balance',
       'payroll.view.summary', 'payroll.view.detail', 'payroll.close', 'expense.view', 'cashfund.view.all', 'cashfund.manage', 'contribution.remit',
       'ar.collect', 'ar.approve', 'ar.opening', 'incentive.view', 'incentive.release', ...approvals('AR_PAYMENT', 'ECOM_SETTLEMENT', 'AGENT_INCENTIVE'), 'gl.voucher.edit', 'bank.entry', 'bs.accounts.view', 'ecom.view',
@@ -246,13 +260,13 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
     key: 'ACCOUNTING_ASSOCIATE',
     name: 'Accounting Associate',
     description: 'Ledger, vouchers, main expenses. Payroll totals only.',
-    permissions: [...READ_ALL, ...COST_BUNDLE, ...ACCOUNTING_BASE, 'payroll.view.summary', 'cashfund.view.all', 'ar.collect', 'ar.approve', 'ar.opening', 'incentive.view', 'incentive.release', ...approvals('AGENT_INCENTIVE'), ...approvals('AR_PAYMENT'), 'gl.voucher.edit', 'bank.entry', 'bs.accounts.view', 'ecom.view'],
+    permissions: ['approval.act.CASH_DEPOSIT_ACCOUNTING', 'franchise.ar.view', 'franchise.ar.pay', 'sixpack.view.all', ...READ_ALL, ...COST_BUNDLE, ...ACCOUNTING_BASE, 'payroll.view.summary', 'cashfund.view.all', 'ar.collect', 'ar.approve', 'ar.opening', 'incentive.view', 'incentive.release', ...approvals('AGENT_INCENTIVE'), ...approvals('AR_PAYMENT'), 'gl.voucher.edit', 'bank.entry', 'bs.accounts.view', 'ecom.view'],
   },
   {
     key: 'HR_STAFF',
     name: 'HR Staff',
     description: 'Payroll runs, employee master, loans/advances, charge-form allocation. Zero access to inventory/sales.',
-    permissions: ['incentive.view', 'incentive.hr', 'payroll.view.summary', 'payroll.view.detail', 'payroll.edit', 'employee.manage', 'location.view.all', 'charge_form.finalize', 'dashboard.view', 'notification.view', 'inspection.view', 'inspection.review', 'contribution.remit', 'revision.view', 'hr.notice'],
+    permissions: ['memo.create', 'sixpack.view.all', 'incentive.view', 'incentive.hr', 'payroll.view.summary', 'payroll.view.detail', 'payroll.edit', 'employee.manage', 'location.view.all', 'charge_form.finalize', 'dashboard.view', 'notification.view', 'inspection.view', 'inspection.review', 'contribution.remit', 'revision.view', 'hr.notice'],
   },
   {
     key: 'FIELD_AUDITOR',
@@ -270,13 +284,25 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
     key: 'ECOMM_ASSOCIATE',
     name: 'E-comm Associate',
     description: 'E-commerce arm (TikTok, Shopee, Lazada, each kept separate): uploads the platform order / waybill files, which draft the warehouse pull-out automatically (the Warehouse In-Charge approves); records returned parcels; uploads payout (settlement) files for Accounting and the monthly ads. Sees selling prices, fees and the e-commerce report; never cost. No separate e-commerce stock: items come from the Warehouse.',
-    permissions: ['ecom.manage', 'ecom.view', 'product.view', 'price.view.RETAIL', 'dashboard.view', 'notification.view'],
+    permissions: ['ecom.waybill', 'ecom.manage', 'ecom.view', 'product.view', 'price.view.RETAIL', 'price.view.TIKTOK', 'price.view.SHOPEE', 'price.view.LAZADA', 'dashboard.view', 'notification.view'],
   },
   {
     key: 'SALES_MANAGER',
     name: 'Sales Manager',
     description: 'Monitors sales targets and their achievement. Sees the sales of every branch, agent and e-commerce platform (amounts, channels, payment types, top products), the Daily Sales Reports, customer contacts and the receivables of dealers, franchises and agents. Sets monthly targets per branch and per agent (the Owner approves) and links agents to their accounts. Never sees cost, margin, supplier data, cash counts, payroll or the books; records no sales or money.',
-    permissions: ['incentive.prepare', 'incentive.view', 'target.manage', 'target.view', 'report.sales.all', 'ar.view', 'product.view', 'location.view.all', 'price.view.RETAIL', 'price.view.DEALER', 'price.view.AGENT', 'price.view.FRANCHISE', 'dashboard.view', 'notification.view'],
+    permissions: ['sixpack.view.all', 'incentive.prepare', 'incentive.view', 'target.manage', 'target.view', 'report.sales.all', 'ar.view', 'product.view', 'location.view.all', 'price.view.RETAIL', 'price.view.CC', 'price.view.DEALER', 'price.view.AGENT', 'price.view.FRANCHISE', 'dashboard.view', 'notification.view'],
+  },
+  {
+    key: 'FRANCHISE_COORDINATOR',
+    name: 'Franchise Coordinator',
+    description: 'Looks after the franchise partners: sees every franchise\'s receivables (invoices, penalties, interest, extension requests) and their stock transfers, issues memorandums to franchise partners and staff. Never sees cost.',
+    permissions: ['franchise.ar.view', 'memo.create', 'ar.view', 'product.view', 'location.view.all', 'report.sales.all', 'report.inventory.all', 'price.view.RETAIL', 'price.view.FRANCHISE', 'price.view.DEALER', 'price.view.CC', 'dashboard.view', 'notification.view', 'discrepancy.view'],
+  },
+  {
+    key: 'ASST_FRANCHISE_COORDINATOR',
+    name: 'Asst. Franchise Coordinator',
+    description: 'Helps the Franchise Coordinator: same views of franchise receivables and transfers, and may issue memorandums. Never sees cost.',
+    permissions: ['franchise.ar.view', 'memo.create', 'ar.view', 'product.view', 'location.view.all', 'report.sales.all', 'report.inventory.all', 'price.view.RETAIL', 'price.view.FRANCHISE', 'price.view.DEALER', 'price.view.CC', 'dashboard.view', 'notification.view', 'discrepancy.view'],
   },
   {
     key: 'AGENT',
@@ -354,6 +380,12 @@ export const APPROVAL_ROUTING: Record<ApprovalType, { roles: RoleKey[]; anyOf?: 
   SALES_TARGET: { roles: ['ADMIN'] },
   OPENING_AR: { roles: ['ADMIN'] },
   AGENT_INCENTIVE: { roles: ['ACCOUNTING_ASSOCIATE', 'ACCOUNTING_HEAD', 'ADMIN'] },
+  /** A franchise owner asks for more time on an invoice: the Owner decides; auditors, Accounting and the Franchise Coordinators are told. */
+  FRANCHISE_AR_EXTENSION: { roles: ['ADMIN'] },
+  /** A branch's cash deposit slip: the Audit Associate checks it first (the auditors and the Owner may too) ... */
+  CASH_DEPOSIT_AUDIT: { roles: ['AUDIT_ASSOCIATE', 'HEAD_AUDITOR', 'ASST_AUDITOR', 'ADMIN'], anyOf: true },
+  /** ... then the Accounting Associate (the Accounting Head and the Owner may too). */
+  CASH_DEPOSIT_ACCOUNTING: { roles: ['ACCOUNTING_ASSOCIATE', 'ACCOUNTING_HEAD', 'ADMIN'], anyOf: true },
 };
 
 /** EDIT_REQUEST approvers depend on who asks (§6.1). */

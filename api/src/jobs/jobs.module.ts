@@ -21,6 +21,7 @@ import { EcommerceModule } from '../ecommerce/ecommerce.module';
 import { EcommerceService } from '../ecommerce/ecommerce.service';
 import { TransferDiscrepancyService } from '../transfers/transfer-discrepancy.service';
 import { TransfersModule } from '../transfers/transfers.module';
+import { FranchiseArService } from '../franchise/franchise-ar.service';
 import { requestContext } from '../common/request-context';
 
 export const JOBS = {
@@ -37,6 +38,7 @@ export const JOBS = {
   CUSTOMER_FOLLOW_UPS: { name: 'customer-follow-ups', cron: '0 1 * * *' }, // 9:00 AM Manila: customers who may have finished their supplements
   CASH_DEPOSIT_REMINDERS: { name: 'cash-deposit-reminders', cron: '0 2 * * *' }, // 10:00 Manila: cash on hand due / overdue
   TRANSFER_DIFF_DEADLINES: { name: 'transfer-diff-deadlines', cron: '20 * * * *' }, // hourly: sending branch reminder after 1 day, Owner after 2 days
+  FRANCHISE_AR: { name: 'franchise-ar', cron: '15 1 * * *' }, // 9:15 AM Manila: penalty notices, due / overdue reminders and the two-month flag on franchise invoices
   ECOM_OVERDUE: { name: 'ecom-overdue', cron: '0 1 * * 5' }, // Friday 9:00 AM Manila: e-commerce orders shipped long ago, not paid nor returned
   MONTH_END_DEPRECIATION: { name: 'month-end-depreciation', cron: '0 17 1 * *' }, // 1st 01:00 Manila for previous month
 } as const;
@@ -46,7 +48,7 @@ export const JOBS = {
 export class JobsService implements OnModuleInit {
   private log = new Logger('Jobs');
   private queue!: Queue; private worker!: Worker;
-  constructor(private transferDiff: TransferDiscrepancyService, private ecom: EcommerceService, private followUps: CustomerFollowUpsService, private reportSubmission: ReportSubmissionService, private cashOnHand: CashOnHandService, private closing: ClosingService, private alerts: AlertsService, private approvals: ApprovalsService, private counts: CountsService, private sales: SalesService, private notifications: NotificationsService, private prices: PriceChangeService, private payroll: PayrollService) {}
+  constructor(private franchiseAr: FranchiseArService, private transferDiff: TransferDiscrepancyService, private ecom: EcommerceService, private followUps: CustomerFollowUpsService, private reportSubmission: ReportSubmissionService, private cashOnHand: CashOnHandService, private closing: ClosingService, private alerts: AlertsService, private approvals: ApprovalsService, private counts: CountsService, private sales: SalesService, private notifications: NotificationsService, private prices: PriceChangeService, private payroll: PayrollService) {}
 
   async onModuleInit() {
     if (process.env.DISABLE_JOBS === 'true' || process.env.NODE_ENV === 'test') return;
@@ -72,6 +74,7 @@ export class JobsService implements OnModuleInit {
       case JOBS.CUSTOMER_FOLLOW_UPS.name: return this.followUps.runDaily();
       case JOBS.CASH_DEPOSIT_REMINDERS.name: return this.cashOnHand.remind();
       case JOBS.TRANSFER_DIFF_DEADLINES.name: return this.transferDiff.runDeadlines();
+      case JOBS.FRANCHISE_AR.name: return this.franchiseAr.runDaily();
       case JOBS.ECOM_OVERDUE.name: return this.ecom.remindOverdue();
       case JOBS.MONTH_END_DEPRECIATION.name: { const d = new Date(); d.setUTCMonth(d.getUTCMonth() - 1); return this.payroll.runDepreciation(d.getUTCFullYear(), d.getUTCMonth() + 1, null); }
       default: throw new Error(`Unknown job ${name}`);

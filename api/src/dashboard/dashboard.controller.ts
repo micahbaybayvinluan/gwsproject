@@ -1,3 +1,4 @@
+import { FranchiseArService } from '../franchise/franchise-ar.service';
 import { TargetsService } from '../targets/targets.service';
 import { ReportSubmissionService } from '../reports/report-submission.service';
 import { CashOnHandService } from '../closing/cash-on-hand.service';
@@ -21,7 +22,7 @@ import { D, ZERO } from '../common/money';
 /** Role dashboards (§20.14), franchise portal (§8.7), Admin settings (§6.1 thresholds etc.). */
 @Controller('api')
 export class DashboardController {
-  constructor(private targets: TargetsService, private prisma: PrismaService, private approvals: ApprovalsService, private alerts: AlertsService, private notify: NotificationsService, private settings: SettingsService, private master: MasterService, private fin: FinReportsService, private cashFund: CashFundService, private counts: CountsService, private priceUpdates: PriceUpdatesService, private cashOnHand: CashOnHandService, private reportSubmission: ReportSubmissionService) {}
+  constructor(private franchiseAr: FranchiseArService, private targets: TargetsService, private prisma: PrismaService, private approvals: ApprovalsService, private alerts: AlertsService, private notify: NotificationsService, private settings: SettingsService, private master: MasterService, private fin: FinReportsService, private cashFund: CashFundService, private counts: CountsService, private priceUpdates: PriceUpdatesService, private cashOnHand: CashOnHandService, private reportSubmission: ReportSubmissionService) {}
 
   @Get('dashboard') @RequirePermission('dashboard.view')
   async dashboard(@CurrentUser() u: SessionUser) {
@@ -29,6 +30,19 @@ export class DashboardController {
     const locWhere = u.locationScoped ? { in: u.locationIds } : { not: '' };
     const out: Record<string, unknown> = { roleKey: u.roleKey, today: dateStr(today), unreadNotifications: await this.notify.unreadCount(u.id) };
     if (u.permissions.has('approval.act.COST_ON_RECEIVING') || [...u.permissions].some((p) => p.startsWith('approval.act.'))) { const inbox = await this.approvals.inbox(u); out.approvals = { pending: inbox.count, oldestDays: inbox.oldestDays, ...(u.roleKey === 'ADMIN' ? { withOthers: (await this.approvals.inbox(u, undefined, true)).count - inbox.count } : {}) }; }
+    // 6-Pack Card: stickers given and cards redeemed today at the branch (owner request 2026-09-30)
+    if (u.permissions.has('sixpack.issue') || u.permissions.has('sixpack.view.all')) {
+      const where = { locationId: locWhere, businessDate: today, voidedAt: null };
+      const st = await this.prisma.db.sixPackSticker.aggregate({ where, _sum: { stickers: true }, _count: true });
+      const rd = await this.prisma.db.sixPackRedemption.aggregate({ where, _sum: { amount: true }, _count: true });
+      out.sixPack = { stickers: st._sum.stickers ?? 0, dr: st._count, cards: rd._count, amount: rd._sum.amount ?? ZERO };
+    }
+    // franchise receivables: the Owner, auditors, Accounting and Franchise Coordinators see what is owed and what is late
+    if (u.permissions.has('franchise.ar.view')) {
+      const rows = await this.franchiseAr.list(u, {});
+      const all = rows.franchises;
+      out.franchiseAr = { franchises: all.filter((f) => f.invoices.length).length, total: all.reduce((t, f) => t.plus(f.totals.total), ZERO), overdue: all.reduce((t, f) => t.plus(f.totals.overdue), ZERO), overdueInvoices: all.reduce((t, f) => t + f.totals.overdueCount, 0), flagged: all.reduce((t, f) => t + f.totals.flagged, 0), creditHold: all.filter((f) => f.creditHold).length };
+    }
     if (u.roleKey !== 'HR_STAFF') {
       if (u.permissions.has('report.sales.own') || u.permissions.has('report.sales.all')) {
         const sales = await this.prisma.db.salesDoc.findMany({ where: { locationId: locWhere, docDate: today, voidedAt: null }, select: { grandTotal: true, paymentMode: true, locationId: true } });
@@ -111,9 +125,10 @@ export class DashboardController {
     const cust = await this.prisma.db.customer.findFirst({ where: { locationId, type: 'FRANCHISE' } });
     // what the franchise owes GWS sits on GWS invoices (warehouse locations): the owner only, read outside the branch scope
     const owed = cust && u.roleKey === 'FRANCHISE_OWNER' ? await requestContext.runSystem(async () => await this.prisma.db.salesDoc.aggregate({ where: { customerId: cust.id, voidedAt: null }, _sum: { grandTotal: true, amountPaid: true } })) : null;
+    const ar = await this.franchiseAr.summary(locationId);
     const transfersIn = await this.prisma.db.transferLine.findMany({ where: { doc: { toLocationId: locationId, status: { in: ['RECEIVED', 'RESOLVED'] } }, qtyReceived: { gt: 0 } }, include: { doc: { select: { docDate: true } } } });
     let transferValue = ZERO; for (const t of transfersIn) transferValue = transferValue.plus(D(await this.master.priceFor(t.productId, 'FRANCHISE', t.doc.docDate) ?? 0).mul(t.qtyReceived!));
-    return { franchise: loc, stockLines: stock.length, stockUnits: stock.reduce((s, x) => s + (x._sum.qty ?? 0), 0), incoming: incoming.map((t) => ({ id: t.id, controlNo: t.controlNo, from: t.fromLocation.name, lines: t.lines.length })), todaySales: { count: sales._count, total: sales._sum.grandTotal ?? ZERO }, arToWarehouse: u.roleKey === 'FRANCHISE_OWNER' ? { openInvoices: D(owed?._sum.grandTotal).minus(D(owed?._sum.amountPaid)), transfersAtFranchiseCost: transferValue } : null, isOwner: u.roleKey === 'FRANCHISE_OWNER', associateReceives: loc.franchiseAssociateReceives, expiring: (await this.alerts.expiring(u, locationId)).summary };
+    return { franchise: loc, stockLines: stock.length, stockUnits: stock.reduce((s, x) => s + (x._sum.qty ?? 0), 0), incoming: incoming.map((t) => ({ id: t.id, controlNo: t.controlNo, from: t.fromLocation.name, lines: t.lines.length })), todaySales: { count: sales._count, total: sales._sum.grandTotal ?? ZERO }, arToWarehouse: u.roleKey === 'FRANCHISE_OWNER' ? { openInvoices: D(owed?._sum.grandTotal).minus(D(owed?._sum.amountPaid)).plus(ar.total), transfersAtFranchiseCost: transferValue, goods: ar.goods, penaltyAndInterest: ar.charges, overdue: ar.overdue, overdueCount: ar.overdueCount, nextDue: ar.nextDue, creditHold: loc.creditHold } : null, isOwner: u.roleKey === 'FRANCHISE_OWNER', associateReceives: loc.franchiseAssociateReceives, expiring: (await this.alerts.expiring(u, locationId)).summary };
   }
   /** §8.7 Franchise Income Statement = Sales (their retail) − COGS at franchise cost − their expenses. */
   @Get('franchise/pnl') @RequirePermission('franchise.pnl')

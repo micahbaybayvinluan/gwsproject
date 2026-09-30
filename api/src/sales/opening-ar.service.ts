@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../common/prisma.service';
+import { FranchiseArService } from '../franchise/franchise-ar.service';
 import { ApprovalsService } from '../approvals/approvals.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { dateStr, toDateOnly, todayManila } from '../common/manila';
@@ -23,7 +24,7 @@ const CHANNEL = { DEALER: 'DEALER', FRANCHISE: 'FRANCHISE', AGENT: 'AGENT', OTHE
  */
 @Injectable()
 export class OpeningArService implements OnModuleInit {
-  constructor(private prisma: PrismaService, private approvals: ApprovalsService, private notify: NotificationsService) {}
+  constructor(private prisma: PrismaService, private approvals: ApprovalsService, private notify: NotificationsService, private franchiseAr: FranchiseArService) {}
 
   onModuleInit() { this.approvals.register('OPENING_AR', (r, outcome, actor) => this.onDecision(r.documentId, outcome, actor?.note ?? null)); }
 
@@ -74,6 +75,16 @@ export class OpeningArService implements OnModuleInit {
       if (outcome === 'REJECTED') { await db.openingArEntry.update({ where: { id }, data: { status: 'REJECTED', decidedAt: new Date(), decisionNote: note } }); return { ...e, status: 'REJECTED' }; }
       const loc = await db.location.findUniqueOrThrow({ where: { id: e.locationId } });
       if (await db.salesDoc.findFirst({ where: { locationId: e.locationId, drSiNo: e.drSiNo } })) throw new BadRequestException(`DR / SI ${e.drSiNo} is already recorded for ${loc.name}`);
+      // a franchisee's old balance becomes a franchise invoice: the franchise owner sees it in Franchise AR and the memo's penalty and interest apply once it is overdue
+      if (e.kind === 'FRANCHISE' && e.customerId) {
+        const cust = await db.customer.findUnique({ where: { id: e.customerId } });
+        if (cust?.locationId) {
+          const inv = await this.franchiseAr.createOpening(db as never, { franchiseLocationId: cust.locationId, fromLocationId: e.locationId, drSiNo: e.drSiNo, docDate: e.docDate, dueDate: e.dueDate, amount: e.amount, notes: `Opening AR (before GWS-ERP)${e.notes ? ` · ${e.notes}` : ''}` }, e.createdBy);
+          await db.openingArEntry.update({ where: { id }, data: { status: 'APPROVED', decidedAt: new Date(), decisionNote: note } });
+          await this.franchiseAr.tell(cust.locationId, { type: 'FRANCHISE_INVOICE', title: `Old balance recorded for the franchise: ${inv.controlNo} ${e.amount.toString()} due ${dateStr(e.dueDate)}`, body: 'Penalty and interest apply after the due date (memo of July 31, 2026).', link: `/franchise-ar?invoice=${inv.id}` });
+          return { ...e, status: 'APPROVED', locName: loc.name };
+        }
+      }
       const doc = await db.salesDoc.create({ data: {
         controlNo: `OPEN-AR-${loc.code}-${e.drSiNo}`, docDate: e.docDate, locationId: e.locationId, channel: CHANNEL[e.kind as keyof typeof CHANNEL] ?? 'OTHER',
         customerId: e.customerId, agentId: e.agentId, customerName: e.customerName, drSiNo: e.drSiNo, paymentMode: 'AR_PDC',

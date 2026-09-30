@@ -1,19 +1,38 @@
 import { StepChips, approvalLabel, type TimelineItem } from '@/components/ApprovalTimeline';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
+import { Segmented, RingGauge, CapsuleBars, CalendarCard } from '@/components/ui/widgets';
 import { api, fmtDate, peso } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { Button, Card, Stat, Empty, ErrorBox, Textarea, Badge, statusTone } from '@/components/ui/primitives';
 
-interface Dash { transfersInTransit?: { count: number; branches: { name: string; count: number }[] }; targets?: { target: number; actual: number; achievedPct: number | null; pacePct: number; belowPace: string[]; pendingApproval: number }; agentMonth?: { linked: boolean; total: number; count: number; target: number | null; achievedPct: number | null; pacePct: number | null; arOpen: number }; arDue?: { id: string; drSiNo: string; customer: string | null; branch: string; balance: string; dueDate: string; daysToDue: number; pdc: boolean }[]; cashOnHand?: { cashOnHand: string; overdue: number; dueToday: number; maxDays: number; days: { businessDate: string; outstanding: string; dueDate: string; daysLeft: number; status: string }[] }; cashOnHandBranches?: { id: string; name: string; cashOnHand: string; overdue: number; dueToday: number; oldest: string | null }[]; salesReport?: { businessDate: string; submitted: boolean; submittedAt?: string | null; auto?: boolean }; salesReportsMissing?: { name: string }[]; priceUpdates?: { id: string; product: string; what: string; oldValue: string | null; newValue: string | null; effectiveFrom: string; link: string | null; at: string }[]; myRequests?: TimelineItem[]; today: string; unreadNotifications: number; approvals?: { pending: number; oldestDays: number; withOthers?: number }; todaySales?: { count: number; total: string; byMode: Record<string, string> }; ar?: { open: string; overdue: string }; criticalStock?: { product: { name: string }; location: { name: string }; onHand: number; minQty: number; warehouseAvailable: number }[]; expiring?: { bucket: string; qty: number; valueAtSrp: string; valueAtCost?: string }[]; incomingTransfers?: number; openDiscrepancies?: number; chargeFormsPending?: number; gl?: { vouchersThisMonth: number; lockedPeriods: number }; cashFunds?: CashFunds; discrepancyDeadlines?: Deadline[]; weeklyCount?: Weekly; weeklyCountsMissedLastWeek?: { name: string; branch: string }[]; inspectionsToReview?: number; myCharges?: { toAcknowledge: number; openBalance: string } }
+interface Dash { sixPack?: { stickers: number; dr: number; cards: number; amount: string }; franchiseAr?: { franchises: number; total: string; overdue: string; overdueInvoices: number; flagged: number; creditHold: number }; transfersInTransit?: { count: number; branches: { name: string; count: number }[] }; targets?: { target: number; actual: number; achievedPct: number | null; pacePct: number; belowPace: string[]; pendingApproval: number }; agentMonth?: { linked: boolean; total: number; count: number; target: number | null; achievedPct: number | null; pacePct: number | null; arOpen: number }; arDue?: { id: string; drSiNo: string; customer: string | null; branch: string; balance: string; dueDate: string; daysToDue: number; pdc: boolean }[]; cashOnHand?: { cashOnHand: string; overdue: number; dueToday: number; maxDays: number; days: { businessDate: string; outstanding: string; dueDate: string; daysLeft: number; status: string }[] }; cashOnHandBranches?: { id: string; name: string; cashOnHand: string; overdue: number; dueToday: number; oldest: string | null }[]; salesReport?: { businessDate: string; submitted: boolean; submittedAt?: string | null; auto?: boolean }; salesReportsMissing?: { name: string }[]; priceUpdates?: { id: string; product: string; what: string; oldValue: string | null; newValue: string | null; effectiveFrom: string; link: string | null; at: string }[]; myRequests?: TimelineItem[]; today: string; unreadNotifications: number; approvals?: { pending: number; oldestDays: number; withOthers?: number }; todaySales?: { count: number; total: string; byMode: Record<string, string> }; ar?: { open: string; overdue: string }; criticalStock?: { product: { name: string }; location: { name: string }; onHand: number; minQty: number; warehouseAvailable: number }[]; expiring?: { bucket: string; qty: number; valueAtSrp: string; valueAtCost?: string }[]; incomingTransfers?: number; openDiscrepancies?: number; chargeFormsPending?: number; gl?: { vouchersThisMonth: number; lockedPeriods: number }; cashFunds?: CashFunds; discrepancyDeadlines?: Deadline[]; weeklyCount?: Weekly; weeklyCountsMissedLastWeek?: { name: string; branch: string }[]; inspectionsToReview?: number; myCharges?: { toAcknowledge: number; openBalance: string } }
 interface CashFunds { total: string; imprestTotal: string; funds: { locationId: string; location: string; imprest: string; balance: string; spent: string; lastReplenishedAt: string | null; lastCheck: { at: string; variance: string } | null }[] }
 interface Deadline { caseId: string; caseNo: string | null; countNo: string; location: string; deadline: string; daysLeft: number; shortItems: number; shortUnits: number; explanationPending: boolean }
 interface Weekly { weekStart: string; dueDate: string; daysLeft: number; submitted: boolean; submittedAt: string | null; countId: string | null; draft: boolean }
 const BUCKET: Record<string, string> = { EXPIRED: 'Expired', LT_1M: '< 1 month', M1_3: '1–3 months', M3_6: '3–6 months' };
 
+interface Perf { days: number[]; cumulative: Record<string, number[]>; monthNames: string[]; byMonth: Record<string, number[]> }
+
+/** Sales statistic: bars for each day of this month or each month of this year (amounts in full, to the centavo). */
+function StatisticCard() {
+  const [mode, setMode] = useState<'daily' | 'monthly'>('daily');
+  const now = new Date(Date.now() + 8 * 3600e3);
+  const q = useQuery({ queryKey: ['dash-perf'], queryFn: () => api.get<Perf>(`/api/reports/sales-performance?year=${now.getUTCFullYear()}&month=${now.getUTCMonth() + 1}`), staleTime: 60_000 });
+  const p = q.data;
+  const cum = p ? p.days.map((_, i) => Object.values(p.cumulative).reduce((t, v) => t + (v[i] ?? 0), 0)) : [];
+  const daily = p ? p.days.map((d, i) => ({ label: String(d), value: Math.round(((cum[i] ?? 0) - (cum[i - 1] ?? 0)) * 100) / 100 })) : [];
+  const monthly = p ? p.monthNames.map((m, i) => ({ label: m, value: Math.round(Object.values(p.byMonth).reduce((t, v) => t + (v[i] ?? 0), 0) * 100) / 100 })) : [];
+  const data = mode === 'daily' ? daily : monthly; const total = data.reduce((t, x) => t + x.value, 0);
+  return <Card title="Sales statistic" actions={<Segmented value={mode} onChange={setMode} options={[['daily', 'Daily'], ['monthly', 'Monthly']]} />}>
+    <div className="mb-3 text-sm text-slate-500">{mode === 'daily' ? 'Each day of this month' : 'Each month of this year'}: <b className="text-navy">{peso(total)}</b></div>
+    {!p ? <Empty>Loading…</Empty> : data.length ? <CapsuleBars data={data} format={peso} /> : <Empty>No sales yet.</Empty>}
+  </Card>;
+}
+
 export function DashboardPage() {
-  const { me, can } = useAuth();
+  const { me, can } = useAuth(); const nav = useNavigate();
   const q = useQuery({ queryKey: ['dashboard'], queryFn: () => api.get<Dash>('/api/dashboard'), refetchInterval: 60000 });
   const d = q.data;
   if (!d) return <div className="text-slate-500">Loading…</div>;
@@ -35,6 +54,8 @@ export function DashboardPage() {
       {d.targets && <Link to="/targets"><Stat label="Sales vs target this month" value={d.targets.target > 0 && d.targets.achievedPct != null ? `${d.targets.achievedPct}%` : peso(d.targets.actual)} sub={d.targets.target > 0 ? `${peso(d.targets.actual)} of ${peso(d.targets.target)} · ${d.targets.pacePct}% of month gone${d.targets.pendingApproval ? ` · ${d.targets.pendingApproval} target(s) waiting` : ''}` : `sales so far · no target approved yet${d.targets.pendingApproval ? ` (${d.targets.pendingApproval} waiting for the Owner)` : ''}`} tone={d.targets.target > 0 && d.targets.achievedPct != null ? (d.targets.achievedPct >= d.targets.pacePct ? 'green' : 'red') : undefined} /></Link>}
       {d.agentMonth?.linked && <Link to="/my-sales"><Stat label="My sales this month" value={peso(d.agentMonth.total)} sub={d.agentMonth.target != null ? `${d.agentMonth.achievedPct}% of ${peso(d.agentMonth.target)} target` : 'no target set yet'} tone={d.agentMonth.achievedPct != null && d.agentMonth.pacePct != null ? (d.agentMonth.achievedPct >= d.agentMonth.pacePct ? 'green' : 'red') : undefined} /></Link>}
       {d.agentMonth?.linked && <Link to="/my-sales"><Stat label="My customers' unpaid balance" value={peso(d.agentMonth.arOpen)} /></Link>}
+      {d.sixPack && <Link to="/six-pack"><Stat label="6-Pack stickers today" value={d.sixPack.stickers} sub={`${d.sixPack.dr} DR · ${d.sixPack.cards} card${d.sixPack.cards === 1 ? '' : 's'} redeemed${d.sixPack.cards ? ` (${peso(d.sixPack.amount)})` : ''}`} /></Link>}
+      {d.franchiseAr && <Link to="/franchise-ar"><Stat label="Franchise receivables" value={peso(d.franchiseAr.total)} sub={`overdue ${peso(d.franchiseAr.overdue)} · ${d.franchiseAr.overdueInvoices} invoice${d.franchiseAr.overdueInvoices === 1 ? '' : 's'}${d.franchiseAr.flagged ? ` · ⚑ ${d.franchiseAr.flagged} over two months` : ''}${d.franchiseAr.creditHold ? ` · ${d.franchiseAr.creditHold} on cash-before-delivery` : ''}`} tone={d.franchiseAr.flagged ? 'red' : Number(d.franchiseAr.overdue) > 0 ? 'amber' : undefined} /></Link>}
       {d.todaySales && <Link to="/sales"><Stat label={`Sales today (${d.today})`} value={peso(d.todaySales.total)} sub={`${d.todaySales.count} DR/SI · all payments`} /></Link>}
       {d.cashOnHand && <Link to="/cash-on-hand"><Stat label="Cash on hand (not yet deposited)" value={peso(d.cashOnHand.cashOnHand)} sub={Number(d.cashOnHand.cashOnHand) > 0 ? (d.cashOnHand.overdue ? `${d.cashOnHand.overdue} day(s) overdue` : d.cashOnHand.dueToday ? 'deposit due today' : `deposit within ${d.cashOnHand.maxDays} day(s)`) : 'all deposited'} tone={d.cashOnHand.overdue ? 'red' : d.cashOnHand.dueToday ? 'amber' : undefined} /></Link>}
       {d.ar && <Link to="/ar?overdue=1"><Stat label="Open AR" value={peso(d.ar.open)} sub={`overdue ${peso(d.ar.overdue)}`} tone={Number(d.ar.overdue) > 0 ? 'red' : undefined} /></Link>}
@@ -43,6 +64,19 @@ export function DashboardPage() {
       {d.openDiscrepancies !== undefined && <Link to="/discrepancies"><Stat label="Open discrepancy cases" value={d.openDiscrepancies} tone={d.openDiscrepancies ? 'red' : undefined} /></Link>}
       {d.chargeFormsPending !== undefined && <Link to="/charge-forms"><Stat label="Charge forms awaiting HR" value={d.chargeFormsPending} tone={d.chargeFormsPending ? 'amber' : undefined} /></Link>}
       {d.gl && <Stat label="Vouchers this month" value={d.gl.vouchersThisMonth} sub={`${d.gl.lockedPeriods} period(s) locked`} />}
+    </div>
+    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="space-y-4">
+        {(can('report.sales.own') || can('report.sales.all')) && me?.roleKey !== 'HR_STAFF' && <StatisticCard />}
+        {(d.targets || d.cashFunds || d.agentMonth?.linked) && <Card title="At a glance"><div className="flex flex-wrap items-center justify-around gap-6">
+          {d.targets && d.targets.target > 0 && d.targets.achievedPct != null && <Link to="/targets" className="text-center"><RingGauge pct={d.targets.achievedPct} sub="of this month's target" /><div className="mt-2 text-xs text-slate-500">pace {d.targets.pacePct}%</div></Link>}
+          {d.agentMonth?.linked && d.agentMonth.target != null && d.agentMonth.achievedPct != null && <Link to="/my-sales" className="text-center"><RingGauge pct={d.agentMonth.achievedPct} sub="of my target" tone="green" /></Link>}
+          {d.cashFunds && Number(d.cashFunds.imprestTotal) > 0 && <Link to="/cash-fund" className="text-center"><RingGauge pct={(Number(d.cashFunds.total) / Number(d.cashFunds.imprestTotal)) * 100} sub="of the cash fund left" tone="green" /></Link>}
+        </div></Card>}
+      </div>
+      {d.cashOnHand && <CalendarCard value={d.today} max={d.today} title={<span className="text-xs font-semibold text-slate-500">cash still to deposit</span>}
+        marks={Object.fromEntries(d.cashOnHand.days.filter((x) => x.status !== 'DEPOSITED').map((x) => [x.businessDate, { tone: x.status === 'OVERDUE' ? 'red' as const : 'amber' as const, hint: `${peso(x.outstanding)} to deposit` }]))}
+        onSelect={(day) => nav(`/closing?date=${day}`)} />}
     </div>
     {d.todaySales && <Card title={`Today's sales by payment (${d.today})`} actions={<Link className="text-sm text-brand underline" to="/closing">Daily close</Link>}>
       <div className="grid gap-3 text-sm sm:grid-cols-5">{([['CASH', 'Cash'], ['ONLINE', 'Online (bank / GCash)'], ['CREDIT_CARD', 'Credit card'], ['AR_PDC', 'On credit (AR / PDC)']] as const).map(([k, l]) => <div key={k} className="rounded-xl bg-slate-50 p-3"><div className="text-xs uppercase tracking-wide text-slate-500">{l}</div><div className="text-lg font-bold text-navy">{peso(d.todaySales!.byMode[k])}</div></div>)}<div className="rounded-xl bg-navy p-3 text-white"><div className="text-xs uppercase tracking-wide text-white/70">Total ({d.todaySales.count} DR/SI)</div><div className="text-lg font-bold">{peso(d.todaySales.total)}</div></div></div>

@@ -208,7 +208,7 @@ export class TransferDiscrepancyService implements OnModuleInit {
             { locationId: d.toLocationId, productId: l.productId, batchId: l.batchId, qtyDelta: l.qtySent, movementType: 'TRANSFER_IN', documentType: 'TransferDoc', documentId: adj.id, unitCost: l.batch.unitCost, createdBy: by },
           );
           await this.stock.post(tx, posts.splice(0));
-          await this.transfers.postTransferJournal(tx, adj, by);
+          await this.transfers.postTransferJournal(tx, adj, by, `Items received that were not on the form (adjustment form ${no})`);
         }
       } else if (outcome === 'RECEIVED_AS_SENT') {
         for (const x of short) {
@@ -219,7 +219,7 @@ export class TransferDiscrepancyService implements OnModuleInit {
           await tx.transferLine.update({ where: { id: x.l.id }, data: { qtyReceived: x.l.qtySent, shortfallResolution: 'TO_RECEIVER' } });
         }
         // the entry for the quantity now received (R6, or R7 billing for a franchise)
-        if (short.length) await this.transfers.postTransferJournal(tx, { ...d, lines: short.map((x) => ({ ...x.l, qtyReceived: x.qty })) }, by);
+        if (short.length) await this.transfers.postTransferJournal(tx, { ...d, lines: short.map((x) => ({ ...x.l, qtyReceived: x.qty })) }, by, 'Difference resolved: the goods are counted as received as on the form');
       } else {
         for (const x of short) {
           posts.push({ locationId: transit.id, productId: x.l.productId, batchId: x.l.batchId, qtyDelta: -x.qty, movementType: 'EXPIRED_WRITEOFF', documentType: 'TransferDoc', documentId: d.id, unitCost: x.l.batch.unitCost, createdBy: by });

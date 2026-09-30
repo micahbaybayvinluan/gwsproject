@@ -110,6 +110,13 @@ export function r4Collection(r: AccountResolver, e: { locationId: string; counte
   const entry: Entry = { rule: 'R4', book: 'BENTA', lines: consolidate(lines), remarks: `Collection ${e.creditNoteNo}` };
   assertBalanced(entry.lines); return [entry];
 }
+/** Franchise payment (memo 2026-07-31): the goods part clears the franchise's AR; penalty and interest are other income, taken when they are paid. */
+export function r4FranchiseCollection(r: AccountResolver, e: { fromLocationId: string; franchiseLocationId: string; principal: Decimal.Value; charges: Decimal.Value; paymentAccountId: string; receiptNo: string }): Entry[] {
+  const lines = [dr(e.paymentAccountId, D(e.principal).plus(e.charges)), cr(r.ar({ type: 'FRANCHISE', locationId: e.franchiseLocationId }, e.fromLocationId), e.principal)];
+  if (!D(e.charges).isZero()) lines.push(cr(r.global('OTHER_INCOME_FRANCHISE_LATE_CHARGES'), e.charges));
+  const entry: Entry = { rule: 'R4', book: 'BENTA', lines: consolidate(nz(lines)), remarks: `Franchise collection ${e.receiptNo}` };
+  assertBalanced(entry.lines); return [entry];
+}
 // ── R6 transfer between company locations ──
 export function r6Transfer(r: AccountResolver, e: { fromLocationId: string; toLocationId: string; controlNo: string; lines: CostLine[]; shortfall?: { accountingClass: string; qty: number; unitCost: Decimal.Value; charged?: boolean }[] }): Entry[] {
   const lines: Line[] = [];

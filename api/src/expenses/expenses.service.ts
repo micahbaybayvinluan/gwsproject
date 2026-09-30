@@ -11,6 +11,7 @@ import { CashOnHandService } from '../closing/cash-on-hand.service';
 import { ClosingService } from '../closing/closing.service';
 import { CashFundService } from '../cashfund/cashfund.service';
 import { ScopeService } from '../common/scope.service';
+import { DepositVerificationService } from './deposit-verification.service';
 import { toDateOnly, todayManila } from '../common/manila';
 import { D } from '../common/money';
 import type { SessionUser } from '../common/request-context';
@@ -18,7 +19,7 @@ import type { SessionUser } from '../common/request-context';
 /** §8.6 Branch expenses (associates), main expenses (accounting), franchise-local expenses, cash deposits. */
 @Injectable()
 export class ExpensesService {
-  constructor(private cashOnHand: CashOnHandService, private prisma: PrismaService, private seq: SequenceService, private audit: AuditService, private accounts: AccountsService, private posting: PostingService, private attachments: AttachmentsService, private closing: ClosingService, private scope: ScopeService, private cashFund: CashFundService) {}
+  constructor(private cashOnHand: CashOnHandService, private prisma: PrismaService, private seq: SequenceService, private audit: AuditService, private accounts: AccountsService, private posting: PostingService, private attachments: AttachmentsService, private closing: ClosingService, private scope: ScopeService, private cashFund: CashFundService, private depositVerification: DepositVerificationService) {}
 
   accountsFor(user: SessionUser, locationId?: string) {
     if (user.permissions.has('expense.create.main') && !locationId) return this.accounts.mainExpenseAccounts();
@@ -111,14 +112,29 @@ export class ExpensesService {
     return this.prisma.db.franchiseExpense.create({ data: { locationId, docDate: input.docDate ? toDateOnly(input.docDate) : todayManila(), category: input.category, payee: input.payee, amount: D(input.amount).toFixed(2), notes: input.notes, createdBy: user.id } });
   }
 
-  /** §8.4 cash deposit → R10 deposit entry. */
+  /** §8.4 cash deposit → R10 deposit entry. The bank deposit slip is required; the Audit Associate then the Accounting Associate verify it (owner request 2026-09-30). */
   async deposit(input: { locationId?: string; businessDate: string; amount: number; bankAccountId: string; depositedAt: string; slipAttachmentId?: string | null }, user: SessionUser) {
     const locationId = input.locationId ?? user.locationIds[0]; if (user.locationScoped && !user.locationIds.includes(locationId)) throw new ForbiddenException();
-    return this.prisma.db.$transaction(async (tx) => {
+    if (!input.slipAttachmentId) throw new BadRequestException({ message: 'Attach the bank deposit slip: the Audit Associate and the Accounting Associate check it', code: 'SLIP_REQUIRED' });
+    const att = await this.prisma.db.attachment.findUnique({ where: { id: input.slipAttachmentId }, select: { id: true } });
+    if (!att) throw new BadRequestException('The deposit slip was not found; upload it again');
+    const d = await this.prisma.db.$transaction(async (tx) => {
       const d = await tx.cashDeposit.create({ data: { locationId, businessDate: toDateOnly(input.businessDate), amount: D(input.amount).toFixed(2), bankAccountId: input.bankAccountId, depositedAt: toDateOnly(input.depositedAt), slipAttachmentId: input.slipAttachmentId ?? null, createdBy: user.id } });
       await this.posting.post(tx, { type: 'CashDeposit', id: d.id, date: toDateOnly(input.depositedAt), createdBy: user.id }, (r) => r10Deposit(r, { locationId, bankAccountId: input.bankAccountId, amount: input.amount, ref: input.businessDate }));
       return d;
     });
+    await this.depositVerification.requestAudit(d.id, user.id);
+    return this.prisma.db.cashDeposit.findUniqueOrThrow({ where: { id: d.id } });
   }
-  deposits(user: SessionUser, locationId?: string) { const loc = locationId ?? (user.locationScoped ? undefined : undefined); return this.prisma.db.cashDeposit.findMany({ where: { locationId: loc ?? (user.locationScoped ? { in: user.locationIds } : undefined) }, include: { bankAccount: { select: { title: true } } }, orderBy: { businessDate: 'desc' }, take: 200 }); }
+  async deposits(user: SessionUser, locationId?: string) {
+    const rows = await this.prisma.db.cashDeposit.findMany({ where: { locationId: locationId ?? (user.locationScoped ? { in: user.locationIds } : undefined) }, include: { bankAccount: { select: { title: true } } }, orderBy: [{ businessDate: 'desc' }, { createdAt: 'desc' }], take: 200 });
+    const ids = [...new Set(rows.flatMap((r) => [r.createdBy, r.auditVerifiedBy, r.accountingVerifiedBy, r.rejectedBy]).filter((x): x is string => !!x))];
+    const names = await this.prisma.db.user.findMany({ where: { id: { in: ids } }, select: { id: true, fullName: true } });
+    const nm = (id: string | null) => (id ? names.find((n) => n.id === id)?.fullName ?? '' : null);
+    const slips = await this.prisma.db.attachment.findMany({ where: { id: { in: rows.map((r) => r.slipAttachmentId).filter((x): x is string => !!x) } }, select: { id: true, fileName: true, contentType: true } });
+    const locs = await this.prisma.db.location.findMany({ where: { id: { in: [...new Set(rows.map((r) => r.locationId))] } }, select: { id: true, name: true } });
+    return rows.map((r) => ({ ...r, slip: slips.find((s) => s.id === r.slipAttachmentId) ?? null, branch: locs.find((l) => l.id === r.locationId)?.name ?? '', enteredBy: nm(r.createdBy), auditVerifiedByName: nm(r.auditVerifiedBy), accountingVerifiedByName: nm(r.accountingVerifiedBy), rejectedByName: nm(r.rejectedBy) }));
+  }
+  review(id: string) { return this.depositVerification.review(id); }
+  resubmit(id: string, input: { slipAttachmentId?: string | null; note?: string }, user: SessionUser) { return this.depositVerification.resubmit(id, input, user); }
 }

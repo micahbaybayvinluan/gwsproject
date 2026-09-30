@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
 import { AuditService } from '../common/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { FranchiseArService } from './franchise-ar.service';
 import { MasterService } from '../master/master.service';
 import type { SessionUser } from '../common/request-context';
 import { requestContext } from '../common/request-context';
@@ -20,7 +21,7 @@ const sum = (xs: (Prisma.Decimal | null | undefined)[]) => xs.reduce<Prisma.Deci
  */
 @Injectable()
 export class FranchiseService {
-  constructor(private prisma: PrismaService, private audit: AuditService, private notify: NotificationsService, private master: MasterService) {}
+  constructor(private prisma: PrismaService, private audit: AuditService, private notify: NotificationsService, private master: MasterService, private ar: FranchiseArService) {}
 
   private async myLocation(user: SessionUser) {
     const id = user.locationIds[0];
@@ -160,13 +161,14 @@ export class FranchiseService {
     const paidToGws = cust ? sum((await this.prisma.db.payment.findMany({ where: { customerId: cust.id, voidedAt: null, status: 'POSTED', businessDate: { lte: d } }, select: { amount: true } })).map((p) => p.amount)) : ZERO;
     // GWS invoices to this franchise live at GWS locations: read outside the franchise's branch scope
     const owedDocs = cust ? await requestContext.runSystem(async () => await this.prisma.db.salesDoc.findMany({ where: { customerId: cust.id, voidedAt: null, docDate: { lte: d } }, select: { grandTotal: true, amountPaid: true } })) : [];
-    const payableToGws = sum(owedDocs.map((x) => D(x.grandTotal).minus(x.amountPaid)));
+    const arNow = await this.ar.summary(loc.id);
+    const payableToGws = sum(owedDocs.map((x) => D(x.grandTotal).minus(x.amountPaid))).plus(arNow.total);
     const stock = await this.prisma.db.stockBalance.groupBy({ by: ['productId'], where: { locationId: loc.id, qty: { gt: 0 } }, _sum: { qty: true } });
     let inventory = ZERO; for (const s of stock) inventory = inventory.plus(D((await this.master.priceFor(s.productId, 'FRANCHISE', d)) ?? 0).mul(s._sum.qty ?? 0));
     const cash = receipts.minus(cashExpenses).minus(paidToGws);
     const assets = [{ account: 'Cash (sales receipts less expenses, salaries and payments to GWS)', amount: cash }, { account: 'Accounts receivable (franchise customers)', amount: receivables }, { account: 'Inventory at franchise cost', amount: inventory }];
     const totalAssets = sum(assets.map((a) => a.amount));
-    const liabilities = [{ account: 'Payable to GWS (unpaid transfers and invoices)', amount: payableToGws }];
+    const liabilities = [{ account: 'Payable to GWS (unpaid franchise invoices, penalty and interest)', amount: payableToGws }];
     const totalLiabilities = sum(liabilities.map((l) => l.amount));
     const equity = [{ account: "Owner's equity (capital and retained earnings)", amount: totalAssets.minus(totalLiabilities) }];
     return { franchise: loc.name, asOf: dateStr(d), assets, totalAssets, liabilities, totalLiabilities, equity, totalEquity: totalAssets.minus(totalLiabilities), note: 'Built from the franchise records in GWS-ERP. Owner capital put in outside the system is part of equity.' };

@@ -22,6 +22,11 @@ import { WriteoffsPage } from './pages/Writeoffs';
 import { ConsignmentPage, ConsigneesPage } from './pages/Consignment';
 import { EcommercePage } from './pages/Ecommerce';
 import { MySalesPage, TargetsPage } from './pages/Targets';
+import { EcomPricesPage } from '@/pages/EcomPrices';
+import { FranchiseArPage } from '@/pages/FranchiseAr';
+import { MemosPage } from '@/pages/Memos';
+import { SixPackPage } from '@/pages/SixPack';
+import { EcomAnalysisPage } from '@/pages/EcomAnalysis';
 import { IncentivesPage } from './pages/Incentives';
 import { ProductDetailPage, ProductsPage, PriceChangesPage, SuppliersPage } from './pages/Products';
 import { ImportsPage } from './pages/Imports';
@@ -87,6 +92,11 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
               <Route path="/incentives" element={<IncentivesPage />} />
               <Route path="/products" element={<ProductsPage />} />
               <Route path="/products/:id" element={<ProductDetailPage />} />
+              <Route path="/ecom-prices" element={<EcomPricesPage />} />
+              <Route path="/franchise-ar" element={<FranchiseArPage />} />
+              <Route path="/memos" element={<MemosPage />} />
+              <Route path="/six-pack" element={<SixPackPage />} />
+              <Route path="/ecom-analysis" element={<EcomAnalysisPage />} />
               <Route path="/price-changes" element={<PriceChangesPage />} />
               <Route path="/price-changes/:id" element={<PriceChangesPage />} />
               <Route path="/suppliers" element={<SuppliersPage />} />

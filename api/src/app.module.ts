@@ -32,10 +32,12 @@ import { InspectionsModule } from './inspections/inspections.module';
 
 import { HelpModule } from './help/help.module';
 import { FranchiseModule } from './franchise/franchise.module';
+import { MemosModule } from './memos/memos.module';
+import { SixPackModule } from './sixpack/sixpack.module';
 @Module({
   imports: [
     CommonModule, ChargesModule, RevisionsModule, AuthModule, UsersModule, MasterModule, StockModule, NotificationsModule, ApprovalsModule, AttachmentsModule, GlModule,
-    ReceivingModule, TransfersModule, PricingModule, ClosingModule, SalesModule, ExpensesModule, AlertsModule, CountsModule, ReportsModule, ImportsModule, PayrollModule, DashboardModule, JobsModule, EditsModule, CashFundModule, InspectionsModule, HelpModule, FranchiseModule, EcommerceModule, TargetsModule,
+    ReceivingModule, TransfersModule, PricingModule, ClosingModule, SalesModule, ExpensesModule, AlertsModule, CountsModule, ReportsModule, ImportsModule, PayrollModule, DashboardModule, JobsModule, EditsModule, CashFundModule, InspectionsModule, HelpModule, FranchiseModule, MemosModule, SixPackModule, EcommerceModule, TargetsModule,
   ],
   controllers: [HealthController],
 })

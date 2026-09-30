@@ -121,6 +121,16 @@ You run one branch: sales, expenses, stock received and sent, the weekly count, 
    3. **Print draft**, then **Submit for approval**: auditor first, the Owner last. The consignee then owes the amount.
 3. **Goods returned by a consignee:** choose the consignee, the items and your branch → save, print, submit. After approval, confirm the goods when they arrive.
 
+**Your password:** press the key icon at the top right (**Change my password**) any time. Your account is personal and you answer for everything done under it, so never tell your password to anyone, not even HR, your supervisor or the Owner. Nobody can see it.
+
+**6-Pack Card stickers (customers who buy six supplements):**
+1. On **New Sale**, tick **“6-Pack sticker given”** and type the customer's **full name and mobile number**. One sticker is recorded for each supplement on the DR; the DR shows ☑ and the customer is tagged. A voided sale takes its stickers back.
+2. When the customer has six stickers (from any branch), open **6-Pack Card → Redeem a card**: type the mobile number and press **Find** (it shows the sticker balance), complete the **name, email and address**, and press **Redeem**. The ₱300 becomes your branch's **6-Pack Card** expense, paid from the cash on hand, so the cash to remit goes down by the discount.
+3. A customer with an old paper card: tick “old paper card”, type its number and attach a photo. The auditors and the Owner are told.
+4. The dashboard shows today's stickers and cards.
+
+**Prices:** a sale paid by **credit card** uses the credit-card price (SRP ÷ 0.96, see the price memo) by itself; a TikTok, Shopee or Lazada sale uses that platform's price list.
+
 ## Warehouse Associate
 <!-- role: WAREHOUSE_ASSOCIATE -->
 You enter what comes into and goes out of the warehouse. You never see supplier cost. Your entries are checked by the Warehouse In-Charge before stock changes.
@@ -254,6 +264,8 @@ You approve costs and most corrections, audit the branches, and watch the cash.
 - Charge a cash shortage to staff from Daily Close.
 - Review store inspections and the Revision Log.
 
+**Franchise AR and memos:** **Franchise AR** shows every franchise's invoices; you are told of every payment, change, extension request and two-month flag. You may write memorandums (**Memorandums**).
+
 ## Asst Auditor
 <!-- role: ASST_AUDITOR -->
 You support the Head Auditor.
@@ -312,6 +324,8 @@ You sell at a franchise. You never see franchise cost.
 3. **Weekly count:** Stock Counts → **Start my weekly count sheet** → count → submit. Differences open a case with 7 days to explain.
 4. **Your pay:** My Pay & Charges shows only your own salary and charges, set by your franchise owner.
 
+**Your password:** press the key icon at the top right (**Change my password**) any time. Your account is personal and you answer for everything done under it, so never tell your password to anyone, not even HR, your supervisor or the Owner. Nobody can see it.
+
 ## Franchise Owner
 <!-- role: FRANCHISE_OWNER -->
 You run your franchise. Everything you see is limited to your own branch, and your books are separate from the other GWS branches.
@@ -325,6 +339,14 @@ You run your franchise. Everything you see is limited to your own branch, and yo
 4. **Expenses:** add franchise expenses (rent, utilities…); they appear in your statements.
 5. **Corrections:** post-close edits at your franchise come to you for approval.
 6. **Prices:** Price updates on your dashboard show only your franchise price.
+
+**Your password:** press the key icon at the top right (**Change my password**) any time. Your account is personal and you answer for everything done under it, so never tell your password to anyone, not even HR, your supervisor or the Owner. Nobody can see it.
+
+**Franchise AR (what you owe GWS):** open **Franchise AR**. Every delivery is billed at the franchise price when you receive it and is due 30 days later. After the due date a **2% penalty (once) and 0.1% a day** on the unpaid balance are added (memo of July 31, 2026). You can see each invoice, how the amount is worked out, your payments and any changes.
+- **Changes:** if the quantities change after receiving (a difference is resolved by the auditors / Owner), your invoice changes by itself and you, the Owner, auditors, Accounting, the Franchise Coordinators and the sales associates involved are notified.
+- **Need more time?** Press **Ask for extension**, choose the new date and give the reason. The Owner decides; the auditors, Accounting and the Franchise Coordinators are flagged. No new penalty or interest is added until the new date.
+- Unpaid two months after the due date, the account is flagged and the company may issue a demand, suspend credit, or ask for cash before delivery.
+- Sales paid by credit card are priced at the credit-card price automatically.
 
 ## Accounting Head
 <!-- role: ACCOUNTING_HEAD -->
@@ -357,6 +379,10 @@ You keep the books.
    - When the money is withdrawn to the bank, record the transfer in Bank & Office.
    - E-commerce → **All platforms: profit report** compares TikTok, Shopee and Lazada.
 
+**Franchise AR:** open **Franchise AR** to see each franchise's invoices, penalty and interest. Press **Record payment** when a franchise pays: choose how it was paid, the account it went to and the reference. The payment settles the penalty first, then the interest, then the goods. Everyone concerned is notified. Old franchise balances are entered through **AR / Credit → Opening AR** (kind Franchisee); they become franchise invoices.
+
+**Your password:** press the key icon at the top right (**Change my password**) any time. Your account is personal and you answer for everything done under it, so never tell your password to anyone, not even HR, your supervisor or the Owner. Nobody can see it.
+
 ## Accounting Associate
 <!-- role: ACCOUNTING_ASSOCIATE -->
 1. **AR payments** entered by branches: approve or reject them in My Approvals.
@@ -365,6 +391,10 @@ You keep the books.
 4. **Journal Vouchers:** view entries and correct them with **Edit entry** (balanced, no negatives, open period). The people involved and the Owner are notified.
 5. **Bank & Office:** record bank transactions and see balance-sheet account balances.
 6. **Payroll:** you see totals only. Record government contribution payments.
+
+**Franchise AR:** open **Franchise AR** to see each franchise's invoices, penalty and interest. Press **Record payment** when a franchise pays: choose how it was paid, the account it went to and the reference. The payment settles the penalty first, then the interest, then the goods. Everyone concerned is notified. Old franchise balances are entered through **AR / Credit → Opening AR** (kind Franchisee); they become franchise invoices.
+
+**Your password:** press the key icon at the top right (**Change my password**) any time. Your account is personal and you answer for everything done under it, so never tell your password to anyone, not even HR, your supervisor or the Owner. Nobody can see it.
 
 ## HR Staff
 <!-- role: HR_STAFF -->
@@ -397,6 +427,11 @@ You handle people: employees, accounts, pay, charges and notices. You have no ac
    - You are notified of count discrepancies, explanations and Daily Sales Reports not submitted by the cut-off.
    - The Error Log shows errors per staff member.
    - Review store inspection reports.
+
+**Memorandums:** open **Memorandums → Write a memo**: choose who it is for (everyone, franchise owners, franchise associates, a role, a branch or named people), type the subject and the memo, add a table if needed and add the people who sign. The memo gets its number by itself (2026-Q3-046) and everyone addressed is notified and confirms reading. Print it on the company letterhead with **Print / download PDF**.
+**New users and employees:** you are notified whenever the Owner or anyone opens a user account or an employee record, so HR always knows who is in the system.
+
+**Your password:** press the key icon at the top right (**Change my password**) any time. Your account is personal and you answer for everything done under it, so never tell your password to anyone, not even HR, your supervisor or the Owner. Nobody can see it.
 
 ## Executive Assistant
 <!-- role: EXECUTIVE_ASSISTANT -->
@@ -451,6 +486,12 @@ You see and can do everything. You are the final approver.
     - Overdue orders (shipped but neither paid nor returned) reach you every Friday.
     - The E-comm Associate's account is created in Users & Roles with the role **E-comm Associate** (no branch).
 
+**Pricing (new):** **E-com & Card Prices** holds the credit-card price rule (fee % and whether it is SRP ÷ (1 − %) as in the price memo, or SRP + %) and the TikTok / Shopee / Lazada price lists from the masterlist; change any price or import the masterlist again. Lazada follows Shopee until it has its own prices. Amounts keep their centavos.
+**E-com Margin Analysis (new):** each platform's fees and charges, ads, cost of goods and the margin left against your target; for every product the margin at the platform price and the price that keeps the target. Add ad expenses at the bottom of the page.
+**Franchise AR:** record waivers of penalty / interest, decide extension requests (in **Approvals**) and put a franchise on cash-before-delivery. **Memorandums:** yours always carry AL MARVIN VINLUAN (President) and MICAH VINLUAN (Manager). Adding an employee or a user notifies HR.
+
+**Your password:** press the key icon at the top right (**Change my password**) any time. Your account is personal and you answer for everything done under it, so never tell your password to anyone, not even HR, your supervisor or the Owner. Nobody can see it.
+
 ## E-comm Associate
 <!-- role: ECOMM_ASSOCIATE -->
 You run the online shops: **TikTok Shop, Shopee and Lazada**, each on its own tab. E-commerce has no stock of its own: every item comes from the Warehouse, and the Warehouse In-Charge approves each pull-out. You see selling prices and platform fees, never cost.
@@ -492,6 +533,8 @@ You run the online shops: **TikTok Shop, Shopee and Lazada**, each on its own ta
 **Report** (tab: All platforms: profit report)
 - Choose the dates. It shows TikTok, Shopee and Lazada side by side: net sales, each fee, ads, what is left after fees and ads, fees as % of sales, return on ad spend, returns and payouts.
 
+The platform price lists (TikTok, Shopee, Lazada) are set by the Owner in **E-com & Card Prices**; you see the platform prices for your own work. Change your password with the key icon at the top right.
+
 ## Sales Manager
 <!-- role: SALES_MANAGER -->
 You follow the sales of every branch, agent and e-commerce platform, and you set the monthly targets. You never see cost, margin, supplier data, cash counts, payroll or the books, and you do not record sales or money.
@@ -523,6 +566,8 @@ You follow the sales of every branch, agent and e-commerce platform, and you set
 - **Sales Report** and **Sales Graphs**: any branch and period; no profit or cost.
 - **Sales List**, **Daily Sales Report**, **AR & Collections** (who owes what, due dates), **Customers & Follow-ups**, **Products & Prices** (selling prices only).
 
+**Your password:** press the key icon at the top right (**Change my password**) any time. Your account is personal and you answer for everything done under it, so never tell your password to anyone, not even HR, your supervisor or the Owner. Nobody can see it.
+
 ## Agent
 <!-- role: AGENT -->
 You see only your own sales, wherever the items came from, and your own target. You never see cost or other people's sales.
@@ -536,6 +581,20 @@ You see only your own sales, wherever the items came from, and your own target. 
 3. **Agent Incentives:** your incentive per month, its status (waiting for approval, with HR to sign, released) and how it was paid.
 4. If My Sales says your account is not linked, ask the Sales Manager to link it.
 5. **Products & Prices:** retail and agent prices.
+
+## Franchise Coordinator
+<!-- role: FRANCHISE_COORDINATOR -->
+You look after the franchise partners. You never see cost.
+
+1. **Franchise AR:** see each franchise's invoices, penalty (2% once) and interest (0.1% a day) after the due date, payments, changes and extension requests. You are notified of every event: new invoice, payment, change in quantities, extension request, overdue reminders and the two-month flag.
+2. **Recommended process** (shown on the page): day 1 automatic notices; from day 7 call the owner and issue a notice memo; from day 30 the Owner reviews and may put the franchise on cash-before-delivery; at two months a demand memo and the actions the memo allows.
+3. **Memorandums:** write memos to franchise partners and their associates. Choose the addressees, type the memo (a table is optional), add the signers. The memo is numbered by itself and everyone addressed is notified; print it on the letterhead. **Write the demand memo** on the Franchise AR page fills in the notice for you.
+4. **Transfers and stock:** you can see what was sent to and received by each franchise, and the discrepancies.
+5. **Your password:** press the key icon at the top right. It is personal; never tell it to anyone.
+
+## Asst. Franchise Coordinator
+<!-- role: ASST_FRANCHISE_COORDINATOR -->
+You help the Franchise Coordinator with the same screens: **Franchise AR** (invoices, penalty, interest, extension requests, notifications), **Memorandums** (write, sign, track who has read them) and the franchise stock transfers. You never see cost. Change your password with the key icon at the top right.
 
 ## Other users (custom permissions)
 <!-- role: CUSTOM -->

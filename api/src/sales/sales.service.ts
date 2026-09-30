@@ -1,3 +1,4 @@
+import { SixPackService } from '../sixpack/sixpack.service';
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { PaymentMode, Prisma, SalesChannel } from '@prisma/client';
 import { PrismaService, Tx } from '../common/prisma.service';
@@ -24,7 +25,7 @@ export interface SalesLineInput { productId: string; qty: number; unitPrice?: nu
 export interface SalesInput {
   locationId?: string; docDate?: string; channel: SalesChannel; channelSub?: string | null; customerId?: string | null; agentId?: string | null; riderId?: string | null; customerName?: string | null; customerPhone?: string | null; customerEmail?: string | null; drSiNo: string;
   paymentMode: PaymentMode; paymentAccountId?: string | null; proofOfPaymentAttachmentId?: string | null; cardMid?: string; cardSlipNo?: string; cardApprovalCode?: string; cardBatchNo?: string;
-  deliveryFee?: number; riderIncentive?: number; incentive?: { amount: number; payee: string; kind?: 'SALES' | 'RIDER' } | null; shippingFee?: number; shippingExpense?: number; marketplaceCharges?: number; dueDate?: string | null; pdcBank?: string; pdcChequeNo?: string; pdcDate?: string | null; notes?: string;
+  deliveryFee?: number; riderIncentive?: number; incentive?: { amount: number; payee: string; kind?: 'SALES' | 'RIDER' } | null; sixPackSticker?: boolean; shippingFee?: number; shippingExpense?: number; marketplaceCharges?: number; dueDate?: string | null; pdcBank?: string; pdcChequeNo?: string; pdcDate?: string | null; notes?: string;
   lines: SalesLineInput[];
 }
 
@@ -33,7 +34,7 @@ export const TIER_BY_CHANNEL: Record<SalesChannel, string> = { WALK_IN: 'RETAIL'
 /** §8 Sales module: entry (all channels/modes), agents, AR/PDC, payments, credit notes. Stock is deducted on save (FEFO). */
 @Injectable()
 export class SalesService implements OnModuleInit {
-  constructor(private prisma: PrismaService, private seq: SequenceService, private stock: StockService, private approvals: ApprovalsService, private master: MasterService, private notify: NotificationsService, private audit: AuditService, private settings: SettingsService, private attachments: AttachmentsService, private posting: PostingService, private closing: ClosingService, private scope: ScopeService, private expenses: ExpensesService, private followUps: CustomerFollowUpsService) {}
+  constructor(private prisma: PrismaService, private seq: SequenceService, private stock: StockService, private approvals: ApprovalsService, private master: MasterService, private notify: NotificationsService, private audit: AuditService, private settings: SettingsService, private attachments: AttachmentsService, private posting: PostingService, private closing: ClosingService, private scope: ScopeService, private expenses: ExpensesService, private followUps: CustomerFollowUpsService, private sixPack: SixPackService) {}
 
   onModuleInit() {
     this.approvals.register('SPECIAL_PRICE', (req, outcome) => this.onSpecialPriceDecision(req.documentId, outcome));
@@ -82,12 +83,14 @@ export class SalesService implements OnModuleInit {
     const franchiseUser = user.roleKey.startsWith('FRANCHISE');
     const nearExpiryDays = await this.settings.get<number>('alerts.near_expiry_days');
     const autoDiscountPct = D(await this.settings.get<number>('approval.special_price_auto_discount_pct'));
-    const defaultTier = input.agentId && input.channel !== 'AGENT' ? 'AGENT' : TIER_BY_CHANNEL[input.channel];
+    // price list by how the customer buys (owner request 2026-09-30): a marketplace order follows that platform's list; paid by credit card = credit-card price
+    const platformTier = input.channel === 'SHIPPING_MARKETPLACE' && input.channelSub && ['TIKTOK', 'SHOPEE', 'LAZADA'].includes(input.channelSub.toUpperCase()) ? input.channelSub.toUpperCase() : null;
+    const defaultTier = input.agentId && input.channel !== 'AGENT' ? 'AGENT' : platformTier ?? (input.paymentMode === 'CREDIT_CARD' && TIER_BY_CHANNEL[input.channel] === 'RETAIL' ? 'CC' : TIER_BY_CHANNEL[input.channel]);
 
     const doc = await this.prisma.db.$transaction(async (tx) => {
       const controlNo = await this.seq.form(tx, 'DR', locationId);
       const lineRows: Prisma.SalesLineUncheckedCreateWithoutDocInput[] = [];
-      let productTotal = ZERO; let special = false;
+      let productTotal = ZERO; let special = false; let supplementUnits = 0;
       for (const l of input.lines) {
         if (l.qty <= 0) throw new BadRequestException('Qty must be positive');
         const product = await tx.product.findUniqueOrThrow({ where: { id: l.productId }, include: { category: true, bundleComponents: true } });
@@ -95,6 +98,7 @@ export class SalesService implements OnModuleInit {
         const tier = l.priceTier ?? defaultTier;
         if (!user.permissions.has(`price.view.${tier}`) && !franchiseUser) throw new ForbiddenException(`You may not sell at tier ${tier}`);
         const isFreebie = !!l.isFreebie || product.category.accountingClass === 'FREEBIE' || product.category.accountingClass === 'PLASTIC';
+        if (!isFreebie && product.category.accountingClass === 'SUPPLEMENT') supplementUnits += l.qty;
         const tierPrice = isFreebie ? ZERO : D(await this.master.priceFor(product.id, tier, docDate, tx));
         let unitPrice = isFreebie ? ZERO : l.unitPrice != null ? D(l.unitPrice) : tierPrice;
         if (franchiseUser && l.unitPrice != null && !unitPrice.equals(tierPrice)) {
@@ -137,6 +141,8 @@ export class SalesService implements OnModuleInit {
           lines: { create: lineRows },
         }, include: this.include,
       });
+      // 6-Pack Card: one sticker per supplement on the DR, with the customer tagged (owner request 2026-09-30)
+      if (input.sixPackSticker) await this.sixPack.issue(tx, { saleId: created.id, locationId, docDate, name: input.customerName, phone: input.customerPhone, email: input.customerEmail, supplementUnits, userId: user.id });
       if (incentive) {
         if (D(incentive.amount).gt(grandTotal)) throw new BadRequestException('The incentive cannot be more than the sale');
         const ex = await this.expenses.saleIncentive(tx, { locationId, docDate, kind: incentive.kind, payee: incentive.payee, amount: incentive.amount, drSiNo: created.drSiNo, userId: user.id });
@@ -192,6 +198,7 @@ export class SalesService implements OnModuleInit {
     await this.prisma.db.$transaction(async (tx) => {
       await this.stock.post(tx, doc.lines.map((l) => ({ locationId: doc.locationId, productId: l.productId, batchId: l.batchId, qtyDelta: l.qty, movementType: 'SALE_RETURN' as const, documentType: 'SalesDoc', documentId: doc.id, unitCost: l.unitCost, createdBy: user.id })));
       await tx.salesDoc.update({ where: { id }, data: { status: 'VOIDED', voidedAt: new Date(), voidedBy: user.id, voidReason: reason } });
+      await this.sixPack.voidForSale(tx, doc.id);
       // the incentive paid from this sale is voided with it
       if (doc.incentiveExpenseId) { const ex = await tx.expenseDoc.findUnique({ where: { id: doc.incentiveExpenseId } }); if (ex && !ex.voidedAt) await this.expenses.voidInTx(tx, ex, `Sale ${doc.drSiNo} voided: ${reason}`, user.id); }
       // reverse journal

@@ -14,6 +14,8 @@ import { createApp } from '../src/main';
 import { ApprovalsService } from '../src/approvals/approvals.service';
 import { TransferDiscrepancyService } from '../src/transfers/transfer-discrepancy.service';
 import { SalesService } from '../src/sales/sales.service';
+import { FranchiseArService } from '../src/franchise/franchise-ar.service';
+import { makePdf } from './pdf';
 
 const PW = process.env.SEED_PASSWORD || 'ChangeMe!2026';
 const TOTP_ROLES = ['admin', 'ext.auditor', 'head.auditor', 'acct.head'];
@@ -49,7 +51,7 @@ async function inChargeApproves(documentType: string, id: string) {
   if (!r) throw new Error(`No In-Charge approval pending for ${documentType} ${id}`);
   ok(await as('wh.incharge').post(`/api/approvals/${r.id}/decide`).send({ decision: 'APPROVE' }));
 }
-const USERS = ['admin', 'ext.auditor', 'head.auditor', 'asst.auditor', 'audit.assoc', 'wh.incharge', 'wh.assoc', 'sales.westave', 'fr.mayon.assoc', 'fr.mayon.owner', 'custom.user', 'acct.head', 'acct.assoc', 'hr.staff', 'field.auditor', 'sales.dasma', 'sales.csr', 'exec.assistant', 'ecomm.assoc', 'sales.manager', 'agent.jerick'];
+const USERS = ['admin', 'ext.auditor', 'head.auditor', 'asst.auditor', 'audit.assoc', 'wh.incharge', 'wh.assoc', 'sales.westave', 'fr.mayon.assoc', 'fr.mayon.owner', 'custom.user', 'acct.head', 'acct.assoc', 'hr.staff', 'field.auditor', 'sales.dasma', 'sales.csr', 'exec.assistant', 'ecomm.assoc', 'sales.manager', 'agent.jerick', 'franchise.coord', 'asst.franchise.coord'];
 const as = (u: string) => ({ get: (p: string) => http.get(p).set('Authorization', `Bearer ${tokens[u]}`), post: (p: string) => http.post(p).set('Authorization', `Bearer ${tokens[u]}`), put: (p: string) => http.put(p).set('Authorization', `Bearer ${tokens[u]}`), patch: (p: string) => http.patch(p).set('Authorization', `Bearer ${tokens[u]}`), delete: (p: string) => http.delete(p).set('Authorization', `Bearer ${tokens[u]}`) });
 const has = (o: unknown, re: RegExp): boolean => JSON.stringify(o).match(re) !== null;
 const ok = (r: request.Response) => { if (r.status >= 400) throw new Error(`${r.request?.method} ${r.request?.url} → ${r.status} ${JSON.stringify(r.body)}`); return r; };
@@ -60,6 +62,8 @@ async function resetTransactionalData() {
   await prisma.$executeRawUnsafe(`TRUNCATE stock_ledger, stock_balances, receiving_lines, receiving_docs, transfer_lines, transfer_docs, sales_lines, payment_allocations, payments, sales_docs, expense_docs, count_lines, count_docs, discrepancy_cases, charge_form_allocations, charge_form_lines, charge_forms, expiry_writeoff_lines, expiry_writeoff_docs, approval_decisions, approval_requests, notifications, audit_log, batches, daily_closes, post_close_edits, journal_lines, journal_vouchers, beginning_balances, accounting_periods, voucher_sequences, control_sequences, alert_states, attachments, employee_loans, payroll_lines, payroll_runs, employees, min_stock_levels, revaluation_lines, revaluation_entries, cash_deposits, login_session_records, cash_fund_txns, cash_fund_checks, store_inspections, contribution_remittances, document_revisions, price_change_lines, price_change_docs, price_update_logs, franchise_salaries, franchise_charges, franchise_expenses CASCADE`);
   await prisma.$executeRawUnsafe(`TRUNCATE cash_deposits, cash_deposit_extensions, hr_notices, sales_report_submissions`);
   await prisma.$executeRawUnsafe(`TRUNCATE ecom_orders, ecom_order_lines, ecom_settlements, ecom_returns, ecom_ad_spend, ecom_sku_maps, transfer_discrepancies, sales_targets, opening_ar_entries, agent_incentives`);
+  await prisma.$executeRawUnsafe(`TRUNCATE ecom_waybills, ecom_waybill_hints, franchise_payments, franchise_ar_adjustments, franchise_ar_extensions, franchise_invoices, memo_recipients, memos, six_pack_stickers, six_pack_redemptions CASCADE`);
+  await prisma.$executeRawUnsafe(`UPDATE locations SET credit_hold = false, credit_hold_note = NULL`);
   await prisma.$executeRawUnsafe(`UPDATE locations SET franchise_associate_receives = false, cash_deposit_max_days = 1`);
   await prisma.$executeRawUnsafe(`UPDATE cash_funds SET balance = imprest_amount`);
   await prisma.priceList.deleteMany({ where: { product: { name: { startsWith: 'E2E ' } } } });
@@ -323,7 +327,7 @@ describe('scoping & redaction on live endpoints', () => {
     await as('sales.westave').get(`/api/stock/on-hand?locationId=${dasma}`).expect(403);
     await as('sales.westave').get(`/api/sales?locationId=${dasma}`).expect(403);
     const own = ok(await as('sales.westave').get('/api/sales')).body as { locationId: string }[]; expect(own.every((s) => s.locationId === locs.find((l) => l.code === 'WESTAVE')!.id)).toBe(true);
-    const fr = ok(await as('fr.mayon.owner').get('/api/products?take=5')).body; for (const p of fr) for (const tier of Object.keys(p.tierPrices)) expect(['RETAIL', 'FRANCHISE']).toContain(tier);
+    const fr = ok(await as('fr.mayon.owner').get('/api/products?take=5')).body; for (const p of fr) for (const tier of Object.keys(p.tierPrices)) expect(['RETAIL', 'CC', 'FRANCHISE']).toContain(tier);
     expect(has(fr, /"cost"/)).toBe(false);
     const ext = ok(await as('ext.auditor').get('/api/products?take=5')).body; expect(has(ext, /"cost"/)).toBe(true);
     await as('ext.auditor').post('/api/products').send({ name: 'x', categoryId: '00000000-0000-0000-0000-000000000000' }).expect(403); // read-only
@@ -1046,7 +1050,10 @@ describe('Owner requests 2026-09-27: sale incentives, count sheets, count discre
     const payAccts = ok(await as('sales.westave').get(`/api/accounts/payment?locationId=${west}`)).body as { id: string; title: string }[];
     const gcash = payAccts.find((a) => a.title === 'Gcash (GWS)')!; expect(gcash).toBeTruthy();
     expect((ok(await as('exec.assistant').get('/api/bank-entries/options')).body.banks as { title: string }[]).some((a) => a.title === 'Gcash (GWS)')).toBe(true);
-    ok(await as('sales.westave').post('/api/expenses/deposits').send({ locationId: west, businessDate: dateOnly(day(-3)), amount: 2000, bankAccountId: gcash.id, depositedAt: today() }));
+    const slipPng = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(64)]);
+    const slip = ok(await as('sales.westave').post(`/api/attachments/CashDeposit/${crypto.randomUUID()}`).attach('file', slipPng, { filename: 'slip.png', contentType: 'image/png' })).body;
+    expect((await as('sales.westave').post('/api/expenses/deposits').send({ locationId: west, businessDate: dateOnly(day(-3)), amount: 2000, bankAccountId: gcash.id, depositedAt: today() })).status).toBe(400); // the slip is required
+    ok(await as('sales.westave').post('/api/expenses/deposits').send({ locationId: west, businessDate: dateOnly(day(-3)), amount: 2000, bankAccountId: gcash.id, depositedAt: today(), slipAttachmentId: slip.id }));
     b = ok(await as('sales.westave').get('/api/cash-on-hand')).body;
     expect(b.days.find((x: { businessDate: string }) => x.businessDate === dateOnly(day(-3))).status).toBe('DEPOSITED'); expect(b.overdue).toBe(0);
   });
@@ -1705,5 +1712,258 @@ describe('Post-close edits from Daily Close / Daily Sales Report: reason, HR and
     }
     const hr = ok(await as('hr.staff').get('/api/hr-notices')).body as { id: string; kind: string }[];
     expect(hr.some((x) => x.kind === 'POST_CLOSE_EDITS')).toBe(true);
+  });
+});
+
+describe('Owner requests 2026-09-30 (pricing, 6-Pack Card, franchise receivables, memos, users)', () => {
+  let wh = ''; let west = ''; let mayon = ''; let a = '';
+  const today = () => new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);
+  const day = (n: number) => new Date(Date.now() + 8 * 3600e3 + n * 86400000).toISOString().slice(0, 10);
+  const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(64)]);
+  const notes = async (u: string) => JSON.stringify(ok(await as(u).get('/api/notifications')).body);
+  const giveStock = async (locationId: string, productId: string, qty: number, cost: number) => {
+    const batch = await prisma.batch.create({ data: { productId, batchNo: `N-${run}-${locationId.slice(0, 4)}-${qty}`, receivedRef: 'TEST', unitCost: cost.toFixed(2) } });
+    await prisma.stockLedger.create({ data: { locationId, productId, batchId: batch.id, qtyDelta: qty, movementType: 'RECEIVE', documentType: 'OpeningStock', documentId: batch.id, unitCost: cost.toFixed(2), businessDate: new Date(`${today()}T00:00:00Z`) } });
+    await prisma.stockBalance.create({ data: { locationId, productId, batchId: batch.id, qty } });
+  };
+  const decide = async (u: string, id: string, type: string, decision: 'APPROVE' | 'REJECT', note?: string) => { const r = await prisma.approvalRequest.findFirstOrThrow({ where: { documentId: id, type, status: 'PENDING' } }); return as(u).post(`/api/approvals/${r.id}/decide`).send({ decision, note }); };
+  beforeAll(async () => {
+    await prisma.salesReportSubmission.deleteMany({});
+    const locs = ok(await as('admin').get('/api/locations')).body as { id: string; code: string }[];
+    wh = locs.find((l) => l.code === 'WH')!.id; west = locs.find((l) => l.code === 'WESTAVE')!.id; mayon = locs.find((l) => l.code === 'MAYON')!.id;
+    const cats = ok(await as('admin').get('/api/categories')).body as { id: string; accountingClass: string }[];
+    a = ok(await as('admin').post('/api/products').send({ name: `N30 Whey ${run}`, categoryId: cats.find((c) => c.accountingClass === 'SUPPLEMENT')!.id, prices: { RETAIL: 1000, DEALER: 800, FRANCHISE: 700 }, cost: 500 })).body.id;
+    await giveStock(wh, a, 40, 500); await giveStock(west, a, 20, 500);
+  });
+
+  it('credit-card price = SRP ÷ 0.96 to the centavo; the Owner alone sets e-commerce prices (Lazada follows Shopee); a card sale is priced at the CC price; sees only own tiers', async () => {
+    const prod = async (u: string) => (ok(await as(u).get(`/api/products?search=${encodeURIComponent(`N30 Whey ${run}`)}&take=5`)).body as { tierPrices: Record<string, string> }[])[0];
+    const assoc = await prod('sales.westave');
+    expect(Number(assoc.tierPrices.CC)).toBe(1041.67); expect(assoc.tierPrices.TIKTOK).toBeUndefined(); expect(assoc.tierPrices.SHOPEE).toBeUndefined();
+    await as('sales.westave').put('/api/pricing/ecom').send({ rows: [{ productId: a, tier: 'TIKTOK', price: 1199.5 }] }).expect(403);
+    await as('ecomm.assoc').put('/api/pricing/ecom').send({ rows: [{ productId: a, tier: 'TIKTOK', price: 1199.5 }] }).expect(403);
+    ok(await as('admin').put('/api/pricing/ecom').send({ rows: [{ productId: a, tier: 'TIKTOK', price: 1199.5 }, { productId: a, tier: 'SHOPEE', price: 1100 }] }));
+    const ec = await prod('ecomm.assoc');
+    expect(Number(ec.tierPrices.TIKTOK)).toBe(1199.5); expect(Number(ec.tierPrices.SHOPEE)).toBe(1100); expect(Number(ec.tierPrices.LAZADA)).toBe(1100); // no rounding off
+    const accts = ok(await as('sales.westave').get(`/api/accounts/payment?locationId=${west}`)).body as { id: string }[];
+    const up = ok(await as('sales.westave').post(`/api/attachments/SalesDoc/${crypto.randomUUID()}`).attach('file', png, { filename: 'slip.png', contentType: 'image/png' }));
+    const sale = ok(await as('sales.westave').post('/api/sales').send({ channel: 'WALK_IN', paymentMode: 'CREDIT_CARD', drSiNo: `CC-${run}`, paymentAccountId: accts[0].id, proofOfPaymentAttachmentId: up.body.id, cardMid: 'M1', cardSlipNo: 'S1', cardApprovalCode: 'A1', cardBatchNo: 'B1', lines: [{ productId: a, qty: 1 }] })).body;
+    const full = ok(await as('sales.westave').get(`/api/sales/${sale.id}`)).body;
+    expect(full.lines[0].priceTier).toBe('CC'); expect(Number(full.lines[0].unitPrice)).toBe(1041.67); expect(Number(full.grandTotal)).toBe(1041.67);
+    ok(await as('admin').put('/api/pricing/cc-markup').send({ pct: 5, method: 'ADD' }));
+    expect(Number((await prod('sales.westave')).tierPrices.CC)).toBe(1050); // 1000 + 5%
+    ok(await as('admin').put('/api/pricing/cc-markup').send({ pct: 4, method: 'GROSS_UP' }));
+    expect(Number((await prod('sales.westave')).tierPrices.CC)).toBe(1041.67);
+    const cc = await prisma.setting.findUnique({ where: { key: 'pricing.cc_markup_pct' } }); expect(Number(cc?.value)).toBe(4);
+  });
+
+  it('6-Pack Card: sticker ticked on the DR needs the customer tagged; six stickers make a card; the ₱300 becomes the branch expense with the customer data complete; a voided sale takes its stickers back', async () => {
+    const sell = (n: number, extra: Record<string, unknown>) => as('sales.westave').post('/api/sales').send({ channel: 'WALK_IN', paymentMode: 'CASH', drSiNo: `SP-${run}-${n}`, lines: [{ productId: a, qty: 3 }], ...extra });
+    expect((await sell(1, { sixPackSticker: true })).status).toBe(400); // name and number are needed
+    const s1 = ok(await sell(2, { sixPackSticker: true, customerName: 'Maria Santos', customerPhone: '0917 123 4567' })).body;
+    expect(ok(await as('sales.westave').get(`/api/sales/${s1.id}`)).body.sixPackStickers).toBe(3);
+    expect(ok(await as('sales.westave').get('/api/six-pack/customer?phone=%2B639171234567')).body.left).toBe(3); // same person however typed
+    const tooEarly = await as('sales.westave').post('/api/six-pack/redeem').send({ customerName: 'Maria Santos', phone: '09171234567', email: 'maria@example.com', address: '12 Rizal St, Dasmarinas' });
+    expect(tooEarly.status).toBe(400); expect(JSON.stringify(tooEarly.body)).toContain('3 stickers');
+    const s2 = ok(await sell(3, { sixPackSticker: true, customerName: 'Maria Santos', customerPhone: '09171234567' })).body;
+    expect(ok(await as('sales.westave').get('/api/six-pack/customer?phone=09171234567')).body.cardsReady).toBe(1);
+    expect((await as('sales.westave').post('/api/six-pack/redeem').send({ customerName: 'Maria Santos', phone: '09171234567', email: 'not-an-email', address: '12 Rizal St' })).status).toBe(400); // complete data
+    expect((await as('sales.westave').post('/api/six-pack/redeem').send({ customerName: 'Maria Santos', phone: '09171234567', email: 'maria@example.com', address: '12 Rizal St', legacyCardNo: 'OLD-1' })).status).toBe(400); // old card needs a photo
+    const r = ok(await as('sales.westave').post('/api/six-pack/redeem').send({ customerName: 'Maria Santos', phone: '09171234567', email: 'maria@example.com', address: '12 Rizal St, Dasmarinas' })).body;
+    expect(Number(r.amount)).toBe(300);
+    const ex = await prisma.expenseDoc.findUniqueOrThrow({ where: { id: r.expenseId }, include: { account: true } });
+    expect(Number(ex.amount)).toBe(300); expect(ex.account.title).toMatch(/6-Pack Card/); expect(ex.paidFrom).toBe('CASH_DRAWER'); expect(ex.payee).toBe('Maria Santos'); expect(ex.locationId).toBe(west);
+    expect(ok(await as('sales.westave').get('/api/six-pack/customer?phone=09171234567')).body.left).toBe(0);
+    const sum = ok(await as('sales.westave').get('/api/six-pack/summary')).body;
+    expect(sum.today.cards).toBe(1); expect(Number(sum.today.amount)).toBe(300); expect(sum.today.stickers).toBe(6);
+    expect(ok(await as('sales.westave').get('/api/dashboard')).body.sixPack.stickers).toBe(6);
+    expect(ok(await as('sales.westave').get(`/api/expenses?locationId=${west}&from=${today()}&to=${today()}`)).body.some((e: { id: string }) => e.id === r.expenseId)).toBe(true);
+    await as('sales.dasma').get('/api/six-pack/summary?locationId=' + west).expect(403); // another branch
+    expect(ok(await as('head.auditor').get('/api/six-pack/summary')).body.period.cards).toBeGreaterThanOrEqual(1);
+    ok(await as('sales.westave').post(`/api/sales/${s2.id}/void`).send({ reason: 'customer changed mind' }));
+    expect(ok(await as('sales.westave').get('/api/six-pack/customer?phone=09171234567')).body.earned).toBe(3);
+    await as('sales.westave').post(`/api/six-pack/redemptions/${r.id}/void`).send({ reason: 'test' }).expect(403); // associates cannot void a redemption
+    ok(await as('head.auditor').post(`/api/six-pack/redemptions/${r.id}/void`).send({ reason: 'counted twice' }));
+    expect((await prisma.expenseDoc.findUniqueOrThrow({ where: { id: r.expenseId } })).voidedAt).not.toBeNull();
+  });
+
+  it('franchise AR: billed at the franchise price for what was received; a resolved difference changes it by itself and tells everyone; the memo penalty and interest; payment order; extension needs the Owner and flags the others; waive and credit hold are the Owner\'s', async () => {
+    const t = ok(await as('wh.incharge').post('/api/transfers').send({ fromLocationId: wh, toLocationId: mayon, transferType: 'RESTOCK', lines: [{ productId: a, qty: 4 }] })).body;
+    ok(await as('wh.incharge').post(`/api/transfers/${t.id}/submit`));
+    ok(await decide('admin', t.id, 'TRANSFER_TO_FRANCHISE', 'APPROVE'));
+    const fl = ok(await as('fr.mayon.owner').get(`/api/transfers/${t.id}`)).body.lines as { id: string }[];
+    ok(await as('fr.mayon.owner').post(`/api/transfers/${t.id}/confirm`).send({ lines: [{ lineId: fl[0].id, qtyReceived: 3, discrepancyNote: 'only 3 in the box' }] }));
+    // billed for the 3 received at ₱700
+    let list = ok(await as('fr.mayon.owner').get('/api/franchise-ar')).body;
+    let inv = list.franchises.find((f: { name: string }) => f.name.includes('Mayon')).invoices.find((i: { controlNo: string }) => i.controlNo === `FAR-${t.controlNo}`);
+    expect(Number(inv.amount)).toBe(2100); expect(inv.controlNo).toBe(`FAR-${t.controlNo}`); expect(inv.dueDate).toBe(day(30));
+    await as('fr.mayon.assoc').get('/api/franchise-ar').expect(403); await as('sales.westave').get('/api/franchise-ar').expect(403);
+    expect(ok(await as('franchise.coord').get('/api/franchise-ar')).body.franchises.some((f: { invoices: unknown[] }) => f.invoices.length)).toBe(true);
+    for (const u of ['fr.mayon.owner', 'franchise.coord', 'asst.franchise.coord', 'acct.head', 'acct.assoc', 'head.auditor', 'asst.auditor', 'admin']) expect(await notes(u), u).toContain('FRANCHISE_INVOICE');
+    // the Head Auditor finds the receiver miscounted: the franchise gets 4, so the invoice becomes 4 × ₱700
+    ok(await decide('head.auditor', t.id, 'TRANSFER_DIFF_REVIEW', 'REJECT', 'recounted: all 4 were there'));
+    inv = (ok(await as('fr.mayon.owner').get(`/api/franchise-ar/${inv.id}`)).body);
+    expect(Number(inv.amount)).toBe(2800); expect(inv.adjustments.some((x: { kind: string; delta: string }) => x.kind === 'TRANSFER_CHANGE' && Number(x.delta) === 700)).toBe(true);
+    for (const u of ['fr.mayon.owner', 'franchise.coord', 'asst.franchise.coord', 'acct.head', 'head.auditor', 'asst.auditor', 'admin', 'wh.incharge']) expect(await notes(u), u).toContain('FRANCHISE_AR_ADJUSTED');
+    const id = inv.id as string;
+    // payment: Accounting records it, the franchise owner cannot; nothing is overdue yet
+    await as('fr.mayon.owner').post(`/api/franchise-ar/${id}/payments`).send({ amount: 100, mode: 'CASH' }).expect(403);
+    const p1 = ok(await as('acct.head').post(`/api/franchise-ar/${id}/payments`).send({ amount: 1000, mode: 'CASH' })).body;
+    expect(Number(p1.principalPaid)).toBe(1000); expect(Number(p1.totalDue)).toBe(1800);
+    expect((await as('acct.head').post(`/api/franchise-ar/${id}/payments`).send({ amount: 5000, mode: 'CASH' })).status).toBe(400); // more than is due
+    // 10 days overdue on ₱1,800 unpaid: penalty 2% = 36.00, interest 0.1% × 10 days = 18.00
+    await prisma.franchiseInvoice.update({ where: { id }, data: { dueDate: new Date(`${day(-10)}T00:00:00Z`), originalDueDate: new Date(`${day(-10)}T00:00:00Z`) } });
+    const late = ok(await as('fr.mayon.owner').get(`/api/franchise-ar/${id}`)).body;
+    expect(late.daysOverdue).toBe(10); expect(Number(late.penalty)).toBe(36); expect(Number(late.interest)).toBe(18); expect(Number(late.totalDue)).toBe(1854);
+    // an extension is asked in the system: the Owner decides, the others are flagged, nothing changes before the decision
+    await as('fr.mayon.assoc').post(`/api/franchise-ar/${id}/extension`).send({ requestedDueDate: day(15), reason: 'waiting for customers to pay' }).expect(403);
+    ok(await as('fr.mayon.owner').post(`/api/franchise-ar/${id}/extension`).send({ requestedDueDate: day(15), reason: 'waiting for customers to pay' }));
+    for (const u of ['admin', 'head.auditor', 'asst.auditor', 'acct.head', 'acct.assoc', 'franchise.coord']) expect(await notes(u), u).toContain('FRANCHISE_AR_EXTENSION');
+    expect(Number(ok(await as('fr.mayon.owner').get(`/api/franchise-ar/${id}`)).body.daysOverdue)).toBe(10);
+    await as('fr.mayon.owner').post(`/api/approvals/${(await prisma.approvalRequest.findFirstOrThrow({ where: { type: 'FRANCHISE_AR_EXTENSION', status: 'PENDING' } })).id}/decide`).send({ decision: 'APPROVE' }).expect(403);
+    await as('head.auditor').post(`/api/approvals/${(await prisma.approvalRequest.findFirstOrThrow({ where: { type: 'FRANCHISE_AR_EXTENSION', status: 'PENDING' } })).id}/decide`).send({ decision: 'APPROVE' }).expect(403);
+    ok(await as('admin').post(`/api/approvals/${(await prisma.approvalRequest.findFirstOrThrow({ where: { type: 'FRANCHISE_AR_EXTENSION', status: 'PENDING' } })).id}/decide`).send({ decision: 'APPROVE' }));
+    const ext = ok(await as('fr.mayon.owner').get(`/api/franchise-ar/${id}`)).body;
+    expect(ext.dueDate).toBe(day(15)); expect(ext.daysOverdue).toBe(0); expect(Number(ext.chargesDue)).toBe(54); expect(ext.extended).toBe(true);
+    expect(await notes('fr.mayon.owner')).toContain('FRANCHISE_AR_EXTENSION_DECIDED');
+    // only the Owner waives; everyone is told
+    await as('acct.head').post(`/api/franchise-ar/${id}/waive`).send({ amount: 20, reason: 'goodwill' }).expect(403);
+    const w = ok(await as('admin').post(`/api/franchise-ar/${id}/waive`).send({ amount: 20, reason: 'goodwill for the extension' })).body;
+    expect(Number(w.chargesDue)).toBe(34);
+    // a payment settles the penalty first, then the interest, then the goods
+    const p2 = ok(await as('acct.assoc').post(`/api/franchise-ar/${id}/payments`).send({ amount: 34, mode: 'BANK_TRANSFER', reference: 'BT-1' })).body;
+    expect(Number(p2.chargesDue)).toBe(0); expect(Number(p2.principalPaid)).toBe(1000); expect(p2.payments.at(-1).toPrincipal).toBe('0');
+    // cash before delivery: the Owner only
+    await as('acct.head').put(`/api/franchise-ar/locations/${mayon}/credit-hold`).send({ hold: true, note: 'unpaid accounts' }).expect(403);
+    ok(await as('admin').put(`/api/franchise-ar/locations/${mayon}/credit-hold`).send({ hold: true, note: 'unpaid accounts' }));
+    expect(await notes('fr.mayon.owner')).toContain('FRANCHISE_CREDIT_HOLD');
+    ok(await as('admin').put(`/api/franchise-ar/locations/${mayon}/credit-hold`).send({ hold: false }));
+    // dashboards
+    expect(Number(ok(await as('fr.mayon.owner').get('/api/franchise/portal')).body.arToWarehouse.openInvoices)).toBeGreaterThanOrEqual(1800);
+    expect(ok(await as('admin').get('/api/dashboard')).body.franchiseAr.franchises).toBeGreaterThanOrEqual(1);
+    // the daily job: two months overdue → penalty notice and the two-month flag reach everyone
+    await prisma.franchiseInvoice.update({ where: { id }, data: { dueDate: new Date(`${day(-70)}T00:00:00Z`), originalDueDate: new Date(`${day(-70)}T00:00:00Z`), penalty: 0, penaltyPaid: 0, interest: 0, interestPaid: 0, penaltyAppliedOn: null, interestThrough: null, flaggedAt: null, remindedAt: null } });
+    const job = await app.get(FranchiseArService).runDaily();
+    expect(job.flagged).toBeGreaterThanOrEqual(1);
+    for (const u of ['admin', 'franchise.coord', 'acct.head', 'head.auditor', 'fr.mayon.owner']) expect(await notes(u), u).toContain('FRANCHISE_AR_FLAGGED');
+  });
+
+  it('memorandums: numbered 2026-Qn-NNN, addressed to chosen people incl. franchisees, signers printed, everyone notified; the Owner\'s memos always carry the President and the Manager', async () => {
+    await as('sales.westave').post('/api/memos').send({ subject: 'x', body: 'y y y', audience: { all: true } }).expect(403);
+    const hr = ok(await as('hr.staff').post('/api/memos').send({ subject: 'Uniform reminder', body: 'Good day!\n\nPlease wear the uniform.', audience: { franchiseOwners: true, franchiseAssociates: true } })).body;
+    expect(hr.memoNo).toMatch(/^\d{4}-Q[1-4]-\d{3}$/);
+    expect(hr.signers.map((x: { name: string }) => x.name)).toEqual(['HR STAFF']);
+    for (const u of ['fr.mayon.owner', 'fr.mayon.assoc']) expect(await notes(u), u).toContain(hr.memoNo);
+    expect(await notes('sales.westave')).not.toContain(hr.memoNo);
+    const coord = ok(await as('franchise.coord').post('/api/memos').send({ subject: 'Price adjustment', body: 'Good day!\n\nDetails below.', table: { headers: ['Products', 'Franchise cost', 'SRP', 'Credit card'], rows: [['Rule 1 Creatine 75 Serv', '1,000.00', '1,250.00', '1,302.08']] }, audience: { locationIds: [mayon], userIds: [] }, signers: [{ name: 'Angelica Pena', title: 'Franchise Coordinator' }] })).body;
+    const n = (m: string) => Number(m.split('-')[2]); expect(n(coord.memoNo)).toBe(n(hr.memoNo) + 1);
+    const owner = ok(await as('admin').post('/api/memos').send({ subject: 'Policy', body: 'Good day!\n\nPlease read.', audience: { all: true }, signers: [{ name: 'Syd Alvaz', title: 'Audit Staff' }] })).body;
+    expect(owner.signers.slice(0, 2).map((x: { name: string; title: string }) => `${x.name}|${x.title.split(' / ')[0]}`)).toEqual(['AL MARVIN VINLUAN|President', 'MICAH VINLUAN|Manager']);
+    expect(owner.signers.some((x: { name: string }) => x.name === 'Syd Alvaz')).toBe(true);
+    expect(await notes('sales.westave')).toContain(owner.memoNo); expect(await notes('hr.staff')).toContain(owner.memoNo);
+    // only those addressed read it; the writers see who has read it
+    await as('sales.westave').get(`/api/memos/${hr.id}`).expect(403);
+    expect(ok(await as('sales.westave').get('/api/memos')).body.map((m: { memoNo: string }) => m.memoNo)).toEqual([owner.memoNo]);
+    const ack = ok(await as('fr.mayon.owner').post(`/api/memos/${hr.id}/ack`)).body; expect(ack.mine.acknowledgedAt).toBeTruthy();
+    const view = ok(await as('hr.staff').get(`/api/memos/${hr.id}`)).body; expect(view.acknowledgedCount).toBe(1); expect(view.recipients.filter((r: { acknowledgedAt: string | null }) => r.acknowledgedAt)).toHaveLength(1);
+    // printable in the company memo layout
+    const pdf = await as('franchise.coord').get(`/api/memos/${coord.id}/pdf`).expect(200);
+    const html = pdf.body instanceof Buffer ? pdf.body.toString() : String(pdf.text);
+    expect(html).toContain(coord.memoNo); expect(html).toContain('TO:'); expect(html).toContain('RE: PRICE ADJUSTMENT'); expect(html).toContain('1,302.08'); expect(html).toContain('Angelica Pena');
+    await as('hr.staff').post(`/api/memos/${owner.id}/void`).send({ reason: 'test' }).expect(403);
+    ok(await as('admin').post(`/api/memos/${owner.id}/void`).send({ reason: 'sent by mistake' }));
+  });
+
+  it('the Owner adds a user and an employee: HR is notified; everyone can change their own password', async () => {
+    const base = { username: `n30.${run}`, email: `n30.${run}@gws.local`, fullName: 'Nina Reyes', idNumber: `N30-${run}`, roleKey: 'WAREHOUSE_ASSOCIATE', password: 'Temporary#12345', locationIds: [wh] };
+    ok(await as('admin').post('/api/users').send(base));
+    expect(await notes('hr.staff')).toContain(base.username);
+    ok(await as('admin').post('/api/payroll/employees').send({ employeeNo: `E30-${run}`, fullName: 'Pedro Dela Cruz', locationId: west, basicRate: 12000 }));
+    expect(await notes('hr.staff')).toContain(`E30-${run}`);
+    const t = (await http.post('/api/auth/login').send({ identifier: base.username, password: base.password }).expect(201)).body;
+    const H = (r: request.Test) => r.set('Authorization', `Bearer ${t.token}`);
+    await H(http.post('/api/auth/password')).send({ current: base.password, next: 'Nina-Own-Pass#2026' }).expect(201);
+    await H(http.post('/api/auth/password')).send({ current: 'wrong-password', next: 'Another-Pass#2027' }).expect(401);
+    await H(http.post('/api/auth/accept-accountability')).expect(201);
+    await H(http.post('/api/auth/password')).send({ current: 'Nina-Own-Pass#2026', next: 'Nina-Changed-Pass#2027' }).expect(201); // any time, not only at first sign-in
+    await http.post('/api/auth/login').send({ identifier: base.username, password: 'Nina-Changed-Pass#2027' }).expect(201);
+  });
+});
+
+describe('Cash deposit slip: Audit Associate, then Accounting Associate (owner request 2026-09-30)', () => {
+  const today = () => new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);
+  const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(64)]);
+  const notes = async (u: string) => JSON.stringify(ok(await as(u).get('/api/notifications')).body);
+  it('the branch attaches the slip; Audit checks it, then Accounting; a rejection returns it to the branch with the reason and it can be sent again', async () => {
+    const west = (await prisma.location.findUniqueOrThrow({ where: { code: 'WESTAVE' } })).id;
+    const acct = (ok(await as('sales.westave').get(`/api/accounts/payment?locationId=${west}`)).body as { id: string }[])[0];
+    const slip = ok(await as('sales.westave').post(`/api/attachments/CashDeposit/${crypto.randomUUID()}`).attach('file', png, { filename: 'slip.png', contentType: 'image/png' })).body;
+    const dep = ok(await as('sales.westave').post('/api/expenses/deposits').send({ locationId: west, businessDate: today(), amount: 1234.56, bankAccountId: acct.id, depositedAt: today(), slipAttachmentId: slip.id })).body;
+    expect(dep.status).toBe('PENDING_AUDIT');
+    const list = ok(await as('sales.westave').get('/api/expenses/deposits')).body as { id: string; status: string; slip: { fileName: string } | null }[];
+    expect(list.find((d) => d.id === dep.id)!.slip!.fileName).toBe('slip.png');
+    // Accounting cannot check it before Audit; the branch cannot check its own
+    const a1 = await prisma.approvalRequest.findFirstOrThrow({ where: { type: 'CASH_DEPOSIT_AUDIT', documentId: dep.id, status: 'PENDING' } });
+    expect((await as('acct.assoc').post(`/api/approvals/${a1.id}/decide`).send({ decision: 'APPROVE' })).status).toBe(403);
+    expect((await as('sales.westave').post(`/api/approvals/${a1.id}/decide`).send({ decision: 'APPROVE' })).status).toBe(403);
+    expect(ok(await as('acct.assoc').get('/api/approvals/inbox')).body.items?.some?.((i: { documentId: string }) => i.documentId === dep.id) ?? false).toBe(false);
+    expect(JSON.stringify(ok(await as('audit.assoc').get('/api/approvals/inbox')).body)).toContain(dep.id);
+    const rv = ok(await as('audit.assoc').get(`/api/expenses/deposits/${dep.id}/review`)).body; expect(rv.slip.fileName).toBe('slip.png'); expect(Number(rv.amount)).toBe(1234.56);
+    // the Audit Associate rejects (reason required): the branch, Head Auditor, Accounting Head and Owner are told
+    expect((await as('audit.assoc').post(`/api/approvals/${a1.id}/decide`).send({ decision: 'REJECT' })).status).toBe(400);
+    ok(await as('audit.assoc').post(`/api/approvals/${a1.id}/decide`).send({ decision: 'REJECT', note: 'The slip shows ₱1,200, not ₱1,234.56' }));
+    let d = await prisma.cashDeposit.findUniqueOrThrow({ where: { id: dep.id } }); expect(d.status).toBe('REJECTED'); expect(d.rejectReason).toContain('1,200');
+    for (const u of ['sales.westave', 'head.auditor', 'acct.head', 'admin']) expect(await notes(u), u).toContain('CASH_DEPOSIT_REJECTED');
+    await as('hr.staff').post(`/api/expenses/deposits/${dep.id}/resubmit`).send({}).expect(403);
+    ok(await as('sales.westave').post(`/api/expenses/deposits/${dep.id}/resubmit`).send({ note: 'corrected slip' }));
+    const a2 = await prisma.approvalRequest.findFirstOrThrow({ where: { type: 'CASH_DEPOSIT_AUDIT', documentId: dep.id, status: 'PENDING' } });
+    ok(await as('audit.assoc').post(`/api/approvals/${a2.id}/decide`).send({ decision: 'APPROVE' }));
+    d = await prisma.cashDeposit.findUniqueOrThrow({ where: { id: dep.id } }); expect(d.status).toBe('PENDING_ACCOUNTING'); expect(d.auditVerifiedBy).toBeTruthy();
+    const c1 = await prisma.approvalRequest.findFirstOrThrow({ where: { type: 'CASH_DEPOSIT_ACCOUNTING', documentId: dep.id, status: 'PENDING' } });
+    expect((await as('audit.assoc').post(`/api/approvals/${c1.id}/decide`).send({ decision: 'APPROVE' })).status).toBe(403);
+    ok(await as('acct.assoc').post(`/api/approvals/${c1.id}/decide`).send({ decision: 'APPROVE' }));
+    d = await prisma.cashDeposit.findUniqueOrThrow({ where: { id: dep.id } }); expect(d.status).toBe('VERIFIED'); expect(d.accountingVerifiedBy).toBeTruthy();
+    expect(await notes('sales.westave')).toContain('CASH_DEPOSIT_VERIFIED');
+    // dates still to deposit are listed for the branch (clickable in the app)
+    expect(ok(await as('sales.westave').get('/api/cash-on-hand')).body.days).toBeDefined();
+  });
+});
+
+describe('Waybill report: upload shipping labels → SRP, fees and order income (owner request 2026-09-30)', () => {
+  it('E-comm Associate, Head Auditor and Owner upload labels; the product is chosen once and remembered by weight; SRP comes from the platform price list; fees at the platform rates; centavos are kept', async () => {
+    const cats = ok(await as('admin').get('/api/categories')).body as { id: string; accountingClass: string }[];
+    const run2 = `${run}w`;
+    const prod = ok(await as('admin').post('/api/products').send({ name: `WB Whey ${run2}`, categoryId: cats.find((c) => c.accountingClass === 'SUPPLEMENT')!.id, prices: { RETAIL: 1000 }, cost: 500 })).body.id as string;
+    ok(await as('admin').put('/api/pricing/ecom').send({ rows: [{ productId: prod, tier: 'TIKTOK', price: 1199.5 }, { productId: prod, tier: 'SHOPEE', price: 1100 }] }));
+    const pdf = makePdf([[`TT Order ID: 58602435753${run.replace(/\D/g, '').padEnd(7, '1').slice(0, 7)}`, 'JT0023984229750', 'Weight: 0.600 KG', 'RTS Time: 2026-09-12'], ['Order ID:', '2609057S9U6WH6', 'PH2620256392738', 'Product Quantity:', '2', 'Weight:', '602 g'], ['nothing here']]);
+    const up = (u: string, buf: Buffer, name = 'labels.pdf') => http.post('/api/ecommerce-waybills/upload').set('Authorization', `Bearer ${tokens[u]}`).attach('files', buf, { filename: name, contentType: 'application/pdf' });
+    expect((await up('sales.westave', pdf)).status).toBe(403);
+    const r1 = ok(await up('ecomm.assoc', pdf)).body;
+    expect(r1.added).toBe(2); expect(r1.unreadable).toEqual([{ file: 'labels.pdf', pages: [3] }]);
+    expect(ok(await up('head.auditor', pdf)).body).toMatchObject({ added: 0, duplicates: 2 }); // the same labels are never counted twice
+    let rep = ok(await as('ecomm.assoc').get('/api/ecommerce-waybills')).body;
+    expect(rep.totals.waybills).toBe(2); expect(rep.totals.unassigned).toBe(2);
+    const tik = rep.rows.find((x: { platform: string }) => x.platform === 'TIKTOK'); const shp = rep.rows.find((x: { platform: string }) => x.platform === 'SHOPEE');
+    expect(shp.qty).toBe(2); expect(tik.weightG).toBe(600);
+    ok(await as('ecomm.assoc').patch(`/api/ecommerce-waybills/${tik.id}`).send({ productId: prod }));
+    ok(await as('head.auditor').patch(`/api/ecommerce-waybills/${shp.id}`).send({ productId: prod }));
+    ok(await as('admin').put('/api/ecommerce-waybills/rates/TIKTOK').send({ commissionPct: 5, transactionPct: 2, affiliatePct: 0, shippingPerOrder: 30 }));
+    rep = ok(await as('admin').get('/api/ecommerce-waybills')).body;
+    const t2 = rep.rows.find((x: { id: string }) => x.id === tik.id); const s2 = rep.rows.find((x: { id: string }) => x.id === shp.id);
+    expect(t2.unitSrp).toBe(1199.5); expect(t2.srp).toBe(1199.5); expect(t2.priceFrom).toBe('TIKTOK');
+    expect(t2.commission).toBe(59.98); expect(t2.transactionFee).toBe(23.99); expect(t2.shippingFee).toBe(30); expect(t2.fees).toBe(113.97); expect(t2.income).toBe(1085.53);
+    expect(s2.srp).toBe(2200); expect(s2.fees).toBe(0); expect(s2.income).toBe(2200); // Shopee has no rates set yet
+    expect(rep.totals.srp).toBe(3399.5); expect(rep.totals.income).toBe(3285.53);
+    // a second label of the same weight is filled in from what was chosen before, to confirm
+    const pdf2 = makePdf([['TT Order ID: 586024357999999999', 'JT0023984229999', 'Weight: 0.600 KG']]);
+    ok(await up('ecomm.assoc', pdf2, 'more.pdf'));
+    rep = ok(await as('ecomm.assoc').get('/api/ecommerce-waybills?platform=TIKTOK')).body;
+    const g = rep.rows.find((x: { orderId: string }) => x.orderId === '586024357999999999'); expect(g.guessed).toBe(true); expect(g.product.name).toContain('WB Whey');
+    ok(await as('ecomm.assoc').post('/api/ecommerce-waybills/confirm').send({ ids: [g.id] }));
+    expect(ok(await as('ecomm.assoc').get('/api/ecommerce-waybills?platform=TIKTOK')).body.rows.find((x: { id: string }) => x.id === g.id).guessed).toBe(false);
+    const x = await as('head.auditor').get('/api/ecommerce-waybills/export.xlsx').expect(200);
+    expect(x.headers['content-type']).toContain('spreadsheetml'); expect(x.headers['content-disposition']).toContain('Waybill-report');
+    await as('sales.westave').get('/api/ecommerce-waybills').expect(403);
+    ok(await as('ecomm.assoc').delete(`/api/ecommerce-waybills/${g.id}`));
   });
 });

@@ -6,7 +6,7 @@ import { useAuth } from '@/lib/auth';
 import { Badge, Button, Card, Empty, ErrorBox, Field, Input, Select, Stat, Textarea } from '@/components/ui/primitives';
 import { cn } from '@/lib/utils';
 
-interface Portal { franchise: { name: string }; stockLines: number; stockUnits: number; incoming: { id: string; controlNo: string; from: string; lines: number }[]; todaySales: { count: number; total: string }; arToWarehouse: { openInvoices: string; transfersAtFranchiseCost: string } | null; expiring: { bucket: string; qty: number }[]; isOwner: boolean; associateReceives: boolean }
+interface Portal { franchise: { name: string }; stockLines: number; stockUnits: number; incoming: { id: string; controlNo: string; from: string; lines: number }[]; todaySales: { count: number; total: string }; arToWarehouse: { openInvoices: string; transfersAtFranchiseCost: string; goods?: string; penaltyAndInterest?: string; overdue?: string; overdueCount?: number; nextDue?: string | null; creditHold?: boolean } | null; expiring: { bucket: string; qty: number }[]; isOwner: boolean; associateReceives: boolean }
 interface Staff { id: string; fullName: string; username: string }
 interface Salary { id: string; staff: string; periodFrom: string; periodTo: string; basic: string; allowances: string; otherDeductions: string; chargesDeducted: string; netPay: string; notes: string | null }
 interface Charge { id: string; staff: string; kind: string; reason: string; amount: string; deducted: boolean; acknowledgedAt: string | null; createdAt: string }
@@ -30,7 +30,7 @@ export function FranchisePage() {
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <Stat label="Stock on hand" value={d.stockUnits} sub={`${d.stockLines} products`} />
         <Stat label="Today's sales" value={peso(d.todaySales.total)} sub={`${d.todaySales.count} DR`} />
-        {d.arToWarehouse && <Stat label="Owed to GWS" value={peso(d.arToWarehouse.openInvoices)} sub={`transfers at franchise cost ${peso(d.arToWarehouse.transfersAtFranchiseCost)}`} tone="amber" />}
+        {d.arToWarehouse && <Link to="/franchise-ar"><Stat label="Owed to GWS (Franchise AR)" value={peso(d.arToWarehouse.openInvoices)} sub={Number(d.arToWarehouse.overdue ?? 0) > 0 ? `overdue ${peso(d.arToWarehouse.overdue)} incl. penalty and interest ${peso(d.arToWarehouse.penaltyAndInterest ?? 0)}` : d.arToWarehouse.nextDue ? `next due ${d.arToWarehouse.nextDue}` : 'nothing due'} tone={Number(d.arToWarehouse.overdue ?? 0) > 0 ? 'red' : 'amber'} /></Link>}
         <Stat label="Expiring / expired" value={d.expiring.reduce((s, b) => s + b.qty, 0)} tone={d.expiring.find((b) => b.bucket === 'EXPIRED')?.qty ? 'red' : undefined} />
       </div>
       {d.isOwner && <Card title="Who receives incoming stock">

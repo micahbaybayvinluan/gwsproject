@@ -99,7 +99,7 @@ function StackedColumns({ labels, series }: { labels: string[]; series: { name: 
       {labels.map((m, i) => { let acc = 0; const cx = L + band * i + band / 2; return <g key={m}>
         {series.map((s) => { const v = s.values[i] ?? 0; if (v <= 0) return null; const y1 = y(acc + v), y0 = y(acc); acc += v; const h = Math.max(0, y0 - y1 - 2); return <rect key={s.name} x={cx - bw / 2} y={y1} width={bw} height={h} rx={h > 8 ? 3 : 1} fill={s.color} onPointerMove={(e) => { const r = ((e.currentTarget.ownerSVGElement as SVGSVGElement).getBoundingClientRect()); setTip({ x: e.clientX - r.left, y: e.clientY - r.top, text: s.name, total: v, label: m }); }} />; })}
         <text x={cx} y={H - 10} textAnchor="middle" fontSize="11" fill="#64748b">{m}</text>
-        {totals[i] > 0 && <text x={cx} y={y(totals[i]) - 5} textAnchor="middle" fontSize="10.5" fill="#334155">{short(totals[i])}</text>}
+        {totals[i] > 0 && <text x={cx} y={y(totals[i]) - 5} textAnchor="middle" fontSize="9.5" fill="#334155">{peso(totals[i])}</text>}
       </g>; })}
     </svg>
     {tip && <div className="pointer-events-none absolute rounded-lg border border-slate-200 bg-white/95 px-2 py-1 text-xs shadow-lg" style={{ left: tip.x + 12, top: tip.y - 10 }}><b>{peso(tip.total)}</b> <span className="text-slate-600">{tip.text} · {tip.label}</span></div>}

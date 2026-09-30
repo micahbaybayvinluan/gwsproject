@@ -8,6 +8,7 @@ import { ArController, ConsignmentController, OpeningArController, SalesControll
 import { OpeningArService } from './opening-ar.service';
 import { GlModule } from '../gl/gl.module';
 import { ClosingModule } from '../closing/closing.module';
+import { SixPackModule } from '../sixpack/sixpack.module';
 
-@Module({ imports: [GlModule, ClosingModule, ExpensesModule], providers: [SalesService, ConsignmentService, CustomerFollowUpsService, OpeningArService], controllers: [CustomerFollowUpsController, SalesController, OpeningArController, ArController, ConsignmentController], exports: [SalesService, ConsignmentService, CustomerFollowUpsService, OpeningArService] })
+@Module({ imports: [GlModule, ClosingModule, ExpensesModule, SixPackModule], providers: [SalesService, ConsignmentService, CustomerFollowUpsService, OpeningArService], controllers: [CustomerFollowUpsController, SalesController, OpeningArController, ArController, ConsignmentController], exports: [SalesService, ConsignmentService, CustomerFollowUpsService, OpeningArService] })
 export class SalesModule {}

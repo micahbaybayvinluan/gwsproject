@@ -226,12 +226,14 @@ export class ApprovalsService implements OnApplicationBootstrap {
 }
 
 /** Types whose rejection must carry a reason (sent back to the person who entered it). */
-export const REASON_REQUIRED: string[] = ['AR_PAYMENT', 'TRANSFER_DIFF_SENDER', 'TRANSFER_DIFF_REVIEW'];
+export const REASON_REQUIRED: string[] = ['AR_PAYMENT', 'TRANSFER_DIFF_SENDER', 'TRANSFER_DIFF_REVIEW', 'FRANCHISE_AR_EXTENSION', 'CASH_DEPOSIT_AUDIT', 'CASH_DEPOSIT_ACCOUNTING'];
 export function humanType(t: string) { return t.replace(/_/g, ' ').toLowerCase().replace(/^\w/, (c) => c.toUpperCase()); }
 function summaryLine(s: unknown) { if (!s || typeof s !== 'object') return ''; const o = s as Record<string, unknown>; return [o.controlNo, o.locationName, o.total != null ? `₱${o.total}` : null].filter(Boolean).join(' · '); }
 export function documentLink(type: string, id: string) {
   if (type === 'OpeningArEntry') return `/ar?opening=${id}`;
   if (type === 'AgentIncentive') return `/incentives?id=${id}`;
+  if (type === 'CashDeposit') return `/closing?deposit=${id}`;
+  if (type === 'FranchiseArExtension') return `/franchise-ar?extension=${id}`;
   const map: Record<string, string> = { ReceivingDoc: '/receiving', TransferDoc: '/transfers', SalesDoc: '/sales', ExpiryWriteoffDoc: '/writeoffs', PriceChangeDoc: '/price-changes', PostCloseEdit: '/post-close-edits', CountDoc: '/counts', DiscrepancyCase: '/discrepancies', AccountingPeriod: '/accounting/periods', BeginningBalance: '/accounting/beginning-balances', SalesTarget: '/targets', EcomSettlement: '/ecommerce' };
   return `${map[type] ?? '/'}/${id}`;
 }

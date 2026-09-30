@@ -6,6 +6,8 @@ import { HDMF_2024, PHIC_2025, sssRows2025 } from '../src/payroll/contribution-t
 import { ACCOUNT_TEMPLATES } from '../src/gl/account-templates';
 import { seedWorkbooks } from './seed-workbooks';
 import * as path from 'node:path';
+import * as fs from 'node:fs';
+import { normName, parseEcomMasterlist } from '../src/pricing/ecom-masterlist';
 
 const prisma = new PrismaClient();
 const DEV_PASSWORD = process.env.SEED_PASSWORD || 'ChangeMe!2026';
@@ -49,7 +51,7 @@ const CATEGORIES: { name: string; accountingClass: 'SUPPLEMENT' | 'FREEBIE' | 'P
   { name: 'Promo Bundles', accountingClass: 'BUNDLE' }, { name: 'Others', accountingClass: 'OTHER' },
 ];
 
-const TIERS = [['RETAIL', 'Retail (SRP)'], ['DEALER', 'Dealer'], ['FRANCHISE', 'Franchise'], ['AGENT', 'Agent'], ['WHOLESALE', 'Wholesale']];
+const TIERS = [['RETAIL', 'Retail (SRP)'], ['DEALER', 'Dealer'], ['FRANCHISE', 'Franchise'], ['AGENT', 'Agent'], ['WHOLESALE', 'Wholesale'], ['CC', 'Credit card'], ['TIKTOK', 'TikTok'], ['SHOPEE', 'Shopee'], ['LAZADA', 'Lazada']];
 
 /** One test account per role (README lists them). */
 const TEST_USERS: { username: string; role: string; fullName: string; locations?: string[] }[] = [
@@ -80,6 +82,8 @@ const TEST_USERS: { username: string; role: string; fullName: string; locations?
   { username: 'ecomm.assoc', role: 'ECOMM_ASSOCIATE', fullName: 'E-comm Associate' },
   { username: 'sales.manager', role: 'SALES_MANAGER', fullName: 'Sales Manager' },
   { username: 'agent.jerick', role: 'AGENT', fullName: 'Jerick Quinto (Agent)' },
+  { username: 'franchise.coord', role: 'FRANCHISE_COORDINATOR', fullName: 'Franchise Coordinator' },
+  { username: 'asst.franchise.coord', role: 'ASST_FRANCHISE_COORDINATOR', fullName: 'Asst. Franchise Coordinator' },
 ];
 
 async function main() {
@@ -161,6 +165,15 @@ async function main() {
     await prisma.customer.upsert({ where: { code: `DLR-${String(i + 1).padStart(3, '0')}` }, create: { code: `DLR-${String(i + 1).padStart(3, '0')}`, name: d, type: 'DEALER' }, update: { name: d } });
   }
   await seedWorkbooks(prisma, process.env.SEED_DIR || path.resolve(__dirname, '../../seed'));
+  // e-commerce price lists from the masterlist (TikTok and Shopee prices exactly as written; Lazada follows Shopee; the Admin edits them in the app)
+  const ecomFile = path.resolve(process.env.SEED_DIR || path.resolve(__dirname, '../../seed'), 'TIKTOK_SHOPEE_MASTERLIST_2026.xlsx');
+  if (fs.existsSync(ecomFile)) {
+    const rows = await parseEcomMasterlist(fs.readFileSync(ecomFile));
+    const byName = new Map<string, string>(); for (const p of await prisma.product.findMany({ select: { id: true, name: true } })) if (!byName.has(normName(p.name))) byName.set(normName(p.name), p.id);
+    const day = new Date(new Date().toISOString().slice(0, 10) + 'T00:00:00Z'); let n = 0;
+    for (const r of rows) { const id = byName.get(normName(r.name)); if (!id) continue; for (const [tier, price] of [['TIKTOK', r.tiktok], ['SHOPEE', r.shopee]] as const) if (price != null) { await prisma.priceList.upsert({ where: { productId_tier_effectiveFrom: { productId: id, tier, effectiveFrom: day } }, create: { productId: id, tier, effectiveFrom: day, price: price.toFixed(2) }, update: { price: price.toFixed(2) } }); n++; } }
+    console.log(`E-commerce masterlist: ${n} platform prices set (${rows.length} rows, ${rows.filter((r) => !byName.has(normName(r.name))).length} names not found in the product list).`);
+  }
   console.log(`Seed complete. All test users use password: ${DEV_PASSWORD}`);
 }
 

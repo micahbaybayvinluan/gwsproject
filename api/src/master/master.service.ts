@@ -7,6 +7,7 @@ import { D } from '../common/money';
 import { dateStr, todayManila, toDateOnly } from '../common/manila';
 import { MasterDataApprovals } from '../approvals/master-data.service';
 import { PriceUpdatesService } from '../notifications/price-updates.service';
+import { SettingsService } from '../common/settings.service';
 
 /** Supplier DTO: `name` is emitted as `supplierName` so the redaction interceptor can strip it (§16). */
 export function supplierDto<T extends { name: string }>(s: T) {
@@ -16,7 +17,7 @@ export function supplierDto<T extends { name: string }>(s: T) {
 
 @Injectable()
 export class MasterService {
-  constructor(private prisma: PrismaService, private audit: AuditService, md: MasterDataApprovals, private priceUpdates: PriceUpdatesService) {
+  constructor(private prisma: PrismaService, private audit: AuditService, md: MasterDataApprovals, private priceUpdates: PriceUpdatesService, private settings: SettingsService) {
     // what the Owner's approval creates (owner request 2026-09-26: new master data needs the Owner)
     md.registerKind('Location', { label: 'Branch / location', apply: (p, by) => this.createLocation(p as never, by) });
     md.registerKind('Supplier', { label: 'Supplier', apply: (p, by) => this.createSupplier(p as never, by) });
@@ -131,12 +132,24 @@ export class MasterService {
   }
 
   // ── Pricing ──
+  /**
+   * Credit-card price from the SRP (owner memo 2026-09-21): GROSS_UP recovers the card fee from the price (SRP ÷ (1 − 4%), so ₱1,250 → ₱1,302.08);
+   * ADD is SRP + 4%. Kept to the centavo, never rounded to the peso. A price typed for CC on a product wins.
+   */
+  static ccFromSrp(srp: Prisma.Decimal.Value, pct: number, method: string): Prisma.Decimal {
+    const r = D(srp);
+    return (method === 'ADD' ? r.mul(D(1).plus(D(pct).div(100))) : r.div(D(1).minus(D(pct).div(100)))).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+  }
+  private async ccSettings() { return { pct: Number(await this.settings.get<number>('pricing.cc_markup_pct')), method: String(await this.settings.get<string>('pricing.cc_method')) }; }
+
   /** Price in effect = latest effective_from <= date (§4.2). */
   async priceFor(productId: string, tier: string, date: Date = todayManila(), tx: Tx | null = null): Promise<Prisma.Decimal | null> {
     const db = (tx ?? this.prisma.db);
     const row = await db.priceList.findFirst({ where: { productId, tier, effectiveFrom: { lte: date } }, orderBy: { effectiveFrom: 'desc' } });
     if (row) return row.price;
     if (tier === 'AGENT') return this.priceFor(productId, 'DEALER', date, tx); // §18.9 agent defaults to dealer price
+    if (tier === 'LAZADA') return this.priceFor(productId, 'SHOPEE', date, tx); // Lazada follows Shopee until it has its own list
+    if (tier === 'CC') { const srp = await this.priceFor(productId, 'RETAIL', date, tx); if (!srp) return null; const c = await this.ccSettings(); return MasterService.ccFromSrp(srp, c.pct, c.method); }
     return null;
   }
   async costFor(productId: string, date: Date = todayManila(), tx: Tx | null = null): Promise<Prisma.Decimal | null> {
@@ -152,7 +165,12 @@ export class MasterService {
       ORDER BY product_id, tier, effective_from DESC`;
     const map = new Map<string, Record<string, string>>();
     for (const r of rows) { const m = map.get(r.product_id) ?? {}; m[r.tier] = r.price.toString(); map.set(r.product_id, m); }
-    for (const [, m] of map) if (m.AGENT == null && m.DEALER != null) m.AGENT = m.DEALER;
+    const cc = await this.ccSettings();
+    for (const [, m] of map) {
+      if (m.AGENT == null && m.DEALER != null) m.AGENT = m.DEALER;
+      if (m.LAZADA == null && m.SHOPEE != null) m.LAZADA = m.SHOPEE;
+      if (m.CC == null && m.RETAIL != null) m.CC = MasterService.ccFromSrp(m.RETAIL, cc.pct, cc.method).toFixed(2);
+    }
     return map;
   }
   async currentCosts(productIds: string[], date: Date = todayManila()): Promise<Map<string, string>> {

@@ -5,13 +5,14 @@ import * as argon2 from 'argon2';
 import { PrismaService } from '../common/prisma.service';
 import { AuditService } from '../common/audit.service';
 import { SessionStore } from '../auth/session.store';
+import { NotificationsService } from '../notifications/notifications.service';
 import { PERMISSION_KEYS, ROLE_BY_KEY, SINGLE_LOCATION_ROLES } from '../common/permissions';
 
 export interface CreateUserInput { username: string; email?: string; fullName: string; idNumber: string; roleKey: string; password?: string; passwordHash?: string; locationIds?: string[]; employeeId?: string }
 
 @Injectable()
 export class UsersService {
-  constructor(private prisma: PrismaService, private audit: AuditService, private sessions: SessionStore, private md: MasterDataApprovals) {
+  constructor(private prisma: PrismaService, private audit: AuditService, private sessions: SessionStore, private md: MasterDataApprovals, private notify: NotificationsService) {
     md.registerKind('UserAccount', { label: 'User account', apply: (p, by) => this.create(p as unknown as CreateUserInput, by), link: () => '/users' });
   }
 
@@ -48,6 +49,9 @@ export class UsersService {
     });
     await this.audit.log({ action: 'CREATE', entityType: 'User', entityId: user.id, after: user });
     if (input.employeeId) await this.prisma.db.employee.update({ where: { id: input.employeeId }, data: { userId: user.id } });
+    // HR is told of every new account, whoever opens it (owner request 2026-09-30); the password stays private to the person
+    const by = await this.prisma.db.user.findUnique({ where: { id: actorId }, select: { fullName: true } });
+    await this.notify.toRoles(['HR_STAFF'], { type: 'USER_CREATED', title: `New user account ${user.username} for ${user.fullName} (${user.role.name}) opened${by ? ` by ${by.fullName}` : ''}`, body: 'The person sets their own password at first sign-in; nobody else knows it. Give them their ID number and have them accept the accountability statement.', link: '/users' });
     return user;
   }
 

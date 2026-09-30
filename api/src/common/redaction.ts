@@ -5,6 +5,7 @@
  */
 import { CallHandler, ExecutionContext, Injectable, NestInterceptor } from '@nestjs/common';
 import { Observable, map } from 'rxjs';
+import { PRICE_TIERS } from './permissions';
 
 export interface RedactionUser {
   roleKey: string;
@@ -43,7 +44,7 @@ export function redactForRole<T>(value: T, user: RedactionUser | null | undefine
 
 function hasAllTiers(user: RedactionUser) {
   // Only used as a fast-path hint; custom tiers still go through tierAllowed.
-  return ['RETAIL', 'DEALER', 'FRANCHISE', 'AGENT', 'WHOLESALE'].every((t) => has(user, `price.view.${t}`));
+  return PRICE_TIERS.every((t) => has(user, `price.view.${t}`));
 }
 
 function isDecimalLike(v: unknown): boolean { return !!v && typeof v === 'object' && typeof (v as { toFixed?: unknown }).toFixed === 'function' && typeof (v as { toDecimalPlaces?: unknown }).toDecimalPlaces === 'function'; }

@@ -11,7 +11,7 @@ export function BrandMark({ size = 'md', light = false, className }: { size?: 's
   const logo = lh.data?.logoDataUrl;
   const h = size === 'lg' ? 'h-20' : size === 'sm' ? 'h-9' : 'h-12';
   return <div className={cn('flex items-center gap-3', className)}>
-    {logo ? <img src={logo} alt="" className={cn(h, 'w-auto object-contain drop-shadow-sm')} /> : <div className={cn('grid shrink-0 place-items-center rounded-full bg-gradient-to-br from-brand to-brand-dark font-[family-name:var(--font-display)] font-bold text-white shadow-md shadow-brand/30', size === 'lg' ? 'size-20 text-2xl' : size === 'sm' ? 'size-9 text-sm' : 'size-12 text-base')}>GWS</div>}
+    {logo ? <img src={logo} alt="" className={cn(h, 'w-auto object-contain drop-shadow-sm')} /> : <div className={cn('grid shrink-0 place-items-center rounded-full grad-brand font-[family-name:var(--font-display)] font-extrabold text-white shadow-md shadow-brand/30', size === 'lg' ? 'size-20 text-2xl' : size === 'sm' ? 'size-9 text-sm' : 'size-12 text-base')}>GWS</div>}
     <div className="leading-none">
       <div className={cn('font-[family-name:var(--font-display)] font-bold uppercase tracking-wide', size === 'lg' ? 'text-3xl' : size === 'sm' ? 'text-base' : 'text-xl')}>
         <span className={light ? 'text-white/80' : 'text-slate-400'} style={{ fontSize: '.6em', letterSpacing: '.12em' }}>GET </span>

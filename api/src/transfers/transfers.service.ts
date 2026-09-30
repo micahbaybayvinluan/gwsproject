@@ -9,6 +9,7 @@ import { AuditService } from '../common/audit.service';
 import { SettingsService } from '../common/settings.service';
 import { MasterService } from '../master/master.service';
 import { ChargesService } from '../charges/charges.service';
+import { FranchiseArService } from '../franchise/franchise-ar.service';
 import { PostingService } from '../gl/posting.service';
 import { r6Transfer, r7FranchiseTransfer, r8ConsignOut, r9Writeoff } from '../gl/posting-rules';
 import { dateStr, toDateOnly, todayManila } from '../common/manila';
@@ -26,7 +27,7 @@ export interface TransferInput { fromLocationId?: string; toLocationId: string; 
 /** §7.3 Transfers: one document, two views (Pull-Out for sender, Transfer-In for receiver). In-transit until receiver confirms. */
 @Injectable()
 export class TransfersService implements OnModuleInit {
-  constructor(private prisma: PrismaService, private seq: SequenceService, private stock: StockService, private approvals: ApprovalsService, private notify: NotificationsService, private audit: AuditService, private settings: SettingsService, private master: MasterService, private posting: PostingService, private charges: ChargesService) {}
+  constructor(private prisma: PrismaService, private seq: SequenceService, private stock: StockService, private approvals: ApprovalsService, private notify: NotificationsService, private audit: AuditService, private settings: SettingsService, private master: MasterService, private posting: PostingService, private charges: ChargesService, private franchiseAr: FranchiseArService) {}
 
   onModuleInit() {
     for (const t of ['TRANSFER_INTERNAL', 'TRANSFER_TO_FRANCHISE', 'CONSIGNMENT_OUT'] as ApprovalType[]) this.approvals.register(t, (req, outcome, actor) => this.onDecision(req.documentId, outcome, actor?.id ?? null));
@@ -45,7 +46,7 @@ export class TransfersService implements OnModuleInit {
   /** Called after an e-commerce pull-out is approved or rejected (the e-commerce module updates its orders). */
   onEcomPulloutDecided(fn: (docId: string, outcome: 'APPROVED' | 'REJECTED') => Promise<void>) { this.ecomHooks.push(fn); }
 
-  static readonly INCLUDE = { fromLocation: { select: { id: true, code: true, name: true, type: true } }, toLocation: { select: { id: true, code: true, name: true, type: true } }, lines: { include: { product: { select: { id: true, sku: true, name: true, category: { select: { accountingClass: true } } } }, batch: { select: { id: true, batchNo: true, expiryDate: true, flavor: true, unitCost: true, isConsignmentIn: true } } } } } as const;
+  static readonly INCLUDE = { fromLocation: { select: { id: true, code: true, name: true, type: true } }, toLocation: { select: { id: true, code: true, name: true, type: true, creditHold: true } }, lines: { include: { product: { select: { id: true, sku: true, name: true, category: { select: { accountingClass: true } } } }, batch: { select: { id: true, batchNo: true, expiryDate: true, flavor: true, unitCost: true, isConsignmentIn: true } } } } } as const;
 
   async list(user: SessionUser, q: { direction?: 'out' | 'in'; status?: string; locationId?: string; branchIds?: string[]; from?: string; to?: string }) {
     const scope = user.locationScoped ? user.locationIds : null;
@@ -188,7 +189,7 @@ export class TransfersService implements OnModuleInit {
     // goods leaving the warehouse on a Warehouse Associate's pull-out need the In-Charge first
     const preparer = await this.prisma.db.user.findUnique({ where: { id: doc.preparedBy ?? requestedBy }, select: { role: { select: { key: true } } } });
     if (!skipInCharge && doc.fromLocation.type === 'WAREHOUSE' && preparer?.role.key === 'WAREHOUSE_ASSOCIATE') {
-      const req = await this.approvals.request({ type: 'WAREHOUSE_OUT', documentType: 'TransferDoc', documentId: id, requestedBy, summary: { controlNo: doc.controlNo, locationId: doc.fromLocationId, locationName: `${doc.fromLocation.name} → ${doc.toLocation.name}`, transferType: doc.transferType, lines: doc.lines.length, units: doc.lines.reduce((t, l) => t + l.qtySent, 0), step: 'In-Charge checks the goods going out; then the auditors (or Admin for a franchise) approve', nextSteps: [doc.toLocation.type === 'FRANCHISE' ? 'Admin approval' : 'Head Auditor or Asst Auditor approval'] } });
+      const req = await this.approvals.request({ type: 'WAREHOUSE_OUT', documentType: 'TransferDoc', documentId: id, requestedBy, summary: { controlNo: doc.controlNo, locationId: doc.fromLocationId, locationName: `${doc.fromLocation.name} → ${doc.toLocation.name}`, transferType: doc.transferType, lines: doc.lines.length, units: doc.lines.reduce((t, l) => t + l.qtySent, 0), step: 'In-Charge checks the goods going out; then the auditors (or Admin for a franchise) approve', ...(doc.toLocation.type === 'FRANCHISE' && doc.toLocation.creditHold ? { warning: `${doc.toLocation.name} is on cash-before-delivery (unpaid accounts): release the goods only after payment is received` } : {}), nextSteps: [doc.toLocation.type === 'FRANCHISE' ? 'Admin approval' : 'Head Auditor or Asst Auditor approval'] } });
       await this.prisma.db.transferDoc.update({ where: { id }, data: { status: 'SUBMITTED', approvalRequestId: req.id, updatedBy: requestedBy } });
       return;
     }
@@ -384,12 +385,14 @@ export class TransfersService implements OnModuleInit {
   }
 
   /** R6 (company ↔ company) or R7 (to franchise = sale at FRANCHISE tier) for the received quantities. */
-  async postTransferJournal(tx: Tx, doc: Prisma.TransferDocGetPayload<{ include: typeof TransfersService.INCLUDE }>, actorId: string) {
+  async postTransferJournal(tx: Tx, doc: Prisma.TransferDocGetPayload<{ include: typeof TransfersService.INCLUDE }>, actorId: string, why = 'Goods received') {
     const recvLines = doc.lines.filter((l) => (l.qtyReceived ?? 0) > 0).map((l) => ({ productId: l.productId, accountingClass: l.product.category.accountingClass, qty: l.qtyReceived!, unitCost: l.batch.unitCost, isConsignmentIn: l.batch.isConsignmentIn, supplierId: null }));
     if (doc.toLocation.type === 'FRANCHISE') {
       let saleTotal = D(0);
       for (const l of recvLines) { const p = await this.master.priceFor(l.productId, 'FRANCHISE', doc.docDate, tx); saleTotal = saleTotal.plus(D(p ?? 0).mul(l.qty)); }
       await this.posting.post(tx, { type: 'TransferDoc', id: doc.id, date: doc.docDate, createdBy: actorId }, (r) => r7FranchiseTransfer(r, { fromLocationId: doc.fromLocationId, franchiseLocationId: doc.toLocationId, controlNo: doc.controlNo, saleTotal, costLines: recvLines }));
+      // the franchise is billed (or its invoice corrected) for exactly what it received (owner request 2026-09-30)
+      await this.franchiseAr.onTransferBilling(tx, doc, saleTotal, actorId, why);
     } else if (doc.toLocation.type !== 'VIRTUAL' && doc.fromLocation.type !== 'VIRTUAL') {
       await this.posting.post(tx, { type: 'TransferDoc', id: doc.id, date: doc.docDate, createdBy: actorId }, (r) => r6Transfer(r, { fromLocationId: doc.fromLocationId, toLocationId: doc.toLocationId, controlNo: doc.controlNo, lines: recvLines }));
     }

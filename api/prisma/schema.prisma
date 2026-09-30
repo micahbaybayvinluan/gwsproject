@@ -64,6 +64,9 @@ model Location {
   storeInspections  StoreInspection[]
   franchiseExpenses FranchiseExpense[]
   employees         Employee[]
+  /// franchise on cash-before-delivery after unpaid accounts (memo 2026-07-31)
+  creditHold        Boolean                  @default(false) @map("credit_hold")
+  creditHoldNote    String?                  @map("credit_hold_note")
 
   @@map("locations")
 }
@@ -682,6 +685,8 @@ model SalesDoc {
   cardSlipNo                 String?      @map("card_slip_no")
   cardApprovalCode           String?      @map("card_approval_code")
   cardBatchNo                String?      @map("card_batch_no")
+  /// stickers given on this sale for the 6-Pack Card (owner request 2026-09-30)
+  sixPackStickers            Int          @default(0) @map("six_pack_stickers")
   deliveryFee                Decimal      @default(0) @map("delivery_fee") @db.Decimal(14, 2)
   riderIncentive             Decimal      @default(0) @map("rider_incentive") @db.Decimal(14, 2)
   // incentive paid out of this sale's cash (owner request 2026-09-27): a branch expense deducted from the cash to remit
@@ -791,15 +796,25 @@ model PaymentAllocation {
 }
 
 model CashDeposit {
-  id               String   @id @default(uuid())
-  locationId       String   @map("location_id")
-  businessDate     DateTime @map("business_date") @db.Date
-  amount           Decimal  @db.Decimal(14, 2)
-  bankAccountId    String   @map("bank_account_id")
-  depositedAt      DateTime @map("deposited_at") @db.Date
-  slipAttachmentId String?  @map("slip_attachment_id")
-  createdAt        DateTime @default(now()) @map("created_at")
-  createdBy        String?  @map("created_by")
+  id                   String    @id @default(uuid())
+  locationId           String    @map("location_id")
+  businessDate         DateTime  @map("business_date") @db.Date
+  amount               Decimal   @db.Decimal(14, 2)
+  bankAccountId        String    @map("bank_account_id")
+  depositedAt          DateTime  @map("deposited_at") @db.Date
+  slipAttachmentId     String?   @map("slip_attachment_id")
+  createdAt            DateTime  @default(now()) @map("created_at")
+  createdBy            String?   @map("created_by")
+  /// the deposit slip is checked by the Audit Associate, then the Accounting Associate (owner request 2026-09-30): PENDING_AUDIT → PENDING_ACCOUNTING → VERIFIED | REJECTED
+  status               String    @default("PENDING_AUDIT")
+  auditVerifiedBy      String?   @map("audit_verified_by")
+  auditVerifiedAt      DateTime? @map("audit_verified_at")
+  accountingVerifiedBy String?   @map("accounting_verified_by")
+  accountingVerifiedAt DateTime? @map("accounting_verified_at")
+  rejectedBy           String?   @map("rejected_by")
+  rejectedAt           DateTime? @map("rejected_at")
+  rejectReason         String?   @map("reject_reason")
+  approvalRequestId    String?   @map("approval_request_id")
 
   bankAccount Account @relation(fields: [bankAccountId], references: [id])
 
@@ -2071,24 +2086,24 @@ model EcomAdSpend {
 /// Steps: HEAD_AUDITOR review → SENDER confirms (2 days) → ADMIN when the sender disagrees or does not answer → RESOLVED.
 /// A confirmed difference creates adjustment forms numbered after the original (WA-PO-000012-002, -003…).
 model TransferDiscrepancy {
-  id                String    @id @default(uuid())
-  transferId        String    @unique @map("transfer_id")
-  controlNo         String    @map("control_no")
-  status            String    @default("HEAD_AUDITOR") // HEAD_AUDITOR | SENDER | ADMIN | RESOLVED
+  id               String    @id @default(uuid())
+  transferId       String    @unique @map("transfer_id")
+  controlNo        String    @map("control_no")
+  status           String    @default("HEAD_AUDITOR") // HEAD_AUDITOR | SENDER | ADMIN | RESOLVED
   /// [{ productId, name, onForm, received, short, extra, note }]
-  lines             Json
-  receivedBy        String?   @map("received_by")
-  senderUserIds     String[]  @default([]) @map("sender_user_ids")
-  senderDueAt       DateTime? @map("sender_due_at")
-  senderRemindedAt  DateTime? @map("sender_reminded_at")
+  lines            Json
+  receivedBy       String?   @map("received_by")
+  senderUserIds    String[]  @default([]) @map("sender_user_ids")
+  senderDueAt      DateTime? @map("sender_due_at")
+  senderRemindedAt DateTime? @map("sender_reminded_at")
   /// [{ step, by, byName, decision, note, at }]
-  history           Json      @default("[]")
-  outcome           String? // RETURN_TO_SENDER | RECEIVED_AS_SENT | LOST_COMPANY | LOST_CHARGE
-  adjustmentDocIds  String[]  @default([]) @map("adjustment_doc_ids")
-  chargeFormId      String?   @map("charge_form_id")
-  hrNoticeId        String?   @map("hr_notice_id")
-  createdAt         DateTime  @default(now()) @map("created_at")
-  resolvedAt        DateTime? @map("resolved_at")
+  history          Json      @default("[]")
+  outcome          String? // RETURN_TO_SENDER | RECEIVED_AS_SENT | LOST_COMPANY | LOST_CHARGE
+  adjustmentDocIds String[]  @default([]) @map("adjustment_doc_ids")
+  chargeFormId     String?   @map("charge_form_id")
+  hrNoticeId       String?   @map("hr_notice_id")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  resolvedAt       DateTime? @map("resolved_at")
 
   @@index([status])
   @@map("transfer_discrepancies")
@@ -2096,19 +2111,19 @@ model TransferDiscrepancy {
 
 /// Monthly sales target per branch or per agent, set by the Sales Manager and approved by the Owner (owner request 2026-09-29).
 model SalesTarget {
-  id                String   @id @default(uuid())
+  id                String    @id @default(uuid())
   month             String // YYYY-MM
   kind              String // BRANCH | AGENT
-  locationId        String?  @map("location_id")
+  locationId        String?   @map("location_id")
   /// an agent is one person even when listed at several branches: the linked user, or the agent's name
-  agentKey          String?  @map("agent_key")
-  agentName         String?  @map("agent_name")
-  amount            Decimal  @db.Decimal(14, 2)
+  agentKey          String?   @map("agent_key")
+  agentName         String?   @map("agent_name")
+  amount            Decimal   @db.Decimal(14, 2)
   notes             String?
-  status            String   @default("PENDING") // PENDING | APPROVED | REJECTED | SUPERSEDED
-  approvalRequestId String?  @map("approval_request_id")
-  createdBy         String?  @map("created_by")
-  createdAt         DateTime @default(now()) @map("created_at")
+  status            String    @default("PENDING") // PENDING | APPROVED | REJECTED | SUPERSEDED
+  approvalRequestId String?   @map("approval_request_id")
+  createdBy         String?   @map("created_by")
+  createdAt         DateTime  @default(now()) @map("created_at")
   decidedAt         DateTime? @map("decided_at")
 
   @@index([month, kind, status])
@@ -2177,4 +2192,220 @@ model AgentIncentive {
 
   @@index([month, agentKey])
   @@map("agent_incentives")
+}
+
+// ── Franchise receivables (owner request 2026-09-30, memo 2026-07-31): goods billed to a franchise at the franchise price, due by terms;
+// 2% one-time penalty + 0.1% per day on the unpaid balance once overdue ──
+model FranchiseInvoice {
+  id                  String    @id @default(uuid())
+  controlNo           String    @unique @map("control_no")
+  source              String // TRANSFER | OPENING
+  transferId          String?   @unique @map("transfer_id")
+  franchiseLocationId String    @map("franchise_location_id")
+  fromLocationId      String?   @map("from_location_id")
+  issueDate           DateTime  @map("issue_date") @db.Date
+  originalDueDate     DateTime  @map("original_due_date") @db.Date
+  dueDate             DateTime  @map("due_date") @db.Date
+  originalAmount      Decimal   @map("original_amount") @db.Decimal(14, 2)
+  /// the goods now billed (changes when the received quantities change)
+  amount              Decimal   @db.Decimal(14, 2)
+  principalPaid       Decimal   @default(0) @map("principal_paid") @db.Decimal(14, 2)
+  penalty             Decimal   @default(0) @db.Decimal(14, 2)
+  penaltyPaid         Decimal   @default(0) @map("penalty_paid") @db.Decimal(14, 2)
+  interest            Decimal   @default(0) @db.Decimal(14, 2)
+  interestPaid        Decimal   @default(0) @map("interest_paid") @db.Decimal(14, 2)
+  waivedTotal         Decimal   @default(0) @map("waived_total") @db.Decimal(14, 2)
+  penaltyAppliedOn    DateTime? @map("penalty_applied_on") @db.Date
+  interestThrough     DateTime? @map("interest_through") @db.Date
+  status              String    @default("OPEN") // OPEN | PAID | CANCELLED
+  flaggedAt           DateTime? @map("flagged_at") // unpaid two months after the due date
+  remindedAt          DateTime? @map("reminded_at")
+  notes               String?
+  createdBy           String?   @map("created_by")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  payments    FranchisePayment[]
+  adjustments FranchiseArAdjustment[]
+  extensions  FranchiseArExtension[]
+
+  @@index([franchiseLocationId, status])
+  @@index([dueDate])
+  @@map("franchise_invoices")
+}
+
+model FranchisePayment {
+  id                String    @id @default(uuid())
+  receiptNo         String    @unique @map("receipt_no")
+  invoiceId         String    @map("invoice_id")
+  amount            Decimal   @db.Decimal(14, 2)
+  toPenalty         Decimal   @default(0) @map("to_penalty") @db.Decimal(14, 2)
+  toInterest        Decimal   @default(0) @map("to_interest") @db.Decimal(14, 2)
+  toPrincipal       Decimal   @default(0) @map("to_principal") @db.Decimal(14, 2)
+  paidOn            DateTime  @map("paid_on") @db.Date
+  mode              String
+  paymentAccountId  String?   @map("payment_account_id")
+  reference         String?
+  proofAttachmentId String?   @map("proof_attachment_id")
+  notes             String?
+  recordedBy        String    @map("recorded_by")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  voidedAt          DateTime? @map("voided_at")
+
+  invoice FranchiseInvoice @relation(fields: [invoiceId], references: [id])
+
+  @@index([invoiceId])
+  @@map("franchise_payments")
+}
+
+model FranchiseArAdjustment {
+  id         String   @id @default(uuid())
+  invoiceId  String   @map("invoice_id")
+  kind       String // TRANSFER_CHANGE | WAIVER | MANUAL | EXTENSION
+  delta      Decimal  @db.Decimal(14, 2)
+  reason     String
+  transferId String?  @map("transfer_id")
+  details    Json?
+  createdBy  String?  @map("created_by")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  invoice FranchiseInvoice @relation(fields: [invoiceId], references: [id])
+
+  @@index([invoiceId])
+  @@map("franchise_ar_adjustments")
+}
+
+model FranchiseArExtension {
+  id                String    @id @default(uuid())
+  invoiceId         String    @map("invoice_id")
+  requestedBy       String    @map("requested_by")
+  reason            String
+  previousDueDate   DateTime  @map("previous_due_date") @db.Date
+  requestedDueDate  DateTime  @map("requested_due_date") @db.Date
+  status            String    @default("PENDING") // PENDING | APPROVED | REJECTED
+  approvalRequestId String?   @map("approval_request_id")
+  decidedBy         String?   @map("decided_by")
+  decidedAt         DateTime? @map("decided_at")
+  decisionNote      String?   @map("decision_note")
+  createdAt         DateTime  @default(now()) @map("created_at")
+
+  invoice FranchiseInvoice @relation(fields: [invoiceId], references: [id])
+
+  @@index([invoiceId])
+  @@map("franchise_ar_extensions")
+}
+
+// ── Memorandums (owner request 2026-09-30): numbered YYYY-Qn-NNN, addressed to chosen people, signed by the people the memo names ──
+model Memo {
+  id          String    @id @default(uuid())
+  memoNo      String    @unique @map("memo_no")
+  subject     String
+  addressedTo String    @map("addressed_to")
+  fromText    String    @map("from_text")
+  memoDate    DateTime  @map("memo_date") @db.Date
+  body        String
+  table       Json?
+  signers     Json
+  audience    Json
+  status      String    @default("ISSUED") // ISSUED | VOIDED
+  createdBy   String    @map("created_by")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  voidedAt    DateTime? @map("voided_at")
+  voidedBy    String?   @map("voided_by")
+  voidReason  String?   @map("void_reason")
+
+  recipients MemoRecipient[]
+
+  @@index([memoDate])
+  @@map("memos")
+}
+
+model MemoRecipient {
+  id             String    @id @default(uuid())
+  memoId         String    @map("memo_id")
+  userId         String    @map("user_id")
+  acknowledgedAt DateTime? @map("acknowledged_at")
+
+  memo Memo @relation(fields: [memoId], references: [id], onDelete: Cascade)
+
+  @@unique([memoId, userId])
+  @@index([userId])
+  @@map("memo_recipients")
+}
+
+// ── 6-Pack Card (owner request 2026-09-30): a sticker per supplement bought (ticked on the DR, customer tagged); six stickers earn a card worth ₱300, booked as a branch expense ──
+model SixPackSticker {
+  id           String    @id @default(uuid())
+  saleId       String    @unique @map("sale_id")
+  locationId   String    @map("location_id")
+  customerName String    @map("customer_name")
+  phone        String
+  phoneKey     String    @map("phone_key")
+  email        String?
+  stickers     Int
+  businessDate DateTime  @map("business_date") @db.Date
+  issuedBy     String    @map("issued_by")
+  issuedAt     DateTime  @default(now()) @map("issued_at")
+  voidedAt     DateTime? @map("voided_at")
+
+  @@index([phoneKey])
+  @@index([locationId, businessDate])
+  @@map("six_pack_stickers")
+}
+
+model SixPackRedemption {
+  id                String    @id @default(uuid())
+  controlNo         String    @unique @map("control_no")
+  locationId        String    @map("location_id")
+  customerName      String    @map("customer_name")
+  phone             String
+  phoneKey          String    @map("phone_key")
+  email             String?
+  address           String?
+  stickersUsed      Int       @map("stickers_used")
+  amount            Decimal   @db.Decimal(14, 2)
+  expenseId         String?   @map("expense_id")
+  legacyCardNo      String?   @map("legacy_card_no")
+  proofAttachmentId String?   @map("proof_attachment_id")
+  businessDate      DateTime  @map("business_date") @db.Date
+  redeemedBy        String    @map("redeemed_by")
+  redeemedAt        DateTime  @default(now()) @map("redeemed_at")
+  flaggedNote       String?   @map("flagged_note")
+  voidedAt          DateTime? @map("voided_at")
+
+  @@index([phoneKey])
+  @@index([locationId, businessDate])
+  @@map("six_pack_redemptions")
+}
+
+/// One shipping label (waybill) uploaded by the E-comm Associate, Head Auditor or Owner: the report works out SRP, fees and order income from it.
+model EcomWaybill {
+  id         String    @id @default(uuid())
+  platform   String // TIKTOK | SHOPEE | LAZADA | UNKNOWN
+  orderId    String    @map("order_id")
+  trackingNo String?   @map("tracking_no")
+  qty        Int       @default(1)
+  weightG    Int?      @map("weight_g")
+  rtsDate    DateTime? @map("rts_date") @db.Date
+  productId  String?   @map("product_id")
+  /// the product was filled from what was chosen before for the same weight: confirm it
+  guessed    Boolean   @default(false)
+  sourceFile String?   @map("source_file")
+  uploadedBy String?   @map("uploaded_by")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  @@unique([platform, orderId])
+  @@index([createdAt])
+  @@map("ecom_waybills")
+}
+
+model EcomWaybillHint {
+  id        String   @id @default(uuid())
+  platform  String
+  weightG   Int      @map("weight_g")
+  productId String   @map("product_id")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([platform, weightG])
+  @@map("ecom_waybill_hints")
 }

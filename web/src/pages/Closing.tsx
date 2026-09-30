@@ -2,12 +2,15 @@ import { PostCloseEditCard } from '@/components/PostCloseEditCard';
 import { locLabel } from '@/lib/utils';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { Attachments } from '@/components/Attachments';
 import { api, peso, today } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
-import { Badge, Button, Card, ErrorBox, Field, Input, Select, Stat } from '@/components/ui/primitives';
+import { Badge, Button, Card, Empty, ErrorBox, Field, Input, Select, Stat } from '@/components/ui/primitives';
 import { DataTable } from '@/components/ui/table';
 
 const DENOMS = [1000, 500, 200, 100, 50, 20, 10, 5, 1];
+interface CashOnHand { cashOnHand: string; days: { businessDate: string; toDeposit: string; deposited: string; outstanding: string; dueDate: string; daysLeft: number; status: string }[] }
 interface Summary { businessDate: string; cashSalesOnly: string; cashCollections: string; cashSales: string; cashExpenses: string; fundReplenishment?: string; expectedCash: string; totalCashDeposit: string; salesCount: number; expenseCount: number; closed: boolean; close: { countedCash: string | null; cashVariance: string | null; moneyBreakdown: Record<string, number> | null } | null }
 
 /** §8.4 Daily close: summary, Money Breakdown cash count (variance recorded, not blocking), post-close edit requests, deposit. */
@@ -21,7 +24,10 @@ export function ClosingPage() {
   const banks = useQuery({ queryKey: ['payment-accounts-bank'], queryFn: () => api.get<{ id: string; title: string; paymentAccountType: string }[]>('/api/accounts/payment'), enabled: can('sale.create') });
   const count = useMutation({ mutationFn: () => api.post('/api/closing/cash-count', { locationId, date, breakdown: bd }), onSuccess: () => void qc.invalidateQueries({ queryKey: ['closing'] }) });
   const [dep, setDep] = useState({ amount: '', bankAccountId: '', depositedAt: today() });
-  const deposit = useMutation({ mutationFn: () => api.post('/api/expenses/deposits', { locationId, businessDate: date, amount: Number(dep.amount), bankAccountId: dep.bankAccountId, depositedAt: dep.depositedAt }) });
+  const [slip, setSlip] = useState<{ draft: string; id: string | null }>({ draft: crypto.randomUUID(), id: null });
+  const cash = useQuery({ queryKey: ['cash-on-hand', locationId], queryFn: () => api.get<CashOnHand>(`/api/cash-on-hand?locationId=${locationId}`), enabled: !!locationId && (can('sale.create') || can('cashdeposit.view.all')) });
+  const deposit = useMutation({ mutationFn: () => api.post('/api/expenses/deposits', { locationId, businessDate: date, amount: Number(dep.amount || d?.totalCashDeposit), bankAccountId: dep.bankAccountId, depositedAt: dep.depositedAt, slipAttachmentId: slip.id }), onSuccess: () => { setSlip({ draft: crypto.randomUUID(), id: null }); setDep({ ...dep, amount: '' }); void qc.invalidateQueries({ queryKey: ['deposits'] }); void qc.invalidateQueries({ queryKey: ['cash-on-hand'] }); } });
+  const pendingDays = (cash.data?.days ?? []).filter((x) => x.status !== 'DEPOSITED');
   const counted = DENOMS.reduce((t, d) => t + (bd[String(d)] ?? 0) * d, 0);
   const d = s.data;
   return <div className="space-y-4">
@@ -42,13 +48,20 @@ export function ClosingPage() {
           <ErrorBox error={count.error} />
         </Card>
         <Card title="Bank deposit">
+          {can('sale.create') && <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-2" data-testid="pending-days">
+            <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-amber-900">Cash still to deposit: {cash.data ? peso(cash.data.cashOnHand) : '…'}</div>
+            {pendingDays.length ? <div className="flex flex-wrap gap-2">{pendingDays.map((x) => <button key={x.businessDate} type="button" onClick={() => { setDate(x.businessDate); setDep({ ...dep, amount: x.outstanding }); }} className={`rounded-lg border px-3 py-1.5 text-left text-sm transition hover:shadow ${x.businessDate === date ? 'ring-2 ring-navy' : ''} ${x.status === 'OVERDUE' ? 'border-red-300 bg-brand-soft text-brand-dark' : x.status === 'DUE_TODAY' ? 'border-amber-300 bg-white text-amber-900' : 'border-slate-300 bg-white'}`}><div className="font-semibold">{x.businessDate}</div><div>{peso(x.outstanding)}</div><div className="text-[11px]">{x.status === 'OVERDUE' ? `${-x.daysLeft} day(s) overdue` : x.status === 'DUE_TODAY' ? 'deposit today' : `${x.daysLeft} day(s) left`}</div></button>)}</div> : <p className="text-sm text-slate-600">Nothing waiting: every day’s cash has been deposited.</p>}
+            <p className="mt-1 text-[11px] text-slate-600">Press a date to deposit that day’s cash.</p></div>}
+          <p className="mb-2 text-sm text-slate-600">Depositing the cash of <b>{date}</b>. Attach the <b>bank deposit slip</b>: the Audit Associate checks it, then the Accounting Associate.</p>
           <div className="grid gap-3 md:grid-cols-3"><Field label="Amount"><Input type="number" inputMode="decimal" value={dep.amount || d.totalCashDeposit} onChange={(e) => setDep({ ...dep, amount: e.target.value })} /></Field><Field label="Bank account"><Select value={dep.bankAccountId} onChange={(e) => setDep({ ...dep, bankAccountId: e.target.value })}><option value="">—</option>{banks.data?.filter((b) => b.paymentAccountType === 'BANK').map((b) => <option key={b.id} value={b.id}>{b.title}</option>)}</Select></Field><Field label="Deposited on"><Input type="date" value={dep.depositedAt} onChange={(e) => setDep({ ...dep, depositedAt: e.target.value })} /></Field></div>
-          <Button className="mt-3" variant="outline" disabled={!dep.bankAccountId} onClick={() => deposit.mutate()}>Record deposit</Button>{deposit.isSuccess && <span className="ml-2 text-sm text-emerald-700">Recorded</span>}<ErrorBox error={deposit.error} />
+          <div className="mt-3"><Attachments key={slip.draft} type="CashDeposit" id={slip.draft} title="Deposit slip (required)" uploadLabel="Attach deposit slip" onUploaded={(a) => setSlip({ ...slip, id: a.id })} /></div>
+          <Button className="mt-3" variant="outline" disabled={!dep.bankAccountId || !slip.id || deposit.isPending} onClick={() => deposit.mutate()}>Record deposit</Button>{deposit.isSuccess && <span className="ml-2 text-sm text-emerald-700">Recorded: waiting for the Audit Associate</span>}{!slip.id && <span className="ml-2 text-xs text-amber-700">Attach the slip first.</span>}<ErrorBox error={deposit.error} />
           <div className="mt-4 flex gap-2"><Button variant="outline" size="sm" onClick={() => api.download(`/api/reports/daily-sales.xlsx?locationId=${locationId}&date=${date}`, `DailySalesReport_${date}.xlsx`)}>Daily Sales Report xlsx</Button><Button variant="outline" size="sm" onClick={() => api.download(`/api/reports/daily-sales.pdf?locationId=${locationId}&date=${date}`, `DailySalesReport_${date}.pdf`)}>PDF</Button></div>
         </Card>
       </div>}
       {!can('sale.create') && d.close?.countedCash != null && <p className="text-sm">Cash counted {peso(d.close.countedCash)} · variance <span className={Number(d.close.cashVariance) < 0 ? 'font-semibold text-red-700' : ''}>{peso(d.close.cashVariance)}</span></p>}
     </>}
+    {locationId && (can('expense.view') || can('expense.create.branch')) && <DepositsCard locationId={locationId} canFix={can('expense.create.branch')} />}
     {can('charge.assign') && <ShortagesCard locationId={me!.locationScoped ? undefined : locationId || undefined} />}
     {!can('sale.create') && can('revision.request') && <Card title="Post-close edit requests"><DataTable data={edits.data ?? []} columns={[{ header: 'Requested', accessorFn: (r) => new Date(r.createdAt).toLocaleString() }, { header: 'Document', accessorFn: (r) => `${r.documentType} ${r.documentId.slice(0, 8)}` }, { header: 'Reason', accessorKey: 'reason' }, { header: 'Status', cell: (c) => <Badge tone={c.row.original.appliedAt ? 'green' : 'amber'}>{c.row.original.appliedAt ? 'APPLIED' : 'PENDING'}</Badge> }]} /></Card>}
     {can('sale.create') && locationId && <PostCloseEditCard locationId={locationId} date={date} isFranchise={me!.locations.find((l) => l.id === locationId)?.type === 'FRANCHISE'} />}
@@ -73,5 +86,28 @@ function ShortagesCard({ locationId }: { locationId?: string }) {
     </div>}
     {m.data && <p className="mt-2 text-sm text-emerald-700">Charge form {m.data.controlNo} created. HR and the staff were notified.</p>}
     <ErrorBox error={m.error} />
+  </Card>;
+}
+
+interface Dep { id: string; businessDate: string; depositedAt: string; amount: string; status: string; bankAccount: { title: string }; slip: { id: string; fileName: string } | null; enteredBy: string | null; auditVerifiedByName: string | null; accountingVerifiedByName: string | null; rejectedByName: string | null; rejectReason: string | null; locationId: string }
+const DEP_STATUS: Record<string, { label: string; tone: 'amber' | 'blue' | 'green' | 'red' }> = {
+  PENDING_AUDIT: { label: 'Waiting: Audit Associate', tone: 'amber' }, PENDING_ACCOUNTING: { label: 'Audit checked · waiting: Accounting Associate', tone: 'blue' }, VERIFIED: { label: 'Verified by Audit and Accounting', tone: 'green' }, REJECTED: { label: 'Not accepted: fix and send again', tone: 'red' },
+};
+
+/** The deposits recorded by the branch, with the slip and where each one stands (Audit Associate, then Accounting Associate). */
+function DepositsCard({ locationId, canFix }: { locationId: string; canFix: boolean }) {
+  const qc = useQueryClient(); const [sp] = useSearchParams(); const [fixing, setFixing] = useState<string | null>(null); const [slip, setSlip] = useState<{ draft: string; id: string | null }>({ draft: crypto.randomUUID(), id: null });
+  const q = useQuery({ queryKey: ['deposits', locationId], queryFn: () => api.get<Dep[]>(`/api/expenses/deposits?locationId=${locationId}`) });
+  const resend = useMutation({ mutationFn: (id: string) => api.post(`/api/expenses/deposits/${id}/resubmit`, { slipAttachmentId: slip.id }), onSuccess: () => { setFixing(null); setSlip({ draft: crypto.randomUUID(), id: null }); void qc.invalidateQueries({ queryKey: ['deposits'] }); } });
+  const rows = q.data ?? [];
+  return <Card title="Deposits recorded by this branch">
+    {rows.length ? <div className="overflow-x-auto"><table className="w-full text-sm"><thead className="text-left text-xs uppercase tracking-wide text-slate-500"><tr><th className="py-1 pr-3">Cash of</th><th className="pr-3">Deposited on</th><th className="num pr-3">Amount</th><th className="pr-3">Bank</th><th className="pr-3">Slip</th><th className="pr-3">By</th><th>Status</th></tr></thead>
+      <tbody>{rows.map((r) => <tr key={r.id} className={`border-t align-top ${sp.get('deposit') === r.id ? 'bg-amber-50' : ''}`}>
+        <td className="py-1.5 pr-3">{r.businessDate}</td><td className="pr-3">{r.depositedAt}</td><td className="num pr-3">{peso(r.amount)}</td><td className="pr-3">{r.bankAccount.title}</td>
+        <td className="pr-3">{r.slip ? <button className="text-brand underline" onClick={() => api.download(`/api/attachments/file/${r.slip!.id}`, r.slip!.fileName)}>View slip</button> : <span className="text-xs text-slate-500">no slip (before slips were required)</span>}</td><td className="pr-3">{r.enteredBy}</td>
+        <td><Badge tone={DEP_STATUS[r.status]?.tone}>{DEP_STATUS[r.status]?.label ?? r.status}</Badge>
+          {r.auditVerifiedByName && <div className="text-xs text-slate-500">Audit: {r.auditVerifiedByName}</div>}{r.accountingVerifiedByName && <div className="text-xs text-slate-500">Accounting: {r.accountingVerifiedByName}</div>}
+          {r.status === 'REJECTED' && <div className="text-xs text-red-700">{r.rejectedByName}: {r.rejectReason}</div>}
+          {r.status === 'REJECTED' && canFix && (fixing === r.id ? <div className="mt-1 space-y-1"><Attachments key={slip.draft} type="CashDeposit" id={slip.draft} title="New deposit slip" uploadLabel="Attach slip" onUploaded={(a) => setSlip({ ...slip, id: a.id })} /><div className="flex gap-1"><Button size="sm" disabled={resend.isPending} onClick={() => resend.mutate(r.id)}>Send again</Button><Button size="sm" variant="outline" onClick={() => setFixing(null)}>Cancel</Button></div><ErrorBox error={resend.error} /></div> : <Button size="sm" variant="outline" className="mt-1" onClick={() => setFixing(r.id)}>Fix and send again</Button>)}</td></tr>)}</tbody></table></div> : <Empty>No deposits recorded yet.</Empty>}
   </Card>;
 }

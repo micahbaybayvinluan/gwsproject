@@ -7,7 +7,7 @@ import { Badge, Button, Card, Empty, ErrorBox, Input, Modal, statusTone } from '
 
 interface Req { id: string; type: string; documentType: string; documentId: string; requestedBy: string; requesterName: string; requiredApproverRoles: string[]; anyOf: boolean; status: string; summary: Record<string, unknown> | null; autoApproveAt: string | null; createdAt: string; decisions: { roleKey: string; decision: string; note: string | null; user: { fullName: string } }[] }
 const LINKS: Record<string, string> = { ReceivingDoc: '/receiving', TransferDoc: '/transfers', SalesDoc: '/sales', ExpiryWriteoffDoc: '/writeoffs', PriceChangeDoc: '/price-changes', CountDoc: '/counts', DiscrepancyCase: '/discrepancies', PostCloseEdit: '/closing', Payment: '/ar' };
-const TYPE_LABEL: Record<string, string> = { AGENT_INCENTIVE: 'Agent incentive (monthly sales confirmed by the Sales Manager)', OPENING_AR: 'Opening AR (before GWS-ERP), entered by Accounting', AUDIT_REVISION: 'Audit Associate correction (Head Auditor only)', AR_PAYMENT: 'AR payment entered by branch', COUNT_REVISION: 'Count sheet revision', DISCREPANCY_EXPLANATION: 'Discrepancy explanation', WAREHOUSE_EDIT: 'Edit of your warehouse document', MASTER_DATA_NEW: 'New master data (Owner approves)', WAREHOUSE_IN: 'Goods into the warehouse (In-Charge approves)', WAREHOUSE_OUT: 'Goods out of the warehouse (In-Charge approves)', CASH_DEPOSIT_EXTENSION: 'More days to deposit cash sales (Head Auditor + Admin)', CONSIGNMENT_CHECK_WH: 'Consignment check (In-Charge, then the Owner)', CONSIGNMENT_CHECK_BRANCH: 'Consignment check (auditor, then the Owner)', CONSIGNMENT_OUT: 'Consignment (Owner approves)', COST_EDIT: 'Product cost change', ECOM_PULLOUT: 'E-commerce pull-out from the Warehouse (In-Charge approves)', ECOM_SETTLEMENT: 'E-commerce payout: sale, fees and payout (Accounting Head)', TRANSFER_DIFF_REVIEW: 'Transfer received with a different quantity (Head Auditor reviews)', TRANSFER_DIFF_SENDER: 'Items your branch sent were not received as on the form: agree or disagree', TRANSFER_DIFF_ADMIN: 'Transfer difference: the sending branch disagrees or did not answer (Owner decides)', SALES_TARGET: 'Monthly sales target (set by the Sales Manager)' };
+const TYPE_LABEL: Record<string, string> = { AGENT_INCENTIVE: 'Agent incentive (monthly sales confirmed by the Sales Manager)', OPENING_AR: 'Opening AR (before GWS-ERP), entered by Accounting', AUDIT_REVISION: 'Audit Associate correction (Head Auditor only)', AR_PAYMENT: 'AR payment entered by branch', COUNT_REVISION: 'Count sheet revision', DISCREPANCY_EXPLANATION: 'Discrepancy explanation', WAREHOUSE_EDIT: 'Edit of your warehouse document', MASTER_DATA_NEW: 'New master data (Owner approves)', WAREHOUSE_IN: 'Goods into the warehouse (In-Charge approves)', WAREHOUSE_OUT: 'Goods out of the warehouse (In-Charge approves)', CASH_DEPOSIT_EXTENSION: 'More days to deposit cash sales (Head Auditor + Admin)', CONSIGNMENT_CHECK_WH: 'Consignment check (In-Charge, then the Owner)', CONSIGNMENT_CHECK_BRANCH: 'Consignment check (auditor, then the Owner)', CONSIGNMENT_OUT: 'Consignment (Owner approves)', COST_EDIT: 'Product cost change', ECOM_PULLOUT: 'E-commerce pull-out from the Warehouse (In-Charge approves)', ECOM_SETTLEMENT: 'E-commerce payout: sale, fees and payout (Accounting Head)', TRANSFER_DIFF_REVIEW: 'Transfer received with a different quantity (Head Auditor reviews)', TRANSFER_DIFF_SENDER: 'Items your branch sent were not received as on the form: agree or disagree', TRANSFER_DIFF_ADMIN: 'Transfer difference: the sending branch disagrees or did not answer (Owner decides)', SALES_TARGET: 'Monthly sales target (set by the Sales Manager)', CASH_DEPOSIT_AUDIT: 'Branch cash deposit: check the deposit slip (Audit Associate)', CASH_DEPOSIT_ACCOUNTING: 'Branch cash deposit: check the deposit slip (Accounting Associate)', FRANCHISE_AR_EXTENSION: 'Franchise asks for more days to pay (Owner decides)' };
 
 /** §6.2 Approvals inbox: grouped by type, newest first, select-all + bulk approve/reject with one note, inline expand. */
 export function ApprovalsPage() {
@@ -55,6 +55,7 @@ export function ApprovalsPage() {
           <div className="flex gap-1"><Button size="sm" onClick={() => one.mutate({ id: r.id, decision: 'APPROVE' })}>{APPROVE_LABEL[r.type] ?? 'Approve'}</Button><Button size="sm" variant="danger" onClick={() => (NEEDS_REASON.includes(r.type) ? setRejecting({ ids: [r.id], bulk: false, type: r.type }) : one.mutate({ id: r.id, decision: 'REJECT' }))}>{REJECT_LABEL[r.type] ?? 'Reject'}</Button></div>
         </div>
         {r.type === 'AR_PAYMENT' && <PaymentReview id={r.documentId} />}
+        {(r.type === 'CASH_DEPOSIT_AUDIT' || r.type === 'CASH_DEPOSIT_ACCOUNTING') && <DepositReview id={r.documentId} />}
         {r.type === 'WAREHOUSE_EDIT' && Array.isArray(r.summary?.changes) && <div className="ml-6 mt-1 rounded border border-amber-200 bg-amber-50 p-2 text-sm">
           <div className="text-xs text-slate-600">{String(r.summary?.proposedBy ?? r.requesterName)} wants to change your {String(r.summary?.document ?? 'document')}. Nothing changes unless you accept.</div>
           <ul className="list-disc pl-5">{(r.summary!.changes as string[]).map((c, i) => <li key={i}>{c}</li>)}</ul>
@@ -132,13 +133,39 @@ export const PAYMENT_REJECT_REASONS = [
 ];
 
 /** Rejections that must say why (the person who sent it sees the reason). */
-const NEEDS_REASON = ['AR_PAYMENT', 'TRANSFER_DIFF_SENDER', 'TRANSFER_DIFF_REVIEW'];
-const APPROVE_LABEL: Record<string, string> = { WAREHOUSE_EDIT: 'Accept', TRANSFER_DIFF_SENDER: 'Agree', TRANSFER_DIFF_REVIEW: 'Confirm the difference' };
-const REJECT_LABEL: Record<string, string> = { TRANSFER_DIFF_SENDER: 'Disagree', TRANSFER_DIFF_REVIEW: 'Receiver miscounted' };
+interface DepReview { branch: string; businessDate: string; depositedAt: string; amount: string; bank: string; enteredBy: string | null; status: string; auditVerifiedBy: string | null; slip: { id: string; fileName: string; contentType: string } | null }
+/** A branch's cash deposit: the slip beside the amount, bank and dates it must match (owner request 2026-09-30). */
+function DepositReview({ id }: { id: string }) {
+  const q = useQuery({ queryKey: ['deposit-review', id], queryFn: () => api.get<DepReview>(`/api/expenses/deposits/${id}/review`) });
+  const [img, setImg] = useState<string | null>(null); const [big, setBig] = useState(false);
+  useEffect(() => {
+    if (!q.data?.slip?.contentType.startsWith('image/')) return; let url = '';
+    void api.blob(`/api/attachments/file/${q.data.slip.id}`).then((b) => { url = URL.createObjectURL(b); setImg(url); }).catch(() => undefined);
+    return () => { if (url) URL.revokeObjectURL(url); };
+  }, [q.data?.slip]);
+  const r = q.data; if (!r) return <p className="ml-6 mt-1 text-xs text-slate-500">Loading deposit…</p>;
+  return <div className="ml-6 mt-2 grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm md:grid-cols-[1fr_220px]">
+    <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5 md:grid-cols-3">
+      <div><dt className="text-xs uppercase text-slate-500">Branch</dt><dd className="font-medium">{r.branch}</dd></div><div><dt className="text-xs uppercase text-slate-500">Amount deposited</dt><dd className="font-semibold">{peso(r.amount)}</dd></div><div><dt className="text-xs uppercase text-slate-500">Bank</dt><dd>{r.bank}</dd></div>
+      <div><dt className="text-xs uppercase text-slate-500">Cash of (sales date)</dt><dd>{r.businessDate}</dd></div><div><dt className="text-xs uppercase text-slate-500">Deposited on</dt><dd>{r.depositedAt}</dd></div><div><dt className="text-xs uppercase text-slate-500">Entered by</dt><dd>{r.enteredBy}</dd></div>
+      {r.auditVerifiedBy && <div className="col-span-2"><dt className="text-xs uppercase text-slate-500">Checked by Audit</dt><dd>{r.auditVerifiedBy}</dd></div>}
+      <div className="col-span-full text-xs text-slate-500">Check that the slip shows the same amount, bank and date.</div>
+    </dl>
+    <div><div className="mb-1 text-xs uppercase text-slate-500">Deposit slip</div>
+      {!r.slip ? <div className="rounded-lg border border-dashed p-4 text-center text-xs text-red-700">No slip attached</div>
+        : img ? <button type="button" onClick={() => setBig(true)} title="Click to enlarge"><img src={img} alt="Deposit slip" className="max-h-56 w-full rounded-lg border bg-white object-contain" /></button>
+          : <button type="button" className="text-brand underline" onClick={() => api.download(`/api/attachments/file/${r.slip!.id}`, r.slip!.fileName)}>{r.slip.fileName}</button>}</div>
+    {big && img && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => setBig(false)}><img src={img} alt="Deposit slip" className="max-h-full max-w-full rounded-lg bg-white" /></div>}
+  </div>;
+}
+
+const NEEDS_REASON = ['AR_PAYMENT', 'TRANSFER_DIFF_SENDER', 'TRANSFER_DIFF_REVIEW', 'CASH_DEPOSIT_AUDIT', 'CASH_DEPOSIT_ACCOUNTING'];
+const APPROVE_LABEL: Record<string, string> = { CASH_DEPOSIT_AUDIT: 'Slip checked', CASH_DEPOSIT_ACCOUNTING: 'Slip checked', WAREHOUSE_EDIT: 'Accept', TRANSFER_DIFF_SENDER: 'Agree', TRANSFER_DIFF_REVIEW: 'Confirm the difference' };
+const REJECT_LABEL: Record<string, string> = { CASH_DEPOSIT_AUDIT: 'Not accepted', CASH_DEPOSIT_ACCOUNTING: 'Not accepted', TRANSFER_DIFF_SENDER: 'Disagree', TRANSFER_DIFF_REVIEW: 'Receiver miscounted' };
 
 function RejectReason({ type, onReject, onClose }: { type: string; onReject: (reason: string) => void; onClose: () => void }) {
   const [pick, setPick] = useState(''); const [other, setOther] = useState('');
-  if (type !== 'AR_PAYMENT') return <Modal title={type === 'TRANSFER_DIFF_SENDER' ? 'Why do you disagree?' : 'What did you find?'} onClose={onClose}>
+  if (type !== 'AR_PAYMENT') return <Modal title={type === 'TRANSFER_DIFF_SENDER' ? 'Why do you disagree?' : type.startsWith('CASH_DEPOSIT') ? 'Why is the deposit not accepted?' : 'What did you find?'} onClose={onClose}>
     <p className="mb-3 text-sm text-slate-600">{type === 'TRANSFER_DIFF_SENDER' ? 'For example "we packed all items, the checker counted them". The Owner reads this and decides.' : 'For example "CCTV shows both boxes arrived". The receiving branch gets the items as on the form.'}</p>
     <Input value={other} onChange={(e) => setOther(e.target.value)} placeholder="Reason (required)" autoFocus />
     <div className="mt-4 flex justify-end gap-2"><Button variant="outline" onClick={onClose}>Cancel</Button><Button variant="danger" disabled={!other.trim()} onClick={() => onReject(other.trim())}>{REJECT_LABEL[type] ?? 'Reject'}</Button></div>

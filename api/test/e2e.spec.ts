@@ -1967,3 +1967,25 @@ describe('Waybill report: upload shipping labels → SRP, fees and order income 
     ok(await as('ecomm.assoc').delete(`/api/ecommerce-waybills/${g.id}`));
   });
 });
+
+describe('6-Pack Card override: Head Auditor asks, the Owner approves (owner request 2026-09-30)', () => {
+  it('a card for a customer who cannot be tagged needs the Head Auditor\'s request and the Owner\'s approval; then it is booked and flagged', async () => {
+    const west = (await prisma.location.findUniqueOrThrow({ where: { code: 'WESTAVE' } })).id;
+    await as('sales.westave').post('/api/six-pack/override').send({ locationId: west, reason: 'customer has no phone' }).expect(403);
+    await as('acct.head').post('/api/six-pack/override').send({ locationId: west, reason: 'customer has no phone' }).expect(403);
+    expect((await as('head.auditor').post('/api/six-pack/override').send({ locationId: west, reason: 'x' })).status).toBe(400); // a reason is required
+    ok(await as('head.auditor').post('/api/six-pack/override').send({ locationId: west, customerName: 'Walk-in lady', reason: 'Customer refused to give a mobile number; paper card brought' }));
+    expect(JSON.stringify(ok(await as('admin').get('/api/notifications')).body)).toContain('SIXPACK_OVERRIDE');
+    const req = await prisma.approvalRequest.findFirstOrThrow({ where: { type: 'SIXPACK_OVERRIDE', status: 'PENDING' } });
+    expect(req.requiredApproverRoles).toEqual(['ADMIN']);
+    expect((await as('head.auditor').post(`/api/approvals/${req.id}/decide`).send({ decision: 'APPROVE' })).status).toBe(403); // the Head Auditor cannot approve their own request
+    const before = await prisma.sixPackRedemption.count();
+    ok(await as('admin').post(`/api/approvals/${req.id}/decide`).send({ decision: 'APPROVE' }));
+    const r = await prisma.sixPackRedemption.findFirstOrThrow({ orderBy: { redeemedAt: 'desc' } });
+    expect(await prisma.sixPackRedemption.count()).toBe(before + 1);
+    expect(Number(r.amount)).toBe(300); expect(r.customerName).toBe('Walk-in lady'); expect(r.flaggedNote).toContain('Override'); expect(r.locationId).toBe(west);
+    const ex = await prisma.expenseDoc.findUniqueOrThrow({ where: { id: r.expenseId! }, include: { account: true } });
+    expect(Number(ex.amount)).toBe(300); expect(ex.account.title).toMatch(/6-Pack Card/);
+    expect(JSON.stringify(ok(await as('sales.westave').get('/api/notifications')).body)).toContain('without complete customer data');
+  });
+});

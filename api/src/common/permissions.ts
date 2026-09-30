@@ -47,6 +47,7 @@ export const APPROVAL_TYPES = [
   'FRANCHISE_AR_EXTENSION',
   'CASH_DEPOSIT_AUDIT',
   'CASH_DEPOSIT_ACCOUNTING',
+  'SIXPACK_OVERRIDE',
 ] as const;
 export type ApprovalType = (typeof APPROVAL_TYPES)[number];
 
@@ -100,7 +101,7 @@ const BASE_KEYS = [
   // memorandums: write and issue (HR, Owner, Franchise Coordinators, Head Auditor)
   'memo.create',
   // 6-Pack Card stickers (Sales Associate), view all branches' stickers and redemptions
-  'sixpack.issue', 'sixpack.view.all',
+  'sixpack.issue', 'sixpack.view.all', 'sixpack.override',
   // Owner's e-commerce margin analysis
   'ecom.analysis',
   // upload waybills and read the SRP / fees / order income report (E-comm Associate, Head Auditor, Owner)
@@ -171,7 +172,7 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
     key: 'HEAD_AUDITOR',
     name: 'Head Auditor',
     description: 'Edits/inputs anything; master data with Admin approval; enters/approves costs; approves internal transfers, post-close edits, write-offs.',
-    permissions: ['ecom.waybill', 'approval.act.CASH_DEPOSIT_AUDIT', 'franchise.ar.view', 'memo.create', 'sixpack.view.all', 'stock.flavor.set', 
+    permissions: ['sixpack.override', 'ecom.waybill', 'approval.act.CASH_DEPOSIT_AUDIT', 'franchise.ar.view', 'memo.create', 'sixpack.view.all', 'stock.flavor.set', 
       ...READ_ALL, ...COST_BUNDLE, 'product.edit', 'product.create', 'price.edit', 'cost.edit', 'supplier.edit',
       'receiving.create', 'receiving.approve_cost', 'transfer.create', 'transfer.confirm', 'transfer.approve.internal', 'transfer.resolve_discrepancy',
       'sale.create', 'sale.edit.sameday', 'sale.edit.postclose', 'sale.void', 'ar.collect', 'expense.create.branch',
@@ -382,6 +383,8 @@ export const APPROVAL_ROUTING: Record<ApprovalType, { roles: RoleKey[]; anyOf?: 
   AGENT_INCENTIVE: { roles: ['ACCOUNTING_ASSOCIATE', 'ACCOUNTING_HEAD', 'ADMIN'] },
   /** A franchise owner asks for more time on an invoice: the Owner decides; auditors, Accounting and the Franchise Coordinators are told. */
   FRANCHISE_AR_EXTENSION: { roles: ['ADMIN'] },
+  /** A 6-Pack card that cannot be tagged to a customer (data missing): the Head Auditor asks, the Owner approves. */
+  SIXPACK_OVERRIDE: { roles: ['ADMIN'] },
   /** A branch's cash deposit slip: the Audit Associate checks it first (the auditors and the Owner may too) ... */
   CASH_DEPOSIT_AUDIT: { roles: ['AUDIT_ASSOCIATE', 'HEAD_AUDITOR', 'ASST_AUDITOR', 'ADMIN'], anyOf: true },
   /** ... then the Accounting Associate (the Accounting Head and the Owner may too). */

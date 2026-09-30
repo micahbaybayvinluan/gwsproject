@@ -33,6 +33,7 @@ export function SixPackPage() {
       <Stat label="Stickers today" value={s.today.stickers} sub={`${s.today.dr} DR with stickers`} /><Stat label="Cards redeemed today" value={s.today.cards} sub={peso(s.today.amount)} tone={s.today.cards ? 'amber' : undefined} />
       <Stat label={`Stickers ${s.from} to ${s.to}`} value={s.period.stickers} sub={`${s.period.dr} DR`} /><Stat label="Cards redeemed in the period" value={s.period.cards} sub={`${peso(s.period.amount)}${s.period.legacy ? ` · ${s.period.legacy} old paper card${s.period.legacy === 1 ? '' : 's'}` : ''}`} tone={s.period.legacy ? 'red' : undefined} />
     </div>}
+    {can('sixpack.override') && <Override locations={locations.data ?? []} />}
     {can('sixpack.issue') && <Redeem perCard={s?.perCard ?? 6} value={s?.value ?? 300} locationId={locationId || me!.locations[0]?.id} onDone={refresh} />}
     {s && s.nearCard.length > 0 && <Card title="Customers close to a card"><ul className="grid gap-x-6 text-sm sm:grid-cols-2">{s.nearCard.map((c) => <li key={c.phone} className="flex justify-between border-b py-1"><span>{c.name} <span className="text-xs text-slate-500">{c.phone}</span></span><Badge tone={c.left >= s.perCard ? 'green' : 'amber'}>{c.left} / {s.perCard}</Badge></li>)}</ul></Card>}
     {s && <Card title="Cards redeemed">{s.redemptions.length ? <div className="overflow-x-auto"><table className="w-full text-sm"><thead className="text-left text-xs uppercase tracking-wide text-slate-500"><tr><th className="py-1 pr-3">Card</th><th className="pr-3">Date</th><th className="pr-3">Branch</th><th className="pr-3">Customer</th><th className="pr-3">Contact</th><th className="num pr-3">Amount</th><th className="pr-3">By</th><th /></tr></thead>
@@ -69,5 +70,24 @@ function Redeem({ perCard, value, locationId, onDone }: { perCard: number; value
     {!complete && <p className="mt-1 text-xs text-amber-700">Complete the customer data first: name, mobile number, email and address.</p>}
     {done && <p className="mt-2 text-sm text-emerald-700">Card {done} recorded. Give the customer their {peso(value)} discount.</p>}
     <ErrorBox error={go.error ?? look.error} />
+  </Card>;
+}
+
+/** Head Auditor: the customer cannot be tagged (data missing) → ask the Owner to allow the card anyway (owner request 2026-09-30). */
+function Override({ locations }: { locations: { id: string; name: string }[] }) {
+  const [f, setF] = useState({ locationId: '', customerName: '', phone: '', email: '', address: '', reason: '' });
+  const m = useMutation({ mutationFn: () => api.post('/api/six-pack/override', { locationId: f.locationId, customerName: f.customerName || null, phone: f.phone || null, email: f.email || null, address: f.address || null, reason: f.reason }), onSuccess: () => setF({ locationId: '', customerName: '', phone: '', email: '', address: '', reason: '' }) });
+  return <Card title="Customer cannot be tagged? Ask the Owner to allow the card">
+    <p className="mb-3 text-sm text-slate-600">If the customer's data is missing, a card can still be given with <b>your request and the Owner's approval</b>. Fill in what is known and the reason. Once the Owner approves, the ₱300 is booked as the branch's 6-Pack Card expense and marked as an override for the auditors.</p>
+    <div className="grid gap-3 md:grid-cols-3">
+      <Field label="Branch"><Select value={f.locationId} onChange={(e) => setF({ ...f, locationId: e.target.value })}><option value="">—</option>{locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</Select></Field>
+      <Field label="Customer name (if known)"><Input value={f.customerName} onChange={(e) => setF({ ...f, customerName: e.target.value })} /></Field>
+      <Field label="Mobile (if known)"><Input value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} /></Field>
+      <Field label="Email (if known)"><Input value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></Field>
+      <Field label="Address (if known)"><Input value={f.address} onChange={(e) => setF({ ...f, address: e.target.value })} /></Field>
+      <Field label="Why can't the customer be tagged? (required)"><Input value={f.reason} onChange={(e) => setF({ ...f, reason: e.target.value })} /></Field>
+    </div>
+    <div className="mt-3 flex items-center gap-3"><Button disabled={!f.locationId || f.reason.trim().length < 5 || m.isPending} onClick={() => m.mutate()}>Send to the Owner</Button>{m.isSuccess && <span className="text-sm text-emerald-700">Sent. The Owner decides in My Approvals.</span>}</div>
+    <ErrorBox error={m.error} />
   </Card>;
 }

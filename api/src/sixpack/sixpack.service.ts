@@ -1,4 +1,6 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
+import { ApprovalsService } from '../approvals/approvals.service';
 import { PrismaService, Tx } from '../common/prisma.service';
 import { AuditService } from '../common/audit.service';
 import { SettingsService } from '../common/settings.service';
@@ -24,8 +26,10 @@ export const validPhone = (p: string) => phoneKey(p).length === 10;
  * expense paid from the cash on hand (so the cash to remit goes down by the discount). An old paper card (before GWS-ERP) needs its number and a photo and is flagged to the auditors and the Owner.
  */
 @Injectable()
-export class SixPackService {
-  constructor(private prisma: PrismaService, private audit: AuditService, private settings: SettingsService, private seq: SequenceService, private notify: NotificationsService, private expenses: ExpensesService, private accounts: AccountsService) {}
+export class SixPackService implements OnModuleInit {
+  constructor(private approvals: ApprovalsService, private prisma: PrismaService, private audit: AuditService, private settings: SettingsService, private seq: SequenceService, private notify: NotificationsService, private expenses: ExpensesService, private accounts: AccountsService) {}
+
+  onModuleInit() { this.approvals.register('SIXPACK_OVERRIDE', (r, outcome, actor) => this.onOverride(r.summary as { _payload: OverrideInput; locationName: string }, r.requestedBy, outcome, actor)); }
 
   private async cfg() { return { perCard: Number(await this.settings.get<number>('sixpack.stickers_per_card')), value: Number(await this.settings.get<number>('sixpack.card_value')) }; }
 
@@ -107,6 +111,49 @@ export class SixPackService {
     return r;
   }
 
+  /**
+   * The customer cannot be tagged (data missing): the Head Auditor asks to give the card anyway, with the reason; the Owner decides. On approval the card is booked
+   * like any other, flagged as an override so the auditors and the Owner can see it.
+   */
+  async requestOverride(user: SessionUser, input: OverrideInput) {
+    if (!user.permissions.has('sixpack.override')) throw new ForbiddenException('Only the Head Auditor can ask to override the customer data');
+    if (!input.reason?.trim() || input.reason.trim().length < 5) throw new BadRequestException('Give the reason the customer cannot be tagged');
+    const loc = await this.prisma.db.location.findUnique({ where: { id: input.locationId } });
+    if (!loc || loc.type === 'VIRTUAL') throw new BadRequestException('Choose the branch');
+    const { value } = await this.cfg();
+    const payload = { ...input, reason: input.reason.trim() };
+    const req = await this.approvals.request({ type: 'SIXPACK_OVERRIDE', documentType: 'SixPackOverride', documentId: randomUUID(), requestedBy: user.id, summary: { controlNo: `6-Pack Card override · ${loc.name}`, locationId: loc.id, locationName: `${loc.name} · ${input.customerName?.trim() || 'customer not identified'}`, total: D(value).toFixed(2), reason: payload.reason, customer: input.customerName ?? null, phone: input.phone ?? null, requestedByName: user.fullName, step: 'Approve = the ₱300 card is booked without complete customer data', _payload: payload } });
+    await this.audit.log({ action: 'REQUEST', entityType: 'SixPackOverride', entityId: req.id, after: payload });
+    await this.notify.toRoles(['ADMIN'], { type: 'SIXPACK_OVERRIDE', title: `⚑ ${user.fullName} asks to give a 6-Pack card at ${loc.name} without complete customer data: ${payload.reason}`, link: '/approvals' });
+    return { requested: true, approvalRequestId: req.id };
+  }
+
+  private async onOverride(summary: { _payload: OverrideInput; locationName: string }, requestedBy: string, outcome: 'APPROVED' | 'REJECTED', actor: { id: string; note?: string } | null) {
+    await requestContext.runSystem(async () => {
+      const p = summary._payload;
+      const loc = await this.prisma.db.location.findUniqueOrThrow({ where: { id: p.locationId } });
+      const who = actor ? (await this.prisma.db.user.findUnique({ where: { id: actor.id }, select: { fullName: true } }))?.fullName ?? '' : 'the Owner';
+      const ha = await this.prisma.db.user.findUnique({ where: { id: requestedBy }, select: { fullName: true } });
+      if (outcome === 'REJECTED') { await this.notify.toUsers([requestedBy], { type: 'SIXPACK_OVERRIDE_DECIDED', title: `The Owner did not approve the 6-Pack card override at ${loc.name}${actor?.note ? `: ${actor.note}` : ''}`, link: '/six-pack' }); return; }
+      const { perCard, value } = await this.cfg();
+      const name = p.customerName?.trim() || 'Customer not identified'; const phone = p.phone?.trim() ?? '';
+      const key = validPhone(phone) ? phoneKey(phone) : 'OVERRIDE';
+      const bal = key === 'OVERRIDE' ? null : await this.balance(key);
+      const uses = bal && bal.left >= perCard ? perCard : 0;
+      const docDate = todayManila();
+      const r = await this.prisma.db.$transaction(async (tx) => {
+        const controlNo = await this.seq.next(tx, 'SPC', { prefix: 'SPC', pad: 6, locationId: p.locationId });
+        let expenseId: string;
+        if (loc.type === 'FRANCHISE') expenseId = (await tx.franchiseExpense.create({ data: { locationId: p.locationId, docDate, category: '6-Pack Card', payee: name, amount: D(value).toFixed(2), notes: `6-Pack Card ${controlNo} (override)`, createdBy: requestedBy } })).id;
+        else expenseId = (await this.expenses.insert(tx, { locationId: p.locationId, docDate, account: await this.account(tx, p.locationId), isMain: false, payee: name, amount: value, paidFrom: 'CASH_DRAWER', notes: `6-Pack Card ${controlNo} (override: ${p.reason})`, userId: requestedBy })).id;
+        return tx.sixPackRedemption.create({ data: { controlNo, locationId: p.locationId, customerName: name, phone, phoneKey: key, email: p.email?.trim() || null, address: p.address?.trim() || null, stickersUsed: uses, amount: D(value).toFixed(2), expenseId, businessDate: docDate, redeemedBy: requestedBy, flaggedNote: `Override asked by ${ha?.fullName ?? 'Head Auditor'}, approved by ${who}: ${p.reason}` } });
+      });
+      await this.audit.log({ action: 'CREATE', entityType: 'SixPackRedemption', entityId: r.id, after: r, userId: actor?.id });
+      const n = { type: 'SIXPACK_OVERRIDE_DECIDED', title: `6-Pack card ${r.controlNo} at ${loc.name} given without complete customer data (override by ${ha?.fullName ?? 'Head Auditor'}, approved by ${who}): ${p.reason}`, link: '/six-pack' };
+      await this.notify.toLocation(p.locationId, n); await this.notify.toRoles(['HEAD_AUDITOR', 'ASST_AUDITOR', 'ADMIN'], n);
+    });
+  }
+
   async voidRedemption(user: SessionUser, id: string, reason: string) {
     const r = await this.prisma.db.sixPackRedemption.findUnique({ where: { id } });
     if (!r || r.voidedAt) throw new NotFoundException();
@@ -154,3 +201,5 @@ export class SixPackService {
       redemptions: reds.slice(0, 100).map((r) => ({ id: r.id, controlNo: r.controlNo, date: dateStr(r.businessDate), branch: locs.find((l) => l.id === r.locationId)?.name ?? '', customer: r.customerName, phone: r.phone, email: r.email, address: r.address, amount: r.amount, legacyCardNo: r.legacyCardNo, by: nm(r.redeemedBy) })) };
   }
 }
+
+export interface OverrideInput { locationId: string; customerName?: string | null; phone?: string | null; email?: string | null; address?: string | null; reason: string }

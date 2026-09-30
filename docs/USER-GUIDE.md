@@ -545,6 +545,7 @@ A sale paid by **credit card** uses the credit-card price: SRP ÷ 0.96, for exam
 2. At six stickers (from any branch) the customer earns a ₱300 card. Open **6-Pack Card → Redeem a card**: type the number → **Find** (shows the balance) → complete name, email and address → **Redeem**.
 3. The ₱300 is booked as your branch's **6-Pack Card** expense, paid from the cash on hand, tagged to the customer.
 4. An old paper card: tick the box, type its number and attach a photo; the auditors and the Owner are told.
+5. **Customer cannot be tagged** (data missing): the **Head Auditor** sends the request on the 6-Pack Card page (branch, what is known, the reason) and the **Owner approves** in My Approvals. The card is then booked as usual and marked as an override.
 
 ## Franchise AR (what franchises owe GWS)
 <!-- for: franchise.ar.view, franchise.ar.own, franchise.ar.pay, franchise.ar.manage -->

@@ -232,6 +232,7 @@ function summaryLine(s: unknown) { if (!s || typeof s !== 'object') return ''; c
 export function documentLink(type: string, id: string) {
   if (type === 'OpeningArEntry') return `/ar?opening=${id}`;
   if (type === 'AgentIncentive') return `/incentives?id=${id}`;
+  if (type === 'SixPackOverride') return `/six-pack?x=${id}`;
   if (type === 'CashDeposit') return `/closing?deposit=${id}`;
   if (type === 'FranchiseArExtension') return `/franchise-ar?extension=${id}`;
   const map: Record<string, string> = { ReceivingDoc: '/receiving', TransferDoc: '/transfers', SalesDoc: '/sales', ExpiryWriteoffDoc: '/writeoffs', PriceChangeDoc: '/price-changes', PostCloseEdit: '/post-close-edits', CountDoc: '/counts', DiscrepancyCase: '/discrepancies', AccountingPeriod: '/accounting/periods', BeginningBalance: '/accounting/beginning-balances', SalesTarget: '/targets', EcomSettlement: '/ecommerce' };

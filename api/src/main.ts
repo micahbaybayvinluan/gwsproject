@@ -1,5 +1,6 @@
 import 'reflect-metadata';
 import { NestFactory, Reflector } from '@nestjs/core';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Logger } from '@nestjs/common';
 import cookieParser from 'cookie-parser';
 import { randomUUID } from 'node:crypto';
@@ -12,7 +13,9 @@ import { AuthGuard } from './auth/auth.guard';
 import { AppExceptionFilter } from './common/http-exception.filter';
 
 export async function createApp() {
-  const app = await NestFactory.create(AppModule, { logger: ['log', 'warn', 'error'] });
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { logger: ['log', 'warn', 'error'] });
+  // a count sheet lists every item (1,500 or more lines) and is saved in one request: the default 100 KB limit is too small
+  app.useBodyParser('json', { limit: '5mb' });
   app.use(cookieParser());
   app.use((req: Request, _res: Response, next: NextFunction) => {
     requestContext.run({ requestId: randomUUID(), ip: req.ip, userAgent: req.headers['user-agent'] }, () => next());

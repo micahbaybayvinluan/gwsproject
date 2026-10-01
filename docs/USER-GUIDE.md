@@ -571,6 +571,28 @@ On **Daily Close & Deposit** the coloured days on the calendar (and the boxes be
 4. A change after it is billed, or more time for the 2 days, is asked for by the Franchise Coordinator (**Ask to change / Ask for more time**) and decided by the **Owner** in My Approvals.
 5. A **franchise owner** sees every transaction of their own franchise only (sales, transfers, expenses, AR) and creates their own sales and expenses.
 
+## Deleting an unfinished draft
+<!-- for: transfer.create, receiving.create, count.create, inspection.create -->
+A draft that was not submitted (a transfer / pull-out, a supplier delivery, a count sheet or a store inspection report) can be deleted: open it and press **Delete draft**. Only the person who prepared it, the Warehouse In-Charge (warehouse forms), the Head Auditor (count sheets and inspections) or the Owner can. The **form numbers adjust by themselves**: the drafts after the deleted one move down one number (their owners are told; print them again if you already printed them), so there is no gap. A form that is already submitted or approved keeps its number; the number that cannot be closed up is used by the next new form. A sent or approved form is never deleted: it is cancelled (void) with a reason.
+
+## The forms behind a stock movement
+<!-- for: report.inventory.all, report.inventory.own -->
+In **Inventory Reports → Daily Inventory Report**, the figures under **Receive, Transfer In, Returns, Pull Out, Other Out and Adj** are links. Press one to see the forms that made that movement: the Pull-Out and Transfer-In forms (each side sees its own copy), the Supplier's Form with the supplier's delivery receipt, the count sheet, the write-off or the replacement ticket, each with its attachments. Sales has no such view; open the sale in Sales List.
+
+## Printed forms: the checker's column
+<!-- for: all -->
+The printed Pull-Out, Transfer-In, DR (sales), Supplier's Form and Count sheet have a blank **Checker's qty (write by hand)** column at the far right. The person who double-checks the goods writes the quantity counted there, then signs "Checked by".
+
+## Marketing and BO pull-outs
+<!-- for: transfer.create, marketing.summary, approval.act.MARKETING_PULLOUT, approval.act.PULLOUT_EXPENSE -->
+Any branch (or the warehouse) with stock can give stock out to **Prothin Marketing**, **GWS Marketing** or **BO** (bad orders): in Transfers & Pull-outs choose it under **To → Stock given out**. Tick **Endorse to Accounting as an expense** if Accounting should book it. The **Head Auditor approves**; the stock then leaves your branch at once (nothing is confirmed at the other end). If it was endorsed, Accounting accepts it in My Approvals and books it at cost (BO as spoilage, marketing as marketing expense). Not endorsed at the start? On the approved form press **Endorse to Accounting as expense** later. **Marketing & BO Pull-outs** (auditors, Accounting, Owner; a branch sees its own) lists everything given out per destination, item by item, with the units already expensed and those waiting for Accounting.
+
+## Replacement tickets
+<!-- for: replacement.create, replacement.view, approval.act.REPLACEMENT_TICKET, approval.act.SUPPLIER_RETURN -->
+**A customer returned an item.** Open **Replacement Tickets → Customer returned an item** (or press the link on the sale's page): find the **DR / SI** it was sold on (DR number, customer name or mobile), choose the item, the quantity (not more than was sold and not already returned) and the reason, and attach a photo. The ticket (RT number) names the DR, the customer and the sales associate. The auditors, Accounting, the Owner, the sales associate of that DR and every branch are told.
+**Any branch except a franchise** gives the customer the replacement and presses **We gave the replacement** on the ticket: the same product or another one, the quantity and the price (the price list by default). The **price difference** against the DR is worked out by itself: the customer pays it, or is refunded / credited. The replacement leaves that branch's stock, the **Head Auditor approves** (if not approved, the stock goes back and the ticket opens again), and the ticket closes. The branch confirms **The customer paid the difference / The refund was given**, and Accounting is told. A return older than 30 days is flagged.
+**Items we return to a supplier.** Open **Return items to a supplier**: the product, quantity, supplier and reason. The **Head Auditor approves**; the stock leaves then. The ticket is tagged to the supplier and **stays open until replacement items arrive**: on Supplier Deliveries choose the ticket ("This delivery replaces a ticket") when you receive them. Part of the quantity keeps it open; enough arrival closes it, and the value difference (a different product, another cost) is worked out. Nothing else closes it. Open tickets are reminded to the auditors, Accounting, the Owner and whoever opened them (customers after 3 days, suppliers after 7), and the page shows which suppliers still owe us units.
+
 ## Page names and what each page is for
 <!-- for: all -->
 - Every menu item has a descriptive name (for example **Supplier Deliveries** or **Transfers & Pull-outs**).

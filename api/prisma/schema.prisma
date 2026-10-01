@@ -363,6 +363,8 @@ enum MovementType {
   TASTING
   BUNDLE_BUILD
   BUNDLE_BREAK
+  /// the replacement handed to a customer against a replacement ticket
+  REPLACEMENT_OUT
 }
 
 model StockLedger {
@@ -457,30 +459,32 @@ model Attachment {
 }
 
 model ReceivingDoc {
-  id                String    @id @default(uuid())
-  controlNo         String    @map("control_no")
-  docDate           DateTime  @map("doc_date") @db.Date
-  status            DocStatus @default(DRAFT)
-  locationId        String    @map("location_id")
-  supplierId        String    @map("supplier_id")
-  supplierRef       String?   @map("supplier_ref")
-  isConsignmentIn   Boolean   @default(false) @map("is_consignment_in")
+  id                  String    @id @default(uuid())
+  controlNo           String    @map("control_no")
+  docDate             DateTime  @map("doc_date") @db.Date
+  status              DocStatus @default(DRAFT)
+  locationId          String    @map("location_id")
+  supplierId          String    @map("supplier_id")
+  /// this delivery replaces items we returned to the supplier (ticket RT-…); its arrival closes the ticket
+  replacementTicketId String?   @map("replacement_ticket_id")
+  supplierRef         String?   @map("supplier_ref")
+  isConsignmentIn     Boolean   @default(false) @map("is_consignment_in")
   /// Warehouse Associate's delivery: the In-Charge checked the goods (first step; the Head Auditor then approves the cost)
-  goodsCheckedBy    String?   @map("goods_checked_by")
-  goodsCheckedAt    DateTime? @map("goods_checked_at")
-  paidOnReceipt     Boolean   @default(false) @map("paid_on_receipt")
-  paymentAccountId  String?   @map("payment_account_id")
-  notes             String?
-  preparedBy        String    @map("prepared_by")
-  approvalRequestId String?   @map("approval_request_id")
-  postedAt          DateTime? @map("posted_at")
-  voidedAt          DateTime? @map("voided_at")
-  voidedBy          String?   @map("voided_by")
-  voidReason        String?   @map("void_reason")
-  createdAt         DateTime  @default(now()) @map("created_at")
-  createdBy         String?   @map("created_by")
-  updatedAt         DateTime  @updatedAt @map("updated_at")
-  updatedBy         String?   @map("updated_by")
+  goodsCheckedBy      String?   @map("goods_checked_by")
+  goodsCheckedAt      DateTime? @map("goods_checked_at")
+  paidOnReceipt       Boolean   @default(false) @map("paid_on_receipt")
+  paymentAccountId    String?   @map("payment_account_id")
+  notes               String?
+  preparedBy          String    @map("prepared_by")
+  approvalRequestId   String?   @map("approval_request_id")
+  postedAt            DateTime? @map("posted_at")
+  voidedAt            DateTime? @map("voided_at")
+  voidedBy            String?   @map("voided_by")
+  voidReason          String?   @map("void_reason")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  createdBy           String?   @map("created_by")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+  updatedBy           String?   @map("updated_by")
 
   location Location        @relation(fields: [locationId], references: [id])
   supplier Supplier        @relation(fields: [supplierId], references: [id])
@@ -2341,6 +2345,81 @@ model FranchiseShippingCharge {
   @@index([status, fillBy])
   @@index([franchiseLocationId])
   @@map("franchise_shipping_charges")
+}
+
+/// Replacement ticket (owner request 2026-10-02). CUSTOMER: an item the customer returned to us and must be replaced (tied to the DR / SI it was sold on); any branch except a franchise ticks it
+/// when it hands the replacement (same or another product; the price difference is worked out) and the Head Auditor approves. SUPPLIER: items we return to a supplier; the ticket stays open until replacement items arrive.
+model ReplacementTicket {
+  id                   String    @id @default(uuid())
+  ticketNo             String    @unique @map("ticket_no")
+  kind                 String // CUSTOMER | SUPPLIER
+  /// CUSTOMER: OPEN → REPLACED (waiting for the Head Auditor) → CLOSED. SUPPLIER: PENDING_RETURN (Head Auditor approves) → AWAITING_REPLACEMENT → PARTIAL → CLOSED. CANCELLED.
+  status               String    @default("OPEN")
+  /// the branch / warehouse that took the return from the customer, or sent the items to the supplier
+  locationId           String    @map("location_id")
+  productId            String    @map("product_id")
+  batchId              String?   @map("batch_id")
+  qty                  Int
+  /// price paid on the DR (customer) or cost (supplier), per unit
+  unitValue            Decimal   @default(0) @map("unit_value") @db.Decimal(14, 2)
+  reason               String
+  notes                String?
+  // customer side: the DR / SI the item was sold on
+  salesDocId           String?   @map("sales_doc_id")
+  salesLineId          String?   @map("sales_line_id")
+  drSiNo               String?   @map("dr_si_no")
+  saleLocationId       String?   @map("sale_location_id")
+  saleControlNo        String?   @map("sale_control_no")
+  saleTier             String?   @map("sale_tier")
+  customerName         String?   @map("customer_name")
+  customerPhone        String?   @map("customer_phone")
+  // the replacement handed to the customer
+  replacedAt           DateTime? @map("replaced_at")
+  replacedBy           String?   @map("replaced_by")
+  replacedLocationId   String?   @map("replaced_location_id")
+  replacementProductId String?   @map("replacement_product_id")
+  replacementQty       Int?      @map("replacement_qty")
+  replacementUnitPrice Decimal?  @map("replacement_unit_price") @db.Decimal(14, 2)
+  replacementPicks     Json?     @map("replacement_picks")
+  /// replacement value − the value on the DR: + the customer pays, − the customer is refunded / credited
+  priceDifference      Decimal?  @map("price_difference") @db.Decimal(14, 2)
+  differenceSettledAt  DateTime? @map("difference_settled_at")
+  differenceSettledBy  String?   @map("difference_settled_by")
+  differenceNote       String?   @map("difference_note")
+  // supplier side
+  supplierId           String?   @map("supplier_id")
+  sentAt               DateTime? @map("sent_at")
+  receivedQty          Int       @default(0) @map("received_qty")
+  receivedValue        Decimal   @default(0) @map("received_value") @db.Decimal(14, 2)
+  approvalRequestId    String?   @map("approval_request_id")
+  closedAt             DateTime? @map("closed_at")
+  closedNote           String?   @map("closed_note")
+  remindedAt           DateTime? @map("reminded_at")
+  createdBy            String    @map("created_by")
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
+
+  receipts ReplacementReceipt[]
+
+  @@index([kind, status])
+  @@index([supplierId, status])
+  @@index([salesDocId])
+  @@map("replacement_tickets")
+}
+
+model ReplacementReceipt {
+  id             String   @id @default(uuid())
+  ticketId       String   @map("ticket_id")
+  receivingDocId String   @map("receiving_doc_id")
+  productId      String   @map("product_id")
+  qty            Int
+  unitCost       Decimal  @map("unit_cost") @db.Decimal(14, 2)
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  ticket ReplacementTicket @relation(fields: [ticketId], references: [id])
+
+  @@unique([ticketId, receivingDocId, productId])
+  @@map("replacement_receipts")
 }
 
 // ── Memorandums (owner request 2026-09-30): numbered YYYY-Qn-NNN, addressed to chosen people, signed by the people the memo names ──

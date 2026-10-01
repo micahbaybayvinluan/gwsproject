@@ -15,7 +15,7 @@ export const TRANSFER_IN: MovementType[] = ['TRANSFER_IN', 'CONSIGN_RETURN', 'BU
 export const RETURNS: MovementType[] = ['SALE_RETURN'];
 export const PULL_OUT: MovementType[] = ['TRANSFER_OUT', 'RETURN_TO_WAREHOUSE', 'RETURN_TO_SUPPLIER', 'CONSIGN_OUT', 'BUNDLE_BREAK'];
 export const SALES: MovementType[] = ['SALE', 'CONSIGN_SALE'];
-export const OTHER_OUT: MovementType[] = ['FREEBIE_ISSUE', 'TASTING'];
+export const OTHER_OUT: MovementType[] = ['FREEBIE_ISSUE', 'TASTING', 'REPLACEMENT_OUT'];
 export const ADJUST: MovementType[] = ['ADJUST_COUNT', 'EXPIRED_WRITEOFF'];
 
 export interface Buckets { receive: number; transferIn: number; returns: number; pullOut: number; sales: number; other: number; adjust: number; receiveCost: number; transferInCost: number; returnsCost: number; pullOutCost: number; salesCost: number; otherCost: number; adjustCost: number }

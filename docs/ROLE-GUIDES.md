@@ -133,6 +133,8 @@ You run one branch: sales, expenses, stock received and sent, the weekly count, 
 
 **Selling to a franchise** (also from the Warehouse store): New Sale → channel **FRANCHISE** → choose the franchisee. The franchise price fills in by itself and may be changed. Plastic bags are charged to franchises (L ₱4, M ₱3, S ₱3, XL ₱5); for stores and other customers they are free unless you type a price because they were sold. Choose **Shipping charged to the franchise: To follow** so the Franchise Coordinator fills the amount within 2 days (it becomes a separate franchise invoice), or type the amount now.
 
+**Returns and give-outs:** when a customer brings back an item, open a **Replacement Ticket** (find the DR) and photograph the item; any other branch can tick it once the replacement is given. To give stock to **Prothin Marketing, GWS Marketing or BO**, use Transfers & Pull-outs (To → Stock given out); the Head Auditor approves. An unfinished draft can be deleted with **Delete draft**; the numbers adjust by themselves.
+
 ## Warehouse Associate
 <!-- role: WAREHOUSE_ASSOCIATE -->
 You enter what comes into and goes out of the warehouse. You never see supplier cost. Your entries are checked by the Warehouse In-Charge before stock changes.
@@ -221,6 +223,8 @@ You are responsible for the warehouse stock. You check your associates' entries,
 
 ## Head Auditor
 <!-- role: HEAD_AUDITOR -->
+New approvals for you: **stock given out to Prothin Marketing / GWS Marketing / BO** (you may also endorse an approved one to Accounting as an expense), **a replacement given to a customer** (price difference shown), and **items returned to a supplier**. Replacement Tickets lists every ticket; Marketing & BO Pull-outs summarises what was given out. In the Daily Inventory Report press a figure to see the forms behind it.
+
 You approve costs and most corrections, audit the branches, and watch the cash.
 
 **Every day: My Approvals**
@@ -352,6 +356,8 @@ You run your franchise. Everything you see is limited to your own branch (every 
 
 ## Accounting Head
 <!-- role: ACCOUNTING_HEAD -->
+You accept **pull-outs endorsed as an expense** (booked at cost) and are told of every replacement ticket, price difference and supplier replacement (Replacement Tickets, Marketing & BO Pull-outs).
+
 You keep the books.
 
 1. **Journal Entries:** every entry links to its source document. Automatic posting is switched on in Settings.
@@ -387,6 +393,8 @@ You keep the books.
 
 ## Accounting Associate
 <!-- role: ACCOUNTING_ASSOCIATE -->
+You accept **pull-outs endorsed as an expense** in My Approvals (booked at cost) and are told of every replacement ticket, its price difference and when it is settled (Replacement Tickets, Marketing & BO Pull-outs).
+
 1. **AR payments** entered by branches: approve or reject them in My Approvals.
 2. **Agent incentives:** approve them in My Approvals, and **Tag as released** on Agent Incentives once paid (mode, account, reference, date).
 3. **Opening AR (credit from before GWS-ERP):** AR & Collections → Opening AR → **+ Enter opening AR** for any branch (branch, customer, DR / SI, invoice date, due date, balance, PDC if any) → **Send for the Owner's approval**. Once approved it shows in the branch's AR.
@@ -455,6 +463,8 @@ You can read everything, including cost, payroll and the financial statements, b
 
 ## Admin (Owner)
 <!-- role: ADMIN -->
+New this month: **Users & Roles has a search box** (name, username, role, branch, ID). You are told of every replacement ticket and of marketing / BO pull-outs, and may decide anything the Head Auditor decides. Unfinished drafts can be deleted by you.
+
 You see and can do everything. You are the final approver.
 
 1. **My Approvals:**
@@ -496,6 +506,8 @@ You see and can do everything. You are the final approver.
 
 ## E-comm Associate
 <!-- role: ECOMM_ASSOCIATE -->
+When you search for a product on the E-commerce pages, the products that have a **TikTok, Shopee or Lazada price come first**; those with no platform price are listed at the bottom.
+
 You run the online shops: **TikTok Shop, Shopee and Lazada**, each on its own tab. E-commerce has no stock of its own: every item comes from the Warehouse, and the Warehouse In-Charge approves each pull-out. You see selling prices and platform fees, never cost.
 
 **Every morning: orders to ship → pull-out** (menu: E-commerce → choose the platform → 1. Orders → pull-out)

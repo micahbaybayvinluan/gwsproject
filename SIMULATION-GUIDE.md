@@ -246,6 +246,13 @@ Waybill Report → **Choose waybill PDF files** (TikTok or Shopee labels) → pi
 67. **Franchise Coordinator sale**: `franchise.coord` → New Sale: only the FRANCHISE channel, AR/PDC or Online; pick the warehouse as the branch.
 68. **Stores and plastics**: at a branch sell to a walk-in customer with a Plastic S: price ₱0 (free). Type a price of 2 and it becomes a sold item.
 
+69. **Delete a draft** (`wh.incharge`): create three transfer drafts, delete the first with **Delete draft**: the other two move down one number (WH-PO / WA-TI) and the next new draft takes the last number.
+70. **Marketing pull-out** (`sales.westave`): Transfers → To "Prothin Marketing" → tick Endorse to Accounting → Create draft → Submit. `head.auditor` approves in My Approvals: the stock leaves West Ave. `acct.assoc` accepts the expense. Check Marketing & BO Pull-outs.
+71. **Movement forms** (`wh.incharge`): Inventory Reports → Daily Inventory Report → press a Transfer In or Pull Out figure → the forms and attachments appear.
+72. **Customer replacement** (`sales.csr`): Replacement Tickets → Customer returned an item → find a DR (for example one made by `sales.westave`) → open the ticket. `sales.dasma` presses **We gave the replacement** with another product: the price difference appears; `head.auditor` approves; the branch confirms the difference was paid.
+73. **Supplier replacement** (`wh.incharge`): Return items to a supplier → `head.auditor` approves → on Supplier Deliveries choose the ticket ("This delivery replaces a ticket") and receive part of the quantity (ticket stays open), then the rest (ticket closes).
+74. **Users search**: as `admin` open Users & Roles and type part of a name in the search box.
+
 ## Where the files come out
 
 All exports download through the browser: Daily Sales Report (xlsx/PDF), Daily Inventory Report (xlsx, one sheet per day plus Summary and Per-day sheets), every paper form (Pull-Out, Transfer-In, DR-Sales, Supplier's Form, Count sheet, Discrepancy Report, Charge Form, Credit Note, Journal Voucher), every list (Export xlsx / CSV buttons), Trial Balance and the financial statements.

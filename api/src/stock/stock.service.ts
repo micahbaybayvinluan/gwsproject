@@ -174,6 +174,7 @@ export class StockService {
       counts: await this.prisma.db.countDoc.findMany({ where: { id: { in: ids('CountDoc') } }, select: { id: true, controlNo: true } }),
       writeoffs: await this.prisma.db.expiryWriteoffDoc.findMany({ where: { id: { in: ids('ExpiryWriteoffDoc') } }, select: { id: true, controlNo: true } }),
       cases: await this.prisma.db.discrepancyCase.findMany({ where: { id: { in: ids('DiscrepancyCase') } }, select: { id: true, caseNo: true } }),
+      tickets: await this.prisma.db.replacementTicket.findMany({ where: { id: { in: ids('ReplacementTicket') } }, select: { id: true, ticketNo: true } }),
       ecomReturns: await this.prisma.db.ecomReturn.findMany({ where: { id: { in: ids('EcomReturn') } }, select: { id: true, controlNo: true } }),
     }));
     return rows.map((r) => {
@@ -186,6 +187,7 @@ export class StockService {
         case 'ExpiryWriteoffDoc': { documentLabel = 'Write-off'; documentNo = docs.writeoffs.find((x) => x.id === r.documentId)?.controlNo ?? null; documentLink = '/writeoffs'; break; }
         case 'DiscrepancyCase': { documentLabel = 'Discrepancy case'; documentNo = docs.cases.find((x) => x.id === r.documentId)?.caseNo ?? null; documentLink = `/discrepancies/${r.documentId}`; break; }
         case 'EcomReturn': { documentLabel = 'E-commerce return'; documentNo = docs.ecomReturns.find((x) => x.id === r.documentId)?.controlNo ?? null; documentLink = '/ecommerce'; break; }
+        case 'ReplacementTicket': { documentLabel = 'Replacement ticket'; documentNo = docs.tickets.find((x) => x.id === r.documentId)?.ticketNo ?? null; documentLink = `/replacements/${r.documentId}`; break; }
         case 'OpeningStock': documentLabel = 'Opening stock'; break;
         case 'ConsignmentSaleReport': documentLabel = 'Consignee sale'; documentLink = '/consignment'; break;
       }
@@ -246,7 +248,7 @@ export class StockService {
     const products = await this.prisma.db.product.findMany({ where: { id: { in: [...new Set([...beg.map((b) => b.product_id), ...moves.map((m) => m.productId)])] } }, select: { id: true, sku: true, name: true } });
     const days = to.getUTCDate();
     const IN_P: MovementType[] = ['RECEIVE']; const IN_T: MovementType[] = ['TRANSFER_IN', 'SALE_RETURN', 'CONSIGN_RETURN', 'BUNDLE_BUILD'];
-    const OUT_P: MovementType[] = ['TRANSFER_OUT', 'RETURN_TO_WAREHOUSE', 'RETURN_TO_SUPPLIER', 'CONSIGN_OUT', 'BUNDLE_BREAK']; const OUT_S: MovementType[] = ['SALE', 'CONSIGN_SALE', 'FREEBIE_ISSUE', 'TASTING'];
+    const OUT_P: MovementType[] = ['TRANSFER_OUT', 'RETURN_TO_WAREHOUSE', 'RETURN_TO_SUPPLIER', 'CONSIGN_OUT', 'BUNDLE_BREAK']; const OUT_S: MovementType[] = ['SALE', 'CONSIGN_SALE', 'FREEBIE_ISSUE', 'TASTING', 'REPLACEMENT_OUT'];
     return products.map((p) => {
       let bal = Number(beg.find((b) => b.product_id === p.id)?.qty ?? 0);
       const begQty = bal;

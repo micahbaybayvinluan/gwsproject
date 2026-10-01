@@ -11,7 +11,7 @@ export const FORM_CODES = {
   PO: 'Pull-Out (stock sent out)', TI: 'Transfer-In (stock received from another location)', RC: "Receiving / Supplier's Form", DR: 'Delivery Receipt – Sales',
   EX: 'Expense', IC: 'Inventory Count sheet', DC: 'Discrepancy case', CF: 'Charge Form', WO: 'Write-off (expired / damaged)', CN: 'Credit Note (AR payment)',
   SI: 'Store Inspection Report', FR: 'Cash Fund Replenishment', PC: 'Price Change',
-  EP: 'E-commerce Payout (settlement)', ER: 'E-commerce Return',
+  EP: 'E-commerce Payout (settlement)', ER: 'E-commerce Return', RT: 'Replacement Ticket',
 } as const;
 export type FormCode = keyof typeof FORM_CODES;
 /** Company-wide forms (no branch) use HO (Head Office). */

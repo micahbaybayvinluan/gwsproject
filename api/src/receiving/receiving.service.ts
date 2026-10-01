@@ -21,7 +21,7 @@ import { requestContext } from '../common/request-context';
 
 export interface ReceivingLineInput { productId: string; qty: number; freeQty?: number; expiryDate?: string | null; batchNo?: string | null; flavor?: string | null; unitCost?: number | null; remarks?: string }
 export interface ReceivingEditInput { supplierId?: string; supplierRef?: string | null; docDate?: string; notes?: string | null; lines: ReceivingLineInput[] }
-export interface ReceivingInput { locationId?: string; supplierId: string; supplierRef?: string; docDate?: string; isConsignmentIn?: boolean; paidOnReceipt?: boolean; paymentAccountId?: string | null; notes?: string; lines: ReceivingLineInput[] }
+export interface ReceivingInput { replacementTicketId?: string; locationId?: string; supplierId: string; supplierRef?: string; docDate?: string; isConsignmentIn?: boolean; paidOnReceipt?: boolean; paymentAccountId?: string | null; notes?: string; lines: ReceivingLineInput[] }
 
 /** §7.2 Receiving from suppliers (Supplier's Form / PO-Purchases) with COST_ON_RECEIVING approval. */
 @Injectable()
@@ -49,11 +49,22 @@ export class ReceivingService implements OnModuleInit {
     return { ...doc, preparedByName: preparer?.fullName ?? null, preparedByRole: (await this.prisma.db.user.findUnique({ where: { id: doc.preparedBy ?? '' }, select: { role: { select: { key: true } } } }))?.role.key ?? null, lines: doc.lines.map((l) => ({ ...l, currentStandardCost: costs.get(l.productId) ?? null })) , attachments: await this.attachments.list('ReceivingDoc', id) };
   }
 
+  private postedHooks: ((docId: string) => Promise<void>)[] = [];
+  /** Called after a supplier delivery is posted (the replacement tickets count what arrived). */
+  onPosted(fn: (docId: string) => Promise<void>) { this.postedHooks.push(fn); }
+
   async create(input: ReceivingInput, user: SessionUser) {
     const wh = input.locationId ? await this.prisma.db.location.findUniqueOrThrow({ where: { id: input.locationId } }) : await this.prisma.db.location.findFirstOrThrow({ where: { type: 'WAREHOUSE' } });
     if (user.locationScoped && !user.locationIds.includes(wh.id)) throw new ForbiddenException('You can only receive into your own location');
     if (!input.lines.length) throw new BadRequestException('At least one line is required');
     const supplier = await this.prisma.db.supplier.findUniqueOrThrow({ where: { id: input.supplierId } });
+    // a delivery that replaces items we returned: it must be the ticket's own supplier, and the ticket must be waiting for it
+    if (input.replacementTicketId) {
+      const t = await requestContext.runSystem(() => this.prisma.db.replacementTicket.findUnique({ where: { id: input.replacementTicketId } }));
+      if (!t || t.kind !== 'SUPPLIER') throw new BadRequestException('Unknown replacement ticket');
+      if (t.supplierId !== supplier.id) throw new BadRequestException(`Ticket ${t.ticketNo} is waiting for a replacement from another supplier`);
+      if (!['AWAITING_REPLACEMENT', 'PARTIAL'].includes(t.status)) throw new BadRequestException(`Ticket ${t.ticketNo} is not waiting for a replacement`);
+    }
     const today = todayManila();
     const warnings = await this.validateLines(input.lines, user);
     const doc = await this.prisma.db.$transaction(async (tx) => {
@@ -61,7 +72,7 @@ export class ReceivingService implements OnModuleInit {
       return tx.receivingDoc.create({
         data: {
           controlNo, docDate: input.docDate ? toDateOnly(input.docDate) : today, locationId: wh.id, supplierId: supplier.id, supplierRef: input.supplierRef, isConsignmentIn: input.isConsignmentIn ?? supplier.isConsignor,
-          paidOnReceipt: !!input.paidOnReceipt, paymentAccountId: input.paymentAccountId ?? null, notes: input.notes, preparedBy: user.id, createdBy: user.id,
+          paidOnReceipt: !!input.paidOnReceipt, paymentAccountId: input.paymentAccountId ?? null, notes: input.notes, replacementTicketId: input.replacementTicketId ?? null, preparedBy: user.id, createdBy: user.id,
           lines: { create: input.lines.map((l) => ({ productId: l.productId, qty: l.qty, freeQty: l.freeQty ?? 0, expiryDate: l.expiryDate ? toDateOnly(l.expiryDate) : null, batchNo: l.batchNo ?? null, flavor: l.flavor?.trim() || null, unitCost: l.unitCost != null ? D(l.unitCost).toFixed(2) : null, remarks: l.remarks })) },
         }, include: this.include,
       });
@@ -235,6 +246,7 @@ export class ReceivingService implements OnModuleInit {
     });
     await this.notify.toLocation(doc.locationId, { type: 'RECEIVING_POSTED', title: `Receiving ${doc.controlNo} posted`, link: `/receiving/${doc.id}` });
     await this.priceUpdates.announce(costChanges, { effectiveFrom: doc.docDate, source: 'RECEIVING_COST', sourceRef: doc.controlNo, link: `/receiving/${doc.id}` });
+    for (const h of this.postedHooks) await h(docId);
   }
 
   async void(id: string, reason: string, user: SessionUser) {

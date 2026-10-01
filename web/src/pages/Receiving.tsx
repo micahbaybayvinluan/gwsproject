@@ -1,8 +1,8 @@
 import { DeleteDraft } from '@/components/DeleteDraft';
 import { ApprovalTimeline } from '@/components/ApprovalTimeline';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api, fmtDate, peso } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { Badge, Button, Card, ErrorBox, Field, Input, Select, statusTone } from '@/components/ui/primitives';
@@ -17,18 +17,25 @@ export function ReceivingPage() {
   const nav = useNavigate(); const { can } = useAuth(); const qc = useQueryClient();
   const q = useQuery({ queryKey: ['receiving'], queryFn: () => api.get<Rcv[]>('/api/receiving') });
   const suppliers = useQuery({ queryKey: ['suppliers'], queryFn: () => api.get<{ id: string; code: string; supplierName?: string; isConsignor: boolean }[]>('/api/suppliers') });
-  const [f, setF] = useState({ supplierId: '', supplierRef: '', isConsignmentIn: false, notes: '' });
+  const [f, setF] = useState({ supplierId: '', supplierRef: '', isConsignmentIn: false, notes: '', replacementTicketId: '' });
+  // a delivery that replaces items we returned to this supplier: choosing the ticket is what closes it when the items arrive (owner request 2026-10-02)
+  const tickets = useQuery({ queryKey: ['supplier-tickets', f.supplierId], queryFn: () => api.get<{ id: string; ticketNo: string; qty: number; receivedQty: number; product: { name: string } | null }[]>(`/api/replacements?kind=SUPPLIER&supplierId=${f.supplierId}&open=1`), enabled: !!f.supplierId && can('replacement.create') });
+  const waiting = (tickets.data ?? []).filter((t) => t.qty > t.receivedQty);
+  const [sp] = useSearchParams(); const pre = sp.get('ticket');
+  const preTicket = useQuery({ queryKey: ['replacement', pre], queryFn: () => api.get<{ id: string; supplier: { id: string } | null }>(`/api/replacements/${pre}`), enabled: !!pre });
+  useEffect(() => { const t = preTicket.data; if (t?.supplier && !f.supplierId) setF((x) => ({ ...x, supplierId: t.supplier!.id, replacementTicketId: t.id })); }, [preTicket.data]); // eslint-disable-line react-hooks/exhaustive-deps
   const [lines, setLines] = useState<{ productId: string; name: string; qty: number; freeQty: number; expiryDate: string; batchNo: string; flavor: string; flavors: string[]; unitCost: string }[]>([]);
   const [search, setSearch] = useState('');
   // the supplier's delivery receipt (DR / invoice): photo or PDF, attached to the new receiving (owner request 2026-09-29)
   const [drFile, setDrFile] = useState<File | null>(null);
   const products = useQuery({ queryKey: ['products', search], queryFn: () => api.get<{ id: string; name: string; sku: string; trackExpiry: boolean; flavors?: string[] }[]>(`/api/products?search=${encodeURIComponent(search)}&take=20`), enabled: search.length >= 2 });
-  const m = useMutation({ mutationFn: async () => { const r = await api.post<{ id: string; warnings: string[] }>('/api/receiving', { ...f, lines: lines.map((l) => ({ productId: l.productId, qty: l.qty, freeQty: l.freeQty, expiryDate: l.expiryDate || null, batchNo: l.batchNo || null, flavor: l.flavor.trim() || null, unitCost: can('cost.edit') && l.unitCost ? Number(l.unitCost) : null })) }); if (drFile) await api.upload(`/api/attachments/ReceivingDoc/${r.id}`, drFile); setDrFile(null); return r; }, onSuccess: (r) => { void qc.invalidateQueries({ queryKey: ['receiving'] }); nav(`/receiving/${r.id}`); } });
+  const m = useMutation({ mutationFn: async () => { const r = await api.post<{ id: string; warnings: string[] }>('/api/receiving', { ...f, replacementTicketId: f.replacementTicketId || undefined, lines: lines.map((l) => ({ productId: l.productId, qty: l.qty, freeQty: l.freeQty, expiryDate: l.expiryDate || null, batchNo: l.batchNo || null, flavor: l.flavor.trim() || null, unitCost: can('cost.edit') && l.unitCost ? Number(l.unitCost) : null })) }); if (drFile) await api.upload(`/api/attachments/ReceivingDoc/${r.id}`, drFile); setDrFile(null); return r; }, onSuccess: (r) => { void qc.invalidateQueries({ queryKey: ['receiving'] }); nav(`/receiving/${r.id}`); } });
   return <div className="space-y-4">
     <h1 className="text-2xl font-bold tracking-tight text-navy">Supplier Deliveries</h1>
     {can('receiving.create') && <Card title="New receiving">
       <div className="grid gap-3 md:grid-cols-4">
         <Field label="Supplier (code)"><Select value={f.supplierId} onChange={(e) => { const s = suppliers.data?.find((x) => x.id === e.target.value); setF({ ...f, supplierId: e.target.value, isConsignmentIn: !!s?.isConsignor }); }}><option value="">—</option>{suppliers.data?.map((s) => <option key={s.id} value={s.id}>{s.code}{s.supplierName ? ` — ${s.supplierName}` : ''}</option>)}</Select></Field>
+        {waiting.length > 0 && <Field label="This delivery replaces a ticket" hint="Its arrival closes the replacement ticket"><Select value={f.replacementTicketId} onChange={(e) => setF({ ...f, replacementTicketId: e.target.value })} data-testid="replacement-ticket"><option value="">— no, an ordinary delivery —</option>{waiting.map((t) => <option key={t.id} value={t.id}>{t.ticketNo} · {t.product?.name} · {t.qty - t.receivedQty} still owed</option>)}</Select></Field>}
         <Field label="Supplier invoice / DR #"><Input value={f.supplierRef} onChange={(e) => setF({ ...f, supplierRef: e.target.value })} /></Field>
         <label className="flex items-end gap-2 pb-2 text-sm"><input type="checkbox" checked={f.isConsignmentIn} onChange={(e) => setF({ ...f, isConsignmentIn: e.target.checked })} /> Consignment-in (supplier's stock)</label>
         <Field label="Notes"><Input value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} /></Field>

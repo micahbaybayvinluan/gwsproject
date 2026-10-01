@@ -6,7 +6,7 @@ import { Z } from '../common/zod.pipe';
 import type { SessionUser } from '../common/request-context';
 
 const Line = z.object({ productId: z.string().uuid(), qty: z.number().int().min(0), freeQty: z.number().int().min(0).optional(), expiryDate: z.string().nullable().optional(), batchNo: z.string().nullable().optional(), flavor: z.string().trim().max(60).nullable().optional(), unitCost: z.number().nonnegative().nullable().optional(), remarks: z.string().optional() }).refine((l) => l.qty + (l.freeQty ?? 0) > 0, { message: 'Quantity must be more than zero (no negative or empty lines)' });
-const Create = z.object({ locationId: z.string().uuid().optional(), supplierId: z.string().uuid(), supplierRef: z.string().optional(), docDate: z.string().optional(), isConsignmentIn: z.boolean().optional(), paidOnReceipt: z.boolean().optional(), paymentAccountId: z.string().uuid().nullable().optional(), notes: z.string().optional(), lines: z.array(Line).min(1) });
+const Create = z.object({ replacementTicketId: z.string().uuid().optional(), locationId: z.string().uuid().optional(), supplierId: z.string().uuid(), supplierRef: z.string().optional(), docDate: z.string().optional(), isConsignmentIn: z.boolean().optional(), paidOnReceipt: z.boolean().optional(), paymentAccountId: z.string().uuid().nullable().optional(), notes: z.string().optional(), lines: z.array(Line).min(1) });
 const Costs = z.object({ costs: z.array(z.object({ lineId: z.string().uuid(), unitCost: z.number().nonnegative() })) });
 const Void = z.object({ reason: z.string().min(3) });
 

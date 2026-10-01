@@ -28,6 +28,7 @@ import { MemosPage } from '@/pages/Memos';
 import { SixPackPage } from '@/pages/SixPack';
 import { EcomAnalysisPage } from '@/pages/EcomAnalysis';
 import { MarketingPulloutsPage } from '@/pages/MarketingPullouts';
+import { ReplacementDetailPage, ReplacementsPage } from '@/pages/Replacements';
 import { EcomWaybillsPage } from '@/pages/EcomWaybills';
 import { IncentivesPage } from './pages/Incentives';
 import { ProductDetailPage, ProductsPage, PriceChangesPage, SuppliersPage } from './pages/Products';
@@ -100,6 +101,8 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
               <Route path="/six-pack" element={<SixPackPage />} />
               <Route path="/ecom-analysis" element={<EcomAnalysisPage />} />
               <Route path="/marketing-pullouts" element={<MarketingPulloutsPage />} />
+              <Route path="/replacements" element={<ReplacementsPage />} />
+              <Route path="/replacements/:id" element={<ReplacementDetailPage />} />
               <Route path="/ecom-waybills" element={<EcomWaybillsPage />} />
               <Route path="/price-changes" element={<PriceChangesPage />} />
               <Route path="/price-changes/:id" element={<PriceChangesPage />} />

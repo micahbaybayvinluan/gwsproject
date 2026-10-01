@@ -22,6 +22,7 @@ import { EcommerceService } from '../ecommerce/ecommerce.service';
 import { TransferDiscrepancyService } from '../transfers/transfer-discrepancy.service';
 import { TransfersModule } from '../transfers/transfers.module';
 import { FranchiseArService } from '../franchise/franchise-ar.service';
+import { FranchiseShippingService } from '../franchise/franchise-shipping.service';
 import { requestContext } from '../common/request-context';
 
 export const JOBS = {
@@ -48,7 +49,7 @@ export const JOBS = {
 export class JobsService implements OnModuleInit {
   private log = new Logger('Jobs');
   private queue!: Queue; private worker!: Worker;
-  constructor(private franchiseAr: FranchiseArService, private transferDiff: TransferDiscrepancyService, private ecom: EcommerceService, private followUps: CustomerFollowUpsService, private reportSubmission: ReportSubmissionService, private cashOnHand: CashOnHandService, private closing: ClosingService, private alerts: AlertsService, private approvals: ApprovalsService, private counts: CountsService, private sales: SalesService, private notifications: NotificationsService, private prices: PriceChangeService, private payroll: PayrollService) {}
+  constructor(private franchiseAr: FranchiseArService, private franchiseShipping: FranchiseShippingService, private transferDiff: TransferDiscrepancyService, private ecom: EcommerceService, private followUps: CustomerFollowUpsService, private reportSubmission: ReportSubmissionService, private cashOnHand: CashOnHandService, private closing: ClosingService, private alerts: AlertsService, private approvals: ApprovalsService, private counts: CountsService, private sales: SalesService, private notifications: NotificationsService, private prices: PriceChangeService, private payroll: PayrollService) {}
 
   async onModuleInit() {
     if (process.env.DISABLE_JOBS === 'true' || process.env.NODE_ENV === 'test') return;
@@ -74,7 +75,7 @@ export class JobsService implements OnModuleInit {
       case JOBS.CUSTOMER_FOLLOW_UPS.name: return this.followUps.runDaily();
       case JOBS.CASH_DEPOSIT_REMINDERS.name: return this.cashOnHand.remind();
       case JOBS.TRANSFER_DIFF_DEADLINES.name: return this.transferDiff.runDeadlines();
-      case JOBS.FRANCHISE_AR.name: return this.franchiseAr.runDaily();
+      case JOBS.FRANCHISE_AR.name: return { ...(await this.franchiseAr.runDaily()), shipping: await this.franchiseShipping.runDaily() };
       case JOBS.ECOM_OVERDUE.name: return this.ecom.remindOverdue();
       case JOBS.MONTH_END_DEPRECIATION.name: { const d = new Date(); d.setUTCMonth(d.getUTCMonth() - 1); return this.payroll.runDepreciation(d.getUTCFullYear(), d.getUTCMonth() + 1, null); }
       default: throw new Error(`Unknown job ${name}`);

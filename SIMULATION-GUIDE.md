@@ -240,6 +240,12 @@ Daily Close & Deposit → press a coloured day on the calendar → bank, **Attac
 **63. E-commerce margin and waybills** — `admin`, `ecomm.assoc`, `head.auditor`
 Waybill Report → **Choose waybill PDF files** (TikTok or Shopee labels) → pick each order's product → the SRP, fees and order income appear; set the platform fee rates at the bottom. `admin`: E-com Margin Analysis shows fees, ads and the price that keeps the target margin; add ad expenses at the bottom.
 
+64. **Sale to a franchise** (`sales.wh`): New Sale → channel FRANCHISE → pick Franchise Mayon (or any franchisee) → add a supplement and a Plastic XL. The franchise price fills in and the plastic is ₱5 (L 4, M 3, S 3, XL 5). Choose **Shipping: To follow** → Review → Save. Check: no "may not sell at tier FRANCHISE" error.
+65. **Shipping to follow** (`franchise.coord`): Notifications show the tag. Franchise AR → Shipping charges billed to franchises → **Fill in the amount** (e.g. ₱350). A new invoice FAR-SHIP-… appears for the franchise (`fr.mayon.owner` sees it; Accounting, auditors and the Owner are told). Ask to change it to ₱400 with a reason → `admin` approves in My Approvals.
+66. **Late shipping** : leave one "to follow" for 2 days: every day the Coordinator, Owner, auditors, Accounting and the franchise owner get a reminder.
+67. **Franchise Coordinator sale**: `franchise.coord` → New Sale: only the FRANCHISE channel, AR/PDC or Online; pick the warehouse as the branch.
+68. **Stores and plastics**: at a branch sell to a walk-in customer with a Plastic S: price ₱0 (free). Type a price of 2 and it becomes a sold item.
+
 ## Where the files come out
 
 All exports download through the browser: Daily Sales Report (xlsx/PDF), Daily Inventory Report (xlsx, one sheet per day plus Summary and Per-day sheets), every paper form (Pull-Out, Transfer-In, DR-Sales, Supplier's Form, Count sheet, Discrepancy Report, Charge Form, Credit Note, Journal Voucher), every list (Export xlsx / CSV buttons), Trial Balance and the financial statements.

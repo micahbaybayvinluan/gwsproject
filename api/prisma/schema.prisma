@@ -2199,7 +2199,7 @@ model AgentIncentive {
 model FranchiseInvoice {
   id                  String    @id @default(uuid())
   controlNo           String    @unique @map("control_no")
-  source              String // TRANSFER | OPENING
+  source              String // TRANSFER | OPENING | SHIPPING
   transferId          String?   @unique @map("transfer_id")
   franchiseLocationId String    @map("franchise_location_id")
   fromLocationId      String?   @map("from_location_id")
@@ -2261,7 +2261,7 @@ model FranchisePayment {
 model FranchiseArAdjustment {
   id         String   @id @default(uuid())
   invoiceId  String   @map("invoice_id")
-  kind       String // TRANSFER_CHANGE | WAIVER | MANUAL | EXTENSION
+  kind       String // TRANSFER_CHANGE | WAIVER | MANUAL | EXTENSION | SHIPPING_EDIT
   delta      Decimal  @db.Decimal(14, 2)
   reason     String
   transferId String?  @map("transfer_id")
@@ -2293,6 +2293,35 @@ model FranchiseArExtension {
 
   @@index([invoiceId])
   @@map("franchise_ar_extensions")
+}
+
+/// Shipping charged to a franchise on a sale (owner request 2026-10-01): tagged "to follow" on the sale, the Franchise Coordinator fills the amount within 2 days,
+/// and it becomes its own franchise invoice (separate from the order).
+model FranchiseShippingCharge {
+  id                  String    @id @default(uuid())
+  salesDocId          String    @unique @map("sales_doc_id")
+  drSiNo              String    @map("dr_si_no")
+  franchiseLocationId String    @map("franchise_location_id")
+  fromLocationId      String    @map("from_location_id")
+  status              String    @default("TO_FOLLOW") // TO_FOLLOW | FILLED
+  fillBy              DateTime  @map("fill_by") @db.Date
+  amount              Decimal?  @db.Decimal(14, 2)
+  courier             String?
+  reference           String?
+  notes               String?
+  invoiceId           String?   @unique @map("invoice_id")
+  filledBy            String?   @map("filled_by")
+  filledAt            DateTime? @map("filled_at")
+  remindedAt          DateTime? @map("reminded_at")
+  /// a change after it was filled, waiting for the Owner: { amount, reason, requestedBy }
+  pendingEdit         Json?     @map("pending_edit")
+  createdBy           String?   @map("created_by")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  @@index([status, fillBy])
+  @@index([franchiseLocationId])
+  @@map("franchise_shipping_charges")
 }
 
 // ── Memorandums (owner request 2026-09-30): numbered YYYY-Qn-NNN, addressed to chosen people, signed by the people the memo names ──

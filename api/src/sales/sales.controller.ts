@@ -17,6 +17,7 @@ const Create = z.object({
   cardMid: z.string().optional(), cardSlipNo: z.string().optional(), cardApprovalCode: z.string().optional(), cardBatchNo: z.string().optional(),
   deliveryFee: z.number().nonnegative().optional(), riderIncentive: z.number().nonnegative().optional(), sixPackSticker: z.boolean().optional(), incentive: z.object({ amount: z.number().nonnegative(), payee: z.string().trim().max(120), kind: z.enum(['SALES', 'RIDER']).optional() }).nullable().optional(), shippingFee: z.number().nonnegative().optional(), shippingExpense: z.number().nonnegative().optional(), marketplaceCharges: z.number().nonnegative().optional(),
   dueDate: z.string().nullable().optional(), pdcBank: z.string().optional(), pdcChequeNo: z.string().optional(), pdcDate: z.string().nullable().optional(), notes: z.string().optional(), lines: z.array(Line).min(1),
+  franchiseShipping: z.object({ mode: z.enum(['NONE', 'TO_FOLLOW', 'AMOUNT']), amount: z.number().positive().optional(), courier: z.string().trim().max(120).optional(), reference: z.string().trim().max(120).optional() }).optional(),
 });
 const Void = z.object({ reason: z.string().min(3) });
 const Payment = z.object({ salesDocIds: z.array(z.string().uuid()).min(1), amount: z.number().positive(), discount: z.number().nonnegative().optional(), paymentMode: z.enum(['CASH', 'ONLINE', 'CREDIT_CARD', 'AR_PDC']), paymentAccountId: z.string().uuid().nullable().optional(), proofAttachmentId: z.string().uuid().nullable().optional(), receivedAt: z.string().optional(), notes: z.string().optional() });
@@ -28,10 +29,10 @@ const Agreement = z.object({ direction: z.enum(['OUT', 'IN']), counterpartyLocat
 @Controller('api/sales')
 export class SalesController {
   constructor(private svc: SalesService) {}
-  @Get() @RequireAnyPermission('sale.create', 'report.sales.own', 'report.sales.all') list(@CurrentUser() u: SessionUser, @Query('locationId') locationId?: string, @Query('from') from?: string, @Query('to') to?: string, @Query('channel') channel?: string, @Query('paymentMode') paymentMode?: string) { return this.svc.list(u, { locationId, from, to, channel, paymentMode }); }
+  @Get() @RequireAnyPermission('sale.create', 'sale.create.franchise', 'report.sales.own', 'report.sales.all') list(@CurrentUser() u: SessionUser, @Query('locationId') locationId?: string, @Query('from') from?: string, @Query('to') to?: string, @Query('channel') channel?: string, @Query('paymentMode') paymentMode?: string) { return this.svc.list(u, { locationId, from, to, channel, paymentMode }); }
   @Get('agent-report') @RequireAnyPermission('report.sales.own', 'report.sales.all') agents(@CurrentUser() u: SessionUser, @Query('from') from: string, @Query('to') to: string, @Query('agentId') agentId?: string) { return this.svc.agentReport(u, { from, to, agentId }); }
-  @Get(':id') @RequireAnyPermission('sale.create', 'report.sales.own', 'report.sales.all') get(@Param('id') id: string, @CurrentUser() u: SessionUser) { return this.svc.get(id, u); }
-  @Post() @RequirePermission('sale.create') @Audited('SalesDoc', 'CREATE') create(@Body(Z(Create)) dto: z.infer<typeof Create>, @CurrentUser() u: SessionUser) { return this.svc.create(dto, u); }
+  @Get(':id') @RequireAnyPermission('sale.create', 'sale.create.franchise', 'report.sales.own', 'report.sales.all') get(@Param('id') id: string, @CurrentUser() u: SessionUser) { return this.svc.get(id, u); }
+  @Post() @RequireAnyPermission('sale.create', 'sale.create.franchise') @Audited('SalesDoc', 'CREATE') create(@Body(Z(Create)) dto: z.infer<typeof Create>, @CurrentUser() u: SessionUser) { return this.svc.create(dto, u); }
   @Post(':id/void') @RequireAnyPermission('sale.void', 'sale.edit.sameday') @Audited('SalesDoc', 'VOID') void(@Param('id') id: string, @Body(Z(Void)) dto: z.infer<typeof Void>, @CurrentUser() u: SessionUser) { return this.svc.void(id, dto.reason, u); }
 }
 

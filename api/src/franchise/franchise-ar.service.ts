@@ -68,14 +68,15 @@ export class FranchiseArService implements OnModuleInit {
   }
 
   // ── who is told ──
+  async franchiseName(locationId: string) { return (await this.franchise(locationId)).name; }
   private async franchise(locationId: string) { return this.prisma.db.location.findUniqueOrThrow({ where: { id: locationId }, select: { id: true, name: true, franchiseOwnerUserId: true, creditHold: true, creditHoldNote: true } }); }
   async tell(locationId: string, n: { type: string; title: string; body?: string; link?: string }, extraUserIds: string[] = []) {
     const loc = await this.franchise(locationId);
     await this.notify.toRoles(FRANCHISE_AR_ROLES, n);
     await this.notify.toUsers([...(loc.franchiseOwnerUserId ? [loc.franchiseOwnerUserId] : []), ...extraUserIds], n);
   }
-  private link(id: string) { return `/franchise-ar?invoice=${id}`; }
-  private peso = (x: Prisma.Decimal.Value) => `₱${D(x).toNumber().toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  link(id: string) { return `/franchise-ar?invoice=${id}`; }
+  peso = (x: Prisma.Decimal.Value) => `₱${D(x).toNumber().toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
   // ── invoices from transfers ──
   /**
@@ -108,6 +109,22 @@ export class FranchiseArService implements OnModuleInit {
     await this.tell(doc.toLocationId, { type: 'FRANCHISE_AR_ADJUSTED', title: `Franchise invoice ${inv.controlNo} changed from ${this.peso(before)} to ${this.peso(after)}: ${why}`, body: `Transfer ${doc.controlNo}. The balance now stands at ${this.peso(p.totalDue)}${p.chargesDue.gt(0) ? ` including ${this.peso(p.chargesDue)} penalty and interest (charges so far are kept; from now they follow the new balance; Accounting may waive any excess)` : ''}.`, link: this.link(inv.id) }, involved);
   }
 
+  /** A new invoice that is not goods from a transfer (the shipping charge of a sale): billed now, due after the terms, with the same penalty / interest rules. */
+  async createCharge(tx: Tx, input: { controlNo: string; source: string; franchiseLocationId: string; fromLocationId: string; amount: Prisma.Decimal.Value; notes?: string | null }, actorId: string | null) {
+    const today = todayManila(); const rules = await this.rules();
+    return tx.franchiseInvoice.create({ data: { controlNo: input.controlNo, source: input.source, franchiseLocationId: input.franchiseLocationId, fromLocationId: input.fromLocationId, issueDate: today, originalDueDate: addDays(today, rules.termsDays), dueDate: addDays(today, rules.termsDays), originalAmount: r2(input.amount).toFixed(2), amount: r2(input.amount).toFixed(2), notes: input.notes ?? null, createdBy: actorId } });
+  }
+  /** Changes the amount billed on an invoice (after an approved correction); what was charged so far stays, later charges follow the new balance. */
+  async changeAmount(tx: Tx, invoiceId: string, newAmount: Prisma.Decimal.Value, kind: string, reason: string, actorId: string | null, details: Record<string, unknown> = {}) {
+    const cur = await tx.franchiseInvoice.findUniqueOrThrow({ where: { id: invoiceId } });
+    const settled = await this.settle(tx, cur);
+    const before = D(settled.amount); const after = r2(newAmount);
+    if (after.lt(D(settled.principalPaid))) throw new BadRequestException('The new amount is less than what the franchise has already paid on this invoice');
+    const closed = after.minus(settled.principalPaid).lte(0) && D(settled.penalty).minus(settled.penaltyPaid).lte(0) && D(settled.interest).minus(settled.interestPaid).lte(0);
+    const inv = await tx.franchiseInvoice.update({ where: { id: invoiceId }, data: { amount: after.toFixed(2), status: closed ? 'PAID' : 'OPEN' } });
+    await tx.franchiseArAdjustment.create({ data: { invoiceId, kind, delta: after.minus(before).toFixed(2), reason, createdBy: actorId, details: { before: before.toFixed(2), after: after.toFixed(2), ...details } as Prisma.InputJsonValue } });
+    return { inv, before, after };
+  }
   /** An old balance (from before GWS-ERP) entered by Accounting as a franchise invoice. */
   async createOpening(tx: Tx, input: { franchiseLocationId: string; fromLocationId: string; drSiNo: string; docDate: Date; dueDate: Date; amount: Prisma.Decimal.Value; notes?: string | null }, actorId: string | null) {
     const controlNo = `FAR-OPEN-${input.drSiNo}`;

@@ -117,6 +117,14 @@ export function r4FranchiseCollection(r: AccountResolver, e: { fromLocationId: s
   const entry: Entry = { rule: 'R4', book: 'BENTA', lines: consolidate(nz(lines)), remarks: `Franchise collection ${e.receiptNo}` };
   assertBalanced(entry.lines); return [entry];
 }
+/** Shipping billed to a franchise on a sale (owner request 2026-10-01): its own receivable, shipping income of the branch that sent the goods. A negative amount reverses part of it. */
+export function r7bFranchiseShipping(r: AccountResolver, e: { fromLocationId: string; franchiseLocationId: string; amount: Decimal.Value; ref: string }): Entry[] {
+  const amt = D(e.amount); if (amt.isZero()) return [];
+  const ar = r.ar({ type: 'FRANCHISE', locationId: e.franchiseLocationId }, e.fromLocationId); let inc: string; try { inc = r.branch('SALES_SHIPPING_FEE', e.fromLocationId); } catch (err) { if (!(err instanceof MissingAccountError)) throw err; inc = r.global('SALES_WAREHOUSE_FRANCHISE'); } // the warehouse has no shipping-fee account of its own: its franchise sales account takes it
+  const lines = amt.gt(0) ? [dr(ar, amt), cr(inc, amt)] : [dr(inc, amt.abs()), cr(ar, amt.abs())];
+  const entry: Entry = { rule: 'R4', book: 'BENTA', lines: consolidate(lines), remarks: `Franchise shipping charge ${e.ref}` };
+  assertBalanced(entry.lines); return [entry];
+}
 // ── R6 transfer between company locations ──
 export function r6Transfer(r: AccountResolver, e: { fromLocationId: string; toLocationId: string; controlNo: string; lines: CostLine[]; shortfall?: { accountingClass: string; qty: number; unitCost: Decimal.Value; charged?: boolean }[] }): Entry[] {
   const lines: Line[] = [];

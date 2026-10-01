@@ -131,6 +131,8 @@ You run one branch: sales, expenses, stock received and sent, the weekly count, 
 
 **Prices:** a sale paid by **credit card** uses the credit-card price (SRP ÷ 0.96, see the price memo) by itself; a TikTok, Shopee or Lazada sale uses that platform's price list.
 
+**Selling to a franchise** (also from the Warehouse store): New Sale → channel **FRANCHISE** → choose the franchisee. The franchise price fills in by itself and may be changed. Plastic bags are charged to franchises (L ₱4, M ₱3, S ₱3, XL ₱5); for stores and other customers they are free unless you type a price because they were sold. Choose **Shipping charged to the franchise: To follow** so the Franchise Coordinator fills the amount within 2 days (it becomes a separate franchise invoice), or type the amount now.
+
 ## Warehouse Associate
 <!-- role: WAREHOUSE_ASSOCIATE -->
 You enter what comes into and goes out of the warehouse. You never see supplier cost. Your entries are checked by the Warehouse In-Charge before stock changes.
@@ -328,7 +330,7 @@ You sell at a franchise. You never see franchise cost.
 
 ## Franchise Owner
 <!-- role: FRANCHISE_OWNER -->
-You run your franchise. Everything you see is limited to your own branch, and your books are separate from the other GWS branches.
+You run your franchise. Everything you see is limited to your own branch (every sale, transfer, expense and invoice of your franchise, and no other), and you create your own sales and expenses. Your books are separate from the other GWS branches. Shipping that GWS charges you for a sale appears on **Franchise AR** as its own invoice.
 
 1. **Franchise Portal → Overview:** stock, incoming deliveries, today's sales and what you owe GWS.
    - Switch **"associate may receive stock"** on or off. With it on, your associate confirms deliveries and you are notified.
@@ -590,11 +592,13 @@ You look after the franchise partners. You never see cost.
 2. **Recommended process** (shown on the page): day 1 automatic notices; from day 7 call the owner and issue a notice memo; from day 30 the Owner reviews and may put the franchise on cash-before-delivery; at two months a demand memo and the actions the memo allows.
 3. **Memorandums:** write memos to franchise partners and their associates. Choose the addressees, type the memo (a table is optional), add the signers. The memo is numbered by itself and everyone addressed is notified; print it on the letterhead. **Write the demand memo** on the Franchise AR page fills in the notice for you.
 4. **Transfers and stock:** you can see what was sent to and received by each franchise, and the discrepancies.
-5. **Your password:** press the key icon at the top right. It is personal; never tell it to anyone.
+5. **New Sale (franchises only):** record a sale to a franchise on credit or paid online, choosing the GWS branch or warehouse the goods come from. The franchise price and the plastic prices (L ₱4, M ₱3, S ₱3, XL ₱5) fill in by themselves and can be changed.
+6. **Shipping charges to franchises:** on Franchise AR, **Fill in the amount** within **2 days** of the sale (a late one is flagged to you, the Owner, the auditors and Accounting every day). Filling it creates a separate franchise invoice. To change the amount afterwards, or to ask for more time, press **Ask to change / Ask for more time**: the Owner decides.
+7. **Your password:** press the key icon at the top right. It is personal; never tell it to anyone.
 
 ## Asst. Franchise Coordinator
 <!-- role: ASST_FRANCHISE_COORDINATOR -->
-You help the Franchise Coordinator with the same screens: **Franchise AR** (invoices, penalty, interest, extension requests, notifications), **Memorandums** (write, sign, track who has read them) and the franchise stock transfers. You never see cost. Change your password with the key icon at the top right.
+You help the Franchise Coordinator with the same screens: **New Sale** (franchise sales only), **Shipping charges to franchises** (fill in the amount within 2 days; ask the Owner to change it), **Franchise AR** (invoices, penalty, interest, extension requests, notifications), **Memorandums** (write, sign, track who has read them) and the franchise stock transfers. You never see cost. Change your password with the key icon at the top right.
 
 ## Other users (custom permissions)
 <!-- role: CUSTOM -->

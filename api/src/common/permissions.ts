@@ -48,6 +48,7 @@ export const APPROVAL_TYPES = [
   'CASH_DEPOSIT_AUDIT',
   'CASH_DEPOSIT_ACCOUNTING',
   'SIXPACK_OVERRIDE',
+  'FRANCHISE_SHIPPING_EDIT',
 ] as const;
 export type ApprovalType = (typeof APPROVAL_TYPES)[number];
 
@@ -106,6 +107,8 @@ const BASE_KEYS = [
   'ecom.analysis',
   // upload waybills and read the SRP / fees / order income report (E-comm Associate, Head Auditor, Owner)
   'ecom.waybill',
+  // franchise sales only (Franchise Coordinators) and the shipping charge billed to a franchise
+  'sale.create.franchise', 'franchise.shipping.fill',
 ] as const;
 
 export const PERMISSION_KEYS: readonly string[] = [
@@ -219,7 +222,7 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
     name: 'Sales Associate',
     description: 'Sales, expenses, pull-outs/transfers for own branch. Own branch reports only. Locked at midnight.',
     permissions: ['sixpack.issue', 'stock.flavor.set', 
-      'product.view', 'location.view.own', 'price.view.RETAIL', 'price.view.DEALER', 'price.view.AGENT', 'price.view.CC',
+      'product.view', 'location.view.own', 'price.view.RETAIL', 'price.view.DEALER', 'price.view.AGENT', 'price.view.CC', 'price.view.FRANCHISE',
       'transfer.create', 'transfer.confirm', 'sale.create', 'sale.edit.sameday', 'ar.view', 'ar.collect',
       'expense.create.branch', 'expense.view', 'count.create', 'report.sales.own', 'report.inventory.own', 'dashboard.view', 'notification.view', 'cashfund.use', 'discrepancy.explain',
       'sale.incentive', 'consignment.request', 'approval.act.TRANSFER_DIFF_SENDER',
@@ -296,14 +299,14 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
   {
     key: 'FRANCHISE_COORDINATOR',
     name: 'Franchise Coordinator',
-    description: 'Looks after the franchise partners: sees every franchise\'s receivables (invoices, penalties, interest, extension requests) and their stock transfers, issues memorandums to franchise partners and staff. Never sees cost.',
-    permissions: ['franchise.ar.view', 'memo.create', 'ar.view', 'product.view', 'location.view.all', 'report.sales.all', 'report.inventory.all', 'price.view.RETAIL', 'price.view.FRANCHISE', 'price.view.DEALER', 'price.view.CC', 'dashboard.view', 'notification.view', 'discrepancy.view'],
+    description: 'Looks after the franchise partners: sees every franchise\'s receivables (invoices, penalties, interest, extension requests) and their stock transfers, issues memorandums to franchise partners and staff. Never sees cost. May record sales to franchises (only), and fills in the shipping charge billed to a franchise.',
+    permissions: ['franchise.ar.view', 'sale.create.franchise', 'franchise.shipping.fill', 'memo.create', 'ar.view', 'product.view', 'location.view.all', 'report.sales.all', 'report.inventory.all', 'price.view.RETAIL', 'price.view.FRANCHISE', 'price.view.DEALER', 'price.view.CC', 'dashboard.view', 'notification.view', 'discrepancy.view'],
   },
   {
     key: 'ASST_FRANCHISE_COORDINATOR',
     name: 'Asst. Franchise Coordinator',
-    description: 'Helps the Franchise Coordinator: same views of franchise receivables and transfers, and may issue memorandums. Never sees cost.',
-    permissions: ['franchise.ar.view', 'memo.create', 'ar.view', 'product.view', 'location.view.all', 'report.sales.all', 'report.inventory.all', 'price.view.RETAIL', 'price.view.FRANCHISE', 'price.view.DEALER', 'price.view.CC', 'dashboard.view', 'notification.view', 'discrepancy.view'],
+    description: 'Helps the Franchise Coordinator: same views of franchise receivables and transfers, and may issue memorandums. Never sees cost. May record sales to franchises (only), and fills in the shipping charge billed to a franchise.',
+    permissions: ['franchise.ar.view', 'sale.create.franchise', 'franchise.shipping.fill', 'memo.create', 'ar.view', 'product.view', 'location.view.all', 'report.sales.all', 'report.inventory.all', 'price.view.RETAIL', 'price.view.FRANCHISE', 'price.view.DEALER', 'price.view.CC', 'dashboard.view', 'notification.view', 'discrepancy.view'],
   },
   {
     key: 'AGENT',
@@ -385,6 +388,7 @@ export const APPROVAL_ROUTING: Record<ApprovalType, { roles: RoleKey[]; anyOf?: 
   FRANCHISE_AR_EXTENSION: { roles: ['ADMIN'] },
   /** A 6-Pack card that cannot be tagged to a customer (data missing): the Head Auditor asks, the Owner approves. */
   SIXPACK_OVERRIDE: { roles: ['ADMIN'] },
+  FRANCHISE_SHIPPING_EDIT: { roles: ['ADMIN'] },
   /** A branch's cash deposit slip: the Audit Associate checks it first (the auditors and the Owner may too) ... */
   CASH_DEPOSIT_AUDIT: { roles: ['AUDIT_ASSOCIATE', 'HEAD_AUDITOR', 'ASST_AUDITOR', 'ADMIN'], anyOf: true },
   /** ... then the Accounting Associate (the Accounting Head and the Owner may too). */

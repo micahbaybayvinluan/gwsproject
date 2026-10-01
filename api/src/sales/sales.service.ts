@@ -20,12 +20,13 @@ import { ClosingService } from '../closing/closing.service';
 import { ScopeService } from '../common/scope.service';
 import { ExpensesService } from '../expenses/expenses.service';
 import { CustomerFollowUpsService } from './customer-followups.service';
+import { FranchiseShippingService } from '../franchise/franchise-shipping.service';
 
 export interface SalesLineInput { productId: string; qty: number; unitPrice?: number | null; batchId?: string | null; exactBatch?: boolean; isFreebie?: boolean; lineRemarks?: string; priceTier?: string }
 export interface SalesInput {
   locationId?: string; docDate?: string; channel: SalesChannel; channelSub?: string | null; customerId?: string | null; agentId?: string | null; riderId?: string | null; customerName?: string | null; customerPhone?: string | null; customerEmail?: string | null; drSiNo: string;
   paymentMode: PaymentMode; paymentAccountId?: string | null; proofOfPaymentAttachmentId?: string | null; cardMid?: string; cardSlipNo?: string; cardApprovalCode?: string; cardBatchNo?: string;
-  deliveryFee?: number; riderIncentive?: number; incentive?: { amount: number; payee: string; kind?: 'SALES' | 'RIDER' } | null; sixPackSticker?: boolean; shippingFee?: number; shippingExpense?: number; marketplaceCharges?: number; dueDate?: string | null; pdcBank?: string; pdcChequeNo?: string; pdcDate?: string | null; notes?: string;
+  deliveryFee?: number; riderIncentive?: number; incentive?: { amount: number; payee: string; kind?: 'SALES' | 'RIDER' } | null; sixPackSticker?: boolean; franchiseShipping?: { mode: 'NONE' | 'TO_FOLLOW' | 'AMOUNT'; amount?: number; courier?: string; reference?: string }; shippingFee?: number; shippingExpense?: number; marketplaceCharges?: number; dueDate?: string | null; pdcBank?: string; pdcChequeNo?: string; pdcDate?: string | null; notes?: string;
   lines: SalesLineInput[];
 }
 
@@ -34,7 +35,7 @@ export const TIER_BY_CHANNEL: Record<SalesChannel, string> = { WALK_IN: 'RETAIL'
 /** §8 Sales module: entry (all channels/modes), agents, AR/PDC, payments, credit notes. Stock is deducted on save (FEFO). */
 @Injectable()
 export class SalesService implements OnModuleInit {
-  constructor(private prisma: PrismaService, private seq: SequenceService, private stock: StockService, private approvals: ApprovalsService, private master: MasterService, private notify: NotificationsService, private audit: AuditService, private settings: SettingsService, private attachments: AttachmentsService, private posting: PostingService, private closing: ClosingService, private scope: ScopeService, private expenses: ExpensesService, private followUps: CustomerFollowUpsService, private sixPack: SixPackService) {}
+  constructor(private prisma: PrismaService, private seq: SequenceService, private stock: StockService, private approvals: ApprovalsService, private master: MasterService, private notify: NotificationsService, private audit: AuditService, private settings: SettingsService, private attachments: AttachmentsService, private posting: PostingService, private closing: ClosingService, private scope: ScopeService, private expenses: ExpensesService, private followUps: CustomerFollowUpsService, private sixPack: SixPackService, private franchiseShipping: FranchiseShippingService) {}
 
   onModuleInit() {
     this.approvals.register('SPECIAL_PRICE', (req, outcome) => this.onSpecialPriceDecision(req.documentId, outcome));
@@ -60,6 +61,22 @@ export class SalesService implements OnModuleInit {
     if (user.locationScoped && !user.locationIds.includes(locationId)) throw new ForbiddenException('Outside your branch');
     const loc = await this.prisma.db.location.findUniqueOrThrow({ where: { id: locationId } });
     if (!loc.isSelling) throw new BadRequestException('This location does not sell');
+    // Franchise Coordinators (owner request 2026-10-01) may record sales to franchises only: on credit or paid online, never cash taken at a branch
+    const franchiseOnly = !user.permissions.has('sale.create');
+    const franchiseCustomer = input.channel === 'FRANCHISE' && input.customerId ? await this.prisma.db.customer.findUnique({ where: { id: input.customerId }, select: { id: true, type: true, locationId: true, name: true } }) : null;
+    if (franchiseCustomer && franchiseCustomer.type !== 'FRANCHISE') throw new BadRequestException('Choose a franchisee for a franchise sale');
+    if (franchiseOnly) {
+      if (input.channel !== 'FRANCHISE' || !franchiseCustomer) throw new ForbiddenException('You can record sales to franchises only: choose the Franchise channel and the franchisee');
+      if (input.paymentMode !== 'AR_PDC' && input.paymentMode !== 'ONLINE') throw new BadRequestException('A franchise sale entered by the Franchise Coordinator is on credit (AR / PDC) or paid online');
+      if (loc.type === 'FRANCHISE') throw new BadRequestException('Choose the GWS branch or warehouse the goods come from');
+      if (input.incentive || input.sixPackSticker || (input.riderIncentive ?? 0) > 0) throw new ForbiddenException('Incentives and 6-Pack stickers are not part of a franchise sale');
+    }
+    const ship = input.franchiseShipping && input.franchiseShipping.mode !== 'NONE' ? input.franchiseShipping : null;
+    if (ship) {
+      if (input.channel !== 'FRANCHISE') throw new BadRequestException('A shipping charge to a franchise belongs on a franchise sale');
+      if (!franchiseCustomer?.locationId) throw new BadRequestException('Choose the franchisee: its franchise location is needed to bill the shipping');
+      if (ship.mode === 'AMOUNT' && !(ship.amount && ship.amount > 0)) throw new BadRequestException('Type the shipping amount, or choose "to follow"');
+    }
     const docDate = input.docDate ? toDateOnly(input.docDate) : todayManila();
     let incentive = input.incentive && input.incentive.amount > 0 ? { amount: round2(D(input.incentive.amount)).toNumber(), payee: input.incentive.payee?.trim() ?? '', kind: input.incentive.kind ?? 'SALES' } : null;
     // the older "Rider incentive" box on delivery sales becomes the same cash-paid rider incentive expense, so every report counts it once
@@ -97,16 +114,19 @@ export class SalesService implements OnModuleInit {
         if (franchiseUser && !product.franchiseVisible) throw new ForbiddenException(`${product.name} is not available to franchises`);
         const tier = l.priceTier ?? defaultTier;
         if (!user.permissions.has(`price.view.${tier}`) && !franchiseUser) throw new ForbiddenException(`You may not sell at tier ${tier}`);
-        const isFreebie = !!l.isFreebie || product.category.accountingClass === 'FREEBIE' || product.category.accountingClass === 'PLASTIC';
+        // Plastic (owner request 2026-10-01): priced on a franchise sale (its franchise price: L 4, M 3, S 3, XL 5); for stores and other customers it is free (0) unless the price is typed because it was sold
+        const isPlastic = product.category.accountingClass === 'PLASTIC';
+        const classFree = !isPlastic && (!!l.isFreebie || product.category.accountingClass === 'FREEBIE');
+        const tierPrice = classFree ? ZERO : tier === 'FRANCHISE' || !isPlastic ? D(await this.master.priceFor(product.id, tier, docDate, tx)) : ZERO;
+        let unitPrice = classFree ? ZERO : l.unitPrice != null ? D(l.unitPrice) : tierPrice;
+        const isFreebie = classFree || (isPlastic && unitPrice.isZero());
         if (!isFreebie && product.category.accountingClass === 'SUPPLEMENT') supplementUnits += l.qty;
-        const tierPrice = isFreebie ? ZERO : D(await this.master.priceFor(product.id, tier, docDate, tx));
-        let unitPrice = isFreebie ? ZERO : l.unitPrice != null ? D(l.unitPrice) : tierPrice;
         if (franchiseUser && l.unitPrice != null && !unitPrice.equals(tierPrice)) {
           if (user.roleKey === 'FRANCHISE_SALES_ASSOCIATE') throw new ForbiddenException('Franchise associates cannot change prices'); // §18.2
           // Franchise owner sells at their own retail price: no SPECIAL_PRICE approval applies (§18.2)
         }
         let flag: string | null = null;
-        if (!franchiseUser && !isFreebie && unitPrice.lt(tierPrice)) {
+        if (!franchiseUser && !classFree && unitPrice.lt(tierPrice)) {
           const discountPct = tierPrice.isZero() ? D(0) : tierPrice.minus(unitPrice).div(tierPrice).mul(100);
           if (discountPct.gt(autoDiscountPct)) { special = true; flag = 'PENDING'; }
         }
@@ -169,6 +189,8 @@ export class SalesService implements OnModuleInit {
     await this.audit.log({ action: 'CREATE', entityType: 'SalesDoc', entityId: doc.id, after: doc });
     // re-order reminder for items with a known consumption period (best effort: never blocks the sale)
     await this.followUps.createForSale(doc.id).catch(() => 0);
+    // shipping charged to the franchise: "to follow" for the Franchise Coordinator, or typed now; either way its own receivable, separate from the order
+    if (ship) await this.franchiseShipping.createForSale({ id: doc.id, controlNo: doc.controlNo, drSiNo: doc.drSiNo, locationId }, franchiseCustomer!.locationId!, { mode: ship.mode as 'TO_FOLLOW' | 'AMOUNT', amount: ship.amount, courier: ship.courier, reference: ship.reference }, user);
     return this.get(doc.id, user);
   }
 

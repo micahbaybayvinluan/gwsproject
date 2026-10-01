@@ -15,6 +15,8 @@ import { ApprovalsService } from '../src/approvals/approvals.service';
 import { TransferDiscrepancyService } from '../src/transfers/transfer-discrepancy.service';
 import { SalesService } from '../src/sales/sales.service';
 import { FranchiseArService } from '../src/franchise/franchise-ar.service';
+import { FranchiseShippingService } from '../src/franchise/franchise-shipping.service';
+import { ensurePlasticFranchisePrices } from '../src/pricing/plastic-prices';
 import { makePdf } from './pdf';
 
 const PW = process.env.SEED_PASSWORD || 'ChangeMe!2026';
@@ -51,7 +53,7 @@ async function inChargeApproves(documentType: string, id: string) {
   if (!r) throw new Error(`No In-Charge approval pending for ${documentType} ${id}`);
   ok(await as('wh.incharge').post(`/api/approvals/${r.id}/decide`).send({ decision: 'APPROVE' }));
 }
-const USERS = ['admin', 'ext.auditor', 'head.auditor', 'asst.auditor', 'audit.assoc', 'wh.incharge', 'wh.assoc', 'sales.westave', 'fr.mayon.assoc', 'fr.mayon.owner', 'custom.user', 'acct.head', 'acct.assoc', 'hr.staff', 'field.auditor', 'sales.dasma', 'sales.csr', 'exec.assistant', 'ecomm.assoc', 'sales.manager', 'agent.jerick', 'franchise.coord', 'asst.franchise.coord'];
+const USERS = ['admin', 'ext.auditor', 'head.auditor', 'asst.auditor', 'audit.assoc', 'wh.incharge', 'wh.assoc', 'sales.westave', 'fr.mayon.assoc', 'fr.mayon.owner', 'custom.user', 'acct.head', 'acct.assoc', 'hr.staff', 'field.auditor', 'sales.dasma', 'sales.csr', 'exec.assistant', 'ecomm.assoc', 'sales.manager', 'agent.jerick', 'franchise.coord', 'asst.franchise.coord', 'sales.wh'];
 const as = (u: string) => ({ get: (p: string) => http.get(p).set('Authorization', `Bearer ${tokens[u]}`), post: (p: string) => http.post(p).set('Authorization', `Bearer ${tokens[u]}`), put: (p: string) => http.put(p).set('Authorization', `Bearer ${tokens[u]}`), patch: (p: string) => http.patch(p).set('Authorization', `Bearer ${tokens[u]}`), delete: (p: string) => http.delete(p).set('Authorization', `Bearer ${tokens[u]}`) });
 const has = (o: unknown, re: RegExp): boolean => JSON.stringify(o).match(re) !== null;
 const ok = (r: request.Response) => { if (r.status >= 400) throw new Error(`${r.request?.method} ${r.request?.url} → ${r.status} ${JSON.stringify(r.body)}`); return r; };
@@ -666,12 +668,12 @@ describe('HR charges, cash fund, inspections, counts, AR & contacts (owner reque
   });
 
   it('Accounting: inventory cost movements per day / month and direct cost from sales; branch staff and Field Auditor get 403', async () => {
-    const m = ok(await as('acct.head').get('/api/reports/inventory-cost?from=2026-09-01&to=2026-09-30&groupBy=month')).body;
+    const m = ok(await as('acct.head').get('/api/reports/inventory-cost?from=2026-09-01&to=2026-10-31&groupBy=month')).body;
     expect(m.rows.length).toBeGreaterThan(0); expect(Object.keys(m.rows[0])).toEqual(expect.arrayContaining(['beginning', 'transferIn', 'pullOut', 'directCostOfSales', 'ending']));
-    const d = ok(await as('acct.assoc').get(`/api/reports/inventory-cost?from=2026-09-01&to=2026-09-30&groupBy=day&locationId=${westId}`)).body; expect(d.rows.every((r: { branch: string }) => r.branch === 'West Ave')).toBe(true);
-    await as('acct.assoc').get('/api/reports/inventory-cost.xlsx?from=2026-09-01&to=2026-09-30&groupBy=day').expect(200);
+    const d = ok(await as('acct.assoc').get(`/api/reports/inventory-cost?from=2026-09-01&to=2026-10-31&groupBy=day&locationId=${westId}`)).body; expect(d.rows.every((r: { branch: string }) => r.branch === 'West Ave')).toBe(true);
+    await as('acct.assoc').get('/api/reports/inventory-cost.xlsx?from=2026-09-01&to=2026-10-31&groupBy=day').expect(200);
     for (const u of ['sales.westave', 'field.auditor']) await as(u).get('/api/reports/inventory-cost?from=2026-09-01&to=2026-09-30').expect(403);
-    const dc = ok(await as('acct.assoc').get('/api/reports/direct-cost?year=2026&month=9')).body; expect(dc.rows.length).toBeGreaterThan(0);
+    const dc = ok(await as('acct.assoc').get('/api/reports/direct-cost?year=2026&month=10')).body; expect(dc.rows.length).toBeGreaterThan(0);
   });
 });
 
@@ -825,12 +827,12 @@ describe('Owner controls batch (owner requests 2026-09-26): In-Charge approvals,
     expect(ok(await as('sales.westave').get('/api/dashboard')).body.priceUpdates.some((p: { what: string }) => p.what === 'Supplier cost')).toBe(false);
   });
 
-  it('selling-price changes reach each person only for the prices they use (franchise sees the franchise price, associates only retail)', async () => {
+  it('selling-price changes reach each person only for the prices they use (franchise sees the franchise price; associates sell at retail and franchise prices, never dealer cost)', async () => {
     const pc = ok(await as('admin').post('/api/price-changes').send({ lines: [{ productId: pid, tier: 'RETAIL', newPrice: 2100 }, { productId: pid, tier: 'FRANCHISE', newPrice: 1550 }] })).body;
     ok(await as('admin').post(`/api/approvals/${(await pending('PRICE_CHANGE', pc.id)).id}/decide`).send({ decision: 'APPROVE' }));
     const own = await notes('fr.mayon.owner'); expect(own).toContain('1,550.00');
     const fa = await notes('fr.mayon.assoc'); expect(fa).toContain('2,100.00'); expect(fa).not.toContain('1,550.00');
-    const sa = await notes('sales.westave'); expect(sa).toContain('2,100.00'); expect(sa).not.toContain('1,550.00');
+    const sa = await notes('sales.westave'); expect(sa).toContain('2,100.00'); expect(sa).toContain('1,550.00'); // associates sell to franchises now
     expect(await notes('hr.staff')).not.toContain('PRICE_UPDATE');
   });
 
@@ -1987,5 +1989,124 @@ describe('6-Pack Card override: Head Auditor asks, the Owner approves (owner req
     const ex = await prisma.expenseDoc.findUniqueOrThrow({ where: { id: r.expenseId! }, include: { account: true } });
     expect(Number(ex.amount)).toBe(300); expect(ex.account.title).toMatch(/6-Pack Card/);
     expect(JSON.stringify(ok(await as('sales.westave').get('/api/notifications')).body)).toContain('without complete customer data');
+  });
+});
+
+describe('Franchise sales: sales associates and the Franchise Coordinator may sell to a franchise; shipping charge to follow; plastic prices (owner request 2026-10-01)', () => {
+  let wh = ''; let west = ''; let mayon = ''; let item = ''; let plasticXl = ''; let plasticS = ''; let fr = '';
+  const today = () => new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);
+  const day = (n: number) => new Date(Date.now() + 8 * 3600e3 + n * 86400000).toISOString().slice(0, 10);
+  const notes = async (u: string) => JSON.stringify(ok(await as(u).get('/api/notifications')).body);
+  const giveStock = async (locationId: string, productId: string, qty: number, cost: number) => {
+    const batch = await prisma.batch.create({ data: { productId, batchNo: `F1-${run}-${locationId.slice(0, 4)}-${productId.slice(0, 4)}`, receivedRef: 'TEST', unitCost: cost.toFixed(2) } });
+    await prisma.stockLedger.create({ data: { locationId, productId, batchId: batch.id, qtyDelta: qty, movementType: 'RECEIVE', documentType: 'OpeningStock', documentId: batch.id, unitCost: cost.toFixed(2), businessDate: new Date(`${today()}T00:00:00Z`) } });
+    await prisma.stockBalance.create({ data: { locationId, productId, batchId: batch.id, qty } });
+  };
+  let n = 0;
+  const sale = (u: string, body: Record<string, unknown>) => as(u).post('/api/sales').send({ drSiNo: `FS-${run}-${++n}`, ...body });
+  beforeAll(async () => {
+    const locs = ok(await as('admin').get('/api/locations')).body as { id: string; code: string }[];
+    wh = locs.find((l) => l.code === 'WH')!.id; west = locs.find((l) => l.code === 'WESTAVE')!.id; mayon = locs.find((l) => l.code === 'MAYON')!.id;
+    const cats = ok(await as('admin').get('/api/categories')).body as { id: string; accountingClass: string }[];
+    const cat = (c: string) => cats.find((x) => x.accountingClass === c)!.id;
+    item = ok(await as('admin').post('/api/products').send({ name: `F1 Whey ${run}`, categoryId: cat('SUPPLEMENT'), prices: { RETAIL: 1000, DEALER: 800, FRANCHISE: 700 }, cost: 500 })).body.id;
+    plasticXl = ok(await as('admin').post('/api/products').send({ name: `Plastic XL ${run}`, categoryId: cat('PLASTIC'), prices: { FRANCHISE: 5 }, cost: 2 })).body.id;
+    plasticS = ok(await as('admin').post('/api/products').send({ name: `Plastic S ${run}`, categoryId: cat('PLASTIC'), cost: 1 })).body.id;
+    for (const loc of [wh, west, mayon]) { await giveStock(loc, item, 30, 500); await giveStock(loc, plasticXl, 100, 2); await giveStock(loc, plasticS, 100, 1); }
+    fr = (await prisma.customer.findFirst({ where: { type: 'FRANCHISE', locationId: mayon } }))?.id ?? (await prisma.customer.create({ data: { code: `FR-${run}`, name: 'Franchise Mayon', type: 'FRANCHISE', locationId: mayon } })).id;
+  });
+
+  it('a sales associate can sell to a franchise at the franchise price (was refused); plastic is charged to the franchise; the price can be changed', async () => {
+    const r = ok(await sale('sales.wh', { locationId: wh, channel: 'FRANCHISE', customerId: fr, paymentMode: 'AR_PDC', dueDate: day(30), franchiseShipping: { mode: 'NONE' }, lines: [{ productId: item, qty: 2 }, { productId: plasticXl, qty: 2 }] }).expect(201)).body;
+    const l = (id: string) => r.lines.find((x: { productId: string }) => x.productId === id);
+    expect(l(item).priceTier).toBe('FRANCHISE'); expect(Number(l(item).unitPrice)).toBe(700);
+    expect(Number(l(plasticXl).unitPrice)).toBe(5); expect(l(plasticXl).isFreebie).toBe(false); expect(Number(r.productTotal)).toBe(1410);
+    // the price may be changed: raised or lowered by a little (no approval); the sale is saved
+    const r2 = ok(await sale('sales.wh', { locationId: wh, channel: 'FRANCHISE', customerId: fr, paymentMode: 'AR_PDC', dueDate: day(30), franchiseShipping: { mode: 'NONE' }, lines: [{ productId: item, qty: 1, unitPrice: 720 }] }).expect(201)).body;
+    expect(Number(r2.productTotal)).toBe(720);
+    // a franchise owner's own retail sale at their franchise: plastic stays free
+    expect(Number(ok(await sale('fr.mayon.owner', { channel: 'WALK_IN', paymentMode: 'CASH', lines: [{ productId: item, qty: 1 }, { productId: plasticXl, qty: 1 }] }).expect(201)).body.productTotal)).toBe(Number(1000));
+  });
+
+  it('plastic for stores and other customers is free, but its price can be typed when it was sold', async () => {
+    const free = ok(await sale('sales.westave', { channel: 'WALK_IN', paymentMode: 'CASH', lines: [{ productId: item, qty: 1 }, { productId: plasticS, qty: 3 }] }).expect(201)).body;
+    const pl = free.lines.find((x: { productId: string }) => x.productId === plasticS);
+    expect(pl.isFreebie).toBe(true); expect(Number(pl.unitPrice)).toBe(0); expect(Number(free.productTotal)).toBe(1000);
+    const sold = ok(await sale('sales.westave', { channel: 'WALK_IN', paymentMode: 'CASH', lines: [{ productId: plasticS, qty: 3, unitPrice: 2 }] }).expect(201)).body;
+    expect(sold.lines[0].isFreebie).toBe(false); expect(Number(sold.productTotal)).toBe(6);
+    // franchise plastic prices are given to sized bags that have none yet; an Admin-set price is never overwritten
+    const bare = await prisma.product.create({ data: { sku: `PL-${run}`, name: `Plastic M ${run}`, categoryId: (await prisma.category.findFirstOrThrow({ where: { accountingClass: 'PLASTIC' } })).id, unit: 'pc' } });
+    await ensurePlasticFranchisePrices(prisma);
+    expect(Number((await prisma.priceList.findFirstOrThrow({ where: { productId: bare.id, tier: 'FRANCHISE' } })).price)).toBe(3);
+    expect(Number((await prisma.priceList.findFirstOrThrow({ where: { productId: plasticXl, tier: 'FRANCHISE' } })).price)).toBe(5);
+  });
+
+  it('shipping to follow: the Franchise Coordinator is told and fills it within 2 days; it becomes its own franchise invoice; everyone is told; later changes need the Owner', async () => {
+    ok(await as('admin').put('/api/settings').send({ 'gl.auto_posting_enabled': true }));
+    const r = ok(await sale('sales.wh', { locationId: wh, channel: 'FRANCHISE', customerId: fr, paymentMode: 'AR_PDC', dueDate: day(30), franchiseShipping: { mode: 'TO_FOLLOW' }, lines: [{ productId: item, qty: 1 }] }).expect(201)).body;
+    const list = ok(await as('franchise.coord').get('/api/franchise-ar/shipping-charges')).body as { id: string; saleId: string; status: string; fillBy: string }[];
+    const ch = list.find((x) => x.saleId === r.id)!; expect(ch.status).toBe('TO_FOLLOW'); expect(ch.fillBy).toBe(day(2));
+    for (const u of ['franchise.coord', 'asst.franchise.coord', 'fr.mayon.owner', 'acct.head', 'acct.assoc', 'head.auditor', 'asst.auditor', 'admin']) expect(await notes(u), u).toContain('FRANCHISE_SHIPPING_TO_FOLLOW');
+    await as('sales.wh').post(`/api/franchise-ar/shipping-charges/${ch.id}/fill`).send({ amount: 350 }).expect(403);
+    await as('fr.mayon.assoc').get('/api/franchise-ar/shipping-charges').expect(403);
+    // the order's own total does not include it
+    expect(Number(r.grandTotal)).toBe(700);
+    const filled = ok(await as('franchise.coord').post(`/api/franchise-ar/shipping-charges/${ch.id}/fill`).send({ amount: 350, courier: 'LBC', reference: 'LBC123' })).body;
+    expect(filled.status).toBe('FILLED'); expect(Number(filled.amount)).toBe(350);
+    await as('franchise.coord').post(`/api/franchise-ar/shipping-charges/${ch.id}/fill`).send({ amount: 100 }).expect(400);
+    const ar = ok(await as('fr.mayon.owner').get('/api/franchise-ar?status=ALL')).body;
+    const inv = ar.franchises.flatMap((f: { invoices: { source: string; controlNo: string; amount: string; dueDate: string }[] }) => f.invoices).find((i: { source: string; controlNo: string }) => i.source === 'SHIPPING' && i.controlNo === `FAR-SHIP-${r.controlNo}`);
+    expect(Number(inv.amount)).toBe(350); expect(inv.dueDate).toBe(day(30));
+    for (const u of ['franchise.coord', 'fr.mayon.owner', 'acct.head', 'head.auditor', 'admin']) expect(await notes(u), u).toContain('FRANCHISE_SHIPPING_INVOICE');
+    const jv = await prisma.journalVoucher.findFirstOrThrow({ where: { sourceDocumentType: 'FranchiseShippingCharge', sourceDocumentId: ch.id }, include: { lines: true } });
+    expect(jv.lines.reduce((t, x) => t + Number(x.debit), 0)).toBe(350);
+    // a change needs the Owner: the sales associate cannot ask, the coordinator asks, only the Owner decides
+    await as('sales.wh').post(`/api/franchise-ar/shipping-charges/${ch.id}/edit`).send({ amount: 400, reason: 'courier changed the rate' }).expect(403);
+    expect((await as('franchise.coord').post(`/api/franchise-ar/shipping-charges/${ch.id}/edit`).send({ amount: 400, reason: 'x' })).status).toBe(400);
+    ok(await as('franchise.coord').post(`/api/franchise-ar/shipping-charges/${ch.id}/edit`).send({ amount: 400, reason: 'courier changed the rate' }));
+    const req = await prisma.approvalRequest.findFirstOrThrow({ where: { type: 'FRANCHISE_SHIPPING_EDIT', documentId: ch.id, status: 'PENDING' } });
+    expect(req.requiredApproverRoles).toEqual(['ADMIN']);
+    await as('franchise.coord').post(`/api/approvals/${req.id}/decide`).send({ decision: 'APPROVE' }).expect(403);
+    ok(await as('admin').post(`/api/approvals/${req.id}/decide`).send({ decision: 'APPROVE' }));
+    const after = ok(await as('fr.mayon.owner').get(`/api/franchise-ar/${inv.id}`)).body;
+    expect(Number(after.amount)).toBe(400); expect(after.adjustments.some((x: { kind: string; delta: string }) => x.kind === 'SHIPPING_EDIT' && Number(x.delta) === 50)).toBe(true);
+    // a second request the Owner rejects leaves the amount alone and tells the coordinator
+    ok(await as('franchise.coord').post(`/api/franchise-ar/shipping-charges/${ch.id}/edit`).send({ amount: 999, reason: 'typed wrong' }));
+    const req2 = await prisma.approvalRequest.findFirstOrThrow({ where: { type: 'FRANCHISE_SHIPPING_EDIT', documentId: ch.id, status: 'PENDING' } });
+    ok(await as('admin').post(`/api/approvals/${req2.id}/decide`).send({ decision: 'REJECT', note: 'keep 400' }));
+    expect(Number(ok(await as('fr.mayon.owner').get(`/api/franchise-ar/${inv.id}`)).body.amount)).toBe(400);
+    expect(await notes('franchise.coord')).toContain('FRANCHISE_SHIPPING_EDIT_REJECTED');
+    ok(await as('admin').put('/api/settings').send({ 'gl.auto_posting_enabled': false }));
+  });
+
+  it('shipping typed at once is billed at once; one not filled after 2 days is reminded every day; "more time" needs the Owner', async () => {
+    const r = ok(await sale('sales.wh', { locationId: wh, channel: 'FRANCHISE', customerId: fr, paymentMode: 'AR_PDC', dueDate: day(30), franchiseShipping: { mode: 'AMOUNT', amount: 120, courier: 'JRS' }, lines: [{ productId: item, qty: 1 }] }).expect(201)).body;
+    const now = ok(await as('fr.mayon.owner').get('/api/franchise-ar/shipping-charges?status=ALL')).body as { saleId: string; status: string; amount: string }[];
+    expect(now.find((x) => x.saleId === r.id)).toMatchObject({ status: 'FILLED' }); expect(Number(now.find((x) => x.saleId === r.id)!.amount)).toBe(120);
+    // refused: shipping typed with no amount; shipping on a non-franchise sale
+    expect((await sale('sales.wh', { locationId: wh, channel: 'FRANCHISE', customerId: fr, paymentMode: 'AR_PDC', dueDate: day(30), franchiseShipping: { mode: 'AMOUNT' }, lines: [{ productId: item, qty: 1 }] })).status).toBe(400);
+    expect((await sale('sales.westave', { channel: 'WALK_IN', paymentMode: 'CASH', franchiseShipping: { mode: 'TO_FOLLOW' }, lines: [{ productId: item, qty: 1 }] })).status).toBe(400);
+    const r3 = ok(await sale('sales.wh', { locationId: wh, channel: 'FRANCHISE', customerId: fr, paymentMode: 'AR_PDC', dueDate: day(30), franchiseShipping: { mode: 'TO_FOLLOW' }, lines: [{ productId: item, qty: 1 }] }).expect(201)).body;
+    const ch = await prisma.franchiseShippingCharge.findUniqueOrThrow({ where: { salesDocId: r3.id } });
+    await prisma.franchiseShippingCharge.update({ where: { id: ch.id }, data: { fillBy: new Date(`${day(-1)}T00:00:00Z`) } });
+    await prisma.notification.deleteMany({ where: { type: 'FRANCHISE_SHIPPING_OVERDUE' } });
+    expect((await app.get(FranchiseShippingService).runDaily()).reminded).toBeGreaterThanOrEqual(1);
+    for (const u of ['franchise.coord', 'asst.franchise.coord', 'fr.mayon.owner', 'acct.head', 'head.auditor', 'admin']) expect(await notes(u), u).toContain('FRANCHISE_SHIPPING_OVERDUE');
+    expect((await app.get(FranchiseShippingService).runDaily()).reminded).toBe(0); // once a day
+    ok(await as('franchise.coord').post(`/api/franchise-ar/shipping-charges/${ch.id}/edit`).send({ fillBy: day(3), reason: 'waiting for the courier receipt' }));
+    const rq = await prisma.approvalRequest.findFirstOrThrow({ where: { type: 'FRANCHISE_SHIPPING_EDIT', documentId: ch.id, status: 'PENDING' } });
+    ok(await as('admin').post(`/api/approvals/${rq.id}/decide`).send({ decision: 'APPROVE' }));
+    expect((await prisma.franchiseShippingCharge.findUniqueOrThrow({ where: { id: ch.id } })).fillBy.toISOString().slice(0, 10)).toBe(day(3));
+  });
+
+  it('the Franchise Coordinator may record sales to franchises only (credit or online); the franchise owner sees only their own franchise\'s transactions and creates them', async () => {
+    ok(await sale('franchise.coord', { locationId: wh, channel: 'FRANCHISE', customerId: fr, paymentMode: 'AR_PDC', dueDate: day(30), franchiseShipping: { mode: 'TO_FOLLOW' }, lines: [{ productId: item, qty: 1 }] }).expect(201));
+    expect((await sale('franchise.coord', { locationId: wh, channel: 'WALK_IN', paymentMode: 'AR_PDC', dueDate: day(30), customerId: fr, lines: [{ productId: item, qty: 1 }] })).status).toBe(403);
+    expect((await sale('franchise.coord', { locationId: wh, channel: 'FRANCHISE', customerId: fr, paymentMode: 'CASH', lines: [{ productId: item, qty: 1 }] })).status).toBe(400);
+    expect((await sale('franchise.coord', { locationId: wh, channel: 'FRANCHISE', paymentMode: 'AR_PDC', dueDate: day(30), lines: [{ productId: item, qty: 1 }] })).status).toBe(403); // no franchisee chosen
+    await as('franchise.coord').get('/api/closing/summary').expect(403); // Daily Close stays with the branches
+    const mine = ok(await as('fr.mayon.owner').get(`/api/sales?from=${day(-1)}&to=${day(1)}`)).body as { locationId: string }[];
+    expect(mine.length).toBeGreaterThan(0); expect(mine.every((x) => x.locationId === mayon)).toBe(true);
+    await as('fr.mayon.owner').post('/api/sales').send({ drSiNo: `FS-${run}-own`, locationId: west, channel: 'WALK_IN', paymentMode: 'CASH', lines: [{ productId: item, qty: 1 }] }).expect(403); // not their franchise
   });
 });

@@ -17,7 +17,7 @@ const BB = z.object({ rows: z.array(z.object({ accountId: z.string().uuid(), deb
 export class AccountsController {
   constructor(private accounts: AccountsService, private md: MasterDataApprovals) {}
   @Get() @RequireAnyPermission('gl.view', 'sale.create', 'expense.create.branch', 'expense.create.main') list(@Query('class') cls?: string, @Query('branchTagId') branchTagId?: string, @Query('entryScope') entryScope?: string, @Query('payment') payment?: string) { return this.accounts.list({ class: cls, branchTagId, entryScope, paymentOnly: payment === '1' }); }
-  @Get('payment') @RequireAnyPermission('sale.create', 'ar.collect', 'expense.create.branch', 'expense.create.main', 'gl.view', 'contribution.remit', 'payroll.close') payment(@Query('locationId') locationId?: string) { return this.accounts.paymentAccounts(locationId); }
+  @Get('payment') @RequireAnyPermission('sale.create', 'sale.create.franchise', 'ar.collect', 'expense.create.branch', 'expense.create.main', 'gl.view', 'contribution.remit', 'payroll.close') payment(@Query('locationId') locationId?: string) { return this.accounts.paymentAccounts(locationId); }
   @Get('templates') @RequirePermission('gl.view') templates() { return this.accounts.templates(); }
   @Get(':id') @RequirePermission('gl.view') get(@Param('id') id: string) { return this.accounts.get(id); }
   @Post() @RequirePermission('gl.account.edit') @Audited('Account', 'CREATE') create(@Body(Z(AccountDto)) dto: z.infer<typeof AccountDto>, @CurrentUser() u: SessionUser) { return this.md.submit('Account', dto, u, { name: dto.title, accountClass: dto.class }, () => this.accounts.create(dto, u.id)); }

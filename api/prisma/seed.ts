@@ -8,6 +8,7 @@ import { seedWorkbooks } from './seed-workbooks';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { normName, parseEcomMasterlist } from '../src/pricing/ecom-masterlist';
+import { ensurePlasticFranchisePrices } from '../src/pricing/plastic-prices';
 
 const prisma = new PrismaClient();
 const DEV_PASSWORD = process.env.SEED_PASSWORD || 'ChangeMe!2026';
@@ -174,6 +175,7 @@ async function main() {
     for (const r of rows) { const id = byName.get(normName(r.name)); if (!id) continue; for (const [tier, price] of [['TIKTOK', r.tiktok], ['SHOPEE', r.shopee]] as const) if (price != null) { await prisma.priceList.upsert({ where: { productId_tier_effectiveFrom: { productId: id, tier, effectiveFrom: day } }, create: { productId: id, tier, effectiveFrom: day, price: price.toFixed(2) }, update: { price: price.toFixed(2) } }); n++; } }
     console.log(`E-commerce masterlist: ${n} platform prices set (${rows.length} rows, ${rows.filter((r) => !byName.has(normName(r.name))).length} names not found in the product list).`);
   }
+  console.log(`Plastic bags: franchise price set on ${await ensurePlasticFranchisePrices(prisma)} product(s) (L 4, M 3, S 3, XL 5).`);
   console.log(`Seed complete. All test users use password: ${DEV_PASSWORD}`);
 }
 

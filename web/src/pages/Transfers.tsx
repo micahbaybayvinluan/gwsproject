@@ -4,6 +4,7 @@ import { ApprovalTimeline } from '@/components/ApprovalTimeline';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { DeleteDraft } from '@/components/DeleteDraft';
 import { api, fmtDate } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { Badge, Button, Card, ErrorBox, Field, Input, Select, statusTone } from '@/components/ui/primitives';
@@ -11,7 +12,7 @@ import { DataTable } from '@/components/ui/table';
 import { Attachments } from '@/components/Attachments';
 import { CorrectionRequest, EditRequests, History, TransferEditor, useEditRights } from '@/components/DocEdits';
 
-interface Tr { pendingReceipt?: unknown; id: string; controlNo: string; docDate: string; status: string; transferType: string; notes: string | null; preparedBy?: string; preparedByName?: string | null; receivedByName?: string | null; fromLocation: { id: string; name: string; type: string }; toLocation: { id: string; name: string; type: string }; lines: { id: string; qtySent: number; qtyReceived: number | null; discrepancyNote: string | null; checkerRemarks: string | null; product: { name: string; sku: string }; batch: { batchNo: string | null; expiryDate: string | null; flavor?: string | null } }[] }
+interface Tr { endorseExpense?: boolean; expenseStatus?: string | null; pendingReceipt?: unknown; id: string; controlNo: string; docDate: string; status: string; transferType: string; notes: string | null; preparedBy?: string; preparedByName?: string | null; receivedByName?: string | null; fromLocation: { id: string; name: string; type: string }; toLocation: { id: string; name: string; type: string }; lines: { id: string; qtySent: number; qtyReceived: number | null; discrepancyNote: string | null; checkerRemarks: string | null; product: { name: string; sku: string }; batch: { batchNo: string | null; expiryDate: string | null; flavor?: string | null } }[] }
 
 const TYPE_ORDER: Record<string, number> = { WAREHOUSE: 0, BRANCH: 1, FRANCHISE: 2, CONSIGNEE: 3, OFFICE: 4 };
 
@@ -53,7 +54,10 @@ export function TransfersPage() {
   // a branch account always sends from its own branch ("From" is fixed); only "To" is chosen
   const from = me!.locationScoped ? own?.id ?? '' : f.fromLocationId; const to = f.toLocationId || (sp.get('to') && sp.get('to') !== from ? sp.get('to')! : '');
   // only what the sending location has on hand (owner request 2026-09-30); a return to the warehouse may include expired stock
-  const withExpired = f.transferType === 'RETURN';
+  // Prothin Marketing / GWS Marketing / BO (owner request 2026-10-01): any branch with stock may give stock out to them; the Head Auditor approves; it can be endorsed to Accounting as an expense
+  const MKT = ['MKT-PROTHIN', 'MKT-GWS', 'BO-BAD']; const [endorse, setEndorse] = useState(false);
+  const marketing = MKT.includes(locations.data?.find((l) => l.id === to)?.code ?? '');
+  const withExpired = f.transferType === 'RETURN' && !marketing;
   const products = useQuery({ queryKey: ['products', search, 'in-stock', from, withExpired], queryFn: () => api.get<{ id: string; name: string; sku: string; onHand?: number }[]>(`/api/products?search=${encodeURIComponent(search)}&take=20&inStockAt=${from}${withExpired ? '&includeExpired=1' : ''}`), enabled: search.length >= 2 && !!from });
   const pushLine = (p: { id: string; name: string }, b?: BatchOpt) => {
     setLines((ls) => { const i = ls.findIndex((x) => x.productId === p.id && (x.batchId ?? null) === (b?.batchId ?? null)); if (i >= 0) return ls.map((x, k) => (k === i ? { ...x, qty: x.qty + 1 } : x));
@@ -62,15 +66,15 @@ export function TransfersPage() {
   };
   const addProduct = async (p: { id: string; name: string }) => { const bs = await loadBatches(p.id, from, withExpired); if (bs.length <= 1) pushLine(p, bs[0]); else { setChoosing({ p, batches: bs }); setSearch(''); } };
   const avail = useQuery({ queryKey: ['wh-avail', lines.map((l) => l.productId).join()], queryFn: () => api.get<{ productId: string; qty: number }[]>(`/api/stock/warehouse-availability?productIds=${lines.map((l) => l.productId).join(',')}`), enabled: lines.length > 0 });
-  const m = useMutation({ mutationFn: () => api.post<{ id: string }>('/api/transfers', { fromLocationId: from, toLocationId: to, transferType: f.transferType, returnReason: f.returnReason || undefined, notes: f.notes, lines: lines.map((l) => ({ productId: l.productId, qty: l.qty, batchId: l.batchId ?? null, exactBatch: !!l.batchId })) }), onSuccess: (r) => { void qc.invalidateQueries({ queryKey: ['transfers'] }); nav(`/transfers/${r.id}`); } });
+  const m = useMutation({ mutationFn: () => api.post<{ id: string }>('/api/transfers', { fromLocationId: from, toLocationId: to, transferType: marketing ? 'MARKETING_PULLOUT' : f.transferType, endorseExpense: marketing ? endorse : undefined, returnReason: f.returnReason || undefined, notes: f.notes, lines: lines.map((l) => ({ productId: l.productId, qty: l.qty, batchId: l.batchId ?? null, exactBatch: !!l.batchId })) }), onSuccess: (r) => { void qc.invalidateQueries({ queryKey: ['transfers'] }); nav(`/transfers/${r.id}`); } });
   return <div className="space-y-4">
     <div className="flex flex-wrap items-end gap-2"><h1 className="mr-auto text-2xl font-bold tracking-tight text-navy">Transfers & Pull-outs</h1><Field label="View"><Select value={direction} onChange={(e) => setDirection(e.target.value)}><option value="">All</option><option value="out">Outgoing (Pull-Out)</option><option value="in">Incoming (Transfer-In)</option></Select></Field><BranchTicks locations={(locations.data ?? []).filter((l) => l.type !== 'VIRTUAL' && !(me!.locationScoped && me!.locations.length === 1 && me!.locations[0].id === l.id))} value={ticked} onChange={setTicked} /></div>
     {me!.locationScoped && !warehouseUser && (can('transfer.confirm') || can('transfer.create')) && <StockRequestCard />}
     {can('transfer.create') && <Card title={warehouseUser ? 'Send stock from the warehouse (to a branch, franchise or consignee)' : me!.locationScoped ? `Pull-out from ${own?.name ?? 'my branch'} (return to warehouse or send to another branch)` : 'New transfer'}>
       <div className="grid gap-3 md:grid-cols-4">
         <Field label="From">{me!.locationScoped ? <div className="flex min-h-9 items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm font-medium" data-testid="from-fixed">{own?.name ?? '—'}</div> : <Select value={from} onChange={(e) => setF({ ...f, fromLocationId: e.target.value })}><option value="">—</option>{locations.data?.map((l) => <option key={l.id} value={l.id}>{locLabel(l)}</option>)}</Select>}</Field>
-        <Field label="To"><Select value={to} onChange={(e) => setF({ ...f, toLocationId: e.target.value })}><option value="">—</option>{locations.data?.filter((l) => (l.type !== 'VIRTUAL' || l.code === 'V-CUSTRET') && l.id !== from).map((l) => <option key={l.id} value={l.id}>{locLabel(l)}</option>)}</Select></Field>
-        <Field label="Type"><Select value={f.transferType} onChange={(e) => setF({ ...f, transferType: e.target.value })}>{['RESTOCK', 'RETURN', 'REPLACEMENT', 'INTERNAL', 'CONSIGNMENT_OUT', 'CONSIGNMENT_RETURN'].map((t) => <option key={t}>{t}</option>)}</Select></Field>
+        <Field label="To"><Select value={to} onChange={(e) => setF({ ...f, toLocationId: e.target.value })}><option value="">—</option>{locations.data?.filter((l) => (l.type !== 'VIRTUAL' || l.code === 'V-CUSTRET') && l.id !== from).map((l) => <option key={l.id} value={l.id}>{locLabel(l)}</option>)}<optgroup label="Stock given out (Head Auditor approves)">{locations.data?.filter((l) => MKT.includes(l.code)).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</optgroup></Select></Field>
+        {marketing ? <div className="md:col-span-2 rounded-xl border border-amber-200 bg-amber-50/70 p-3 text-sm" data-testid="marketing-note"><b>Stock given out to {locations.data?.find((l) => l.id === to)?.name}.</b> The Head Auditor approves; then the stock leaves {me!.locationScoped ? (own?.name ?? 'your branch') : 'the sending location'} at once.<label className="mt-2 flex items-start gap-2"><input type="checkbox" className="mt-1" checked={endorse} onChange={(e) => setEndorse(e.target.checked)} data-testid="endorse-expense" /><span>Endorse to Accounting as an expense (they book it at cost once the Head Auditor has approved).</span></label></div> : <Field label="Type"><Select value={f.transferType} onChange={(e) => setF({ ...f, transferType: e.target.value })}>{['RESTOCK', 'RETURN', 'REPLACEMENT', 'INTERNAL', 'CONSIGNMENT_OUT', 'CONSIGNMENT_RETURN'].map((t) => <option key={t}>{t}</option>)}</Select></Field>}
         {f.transferType === 'RETURN' && <Field label="Return reason"><Select value={f.returnReason} onChange={(e) => setF({ ...f, returnReason: e.target.value })}><option value="">—</option>{['clumped', 'damaged', 'wrong item', 'expired', 'other'].map((r) => <option key={r}>{r}</option>)}</Select></Field>}
         <Field label="Notes" className="md:col-span-4"><Input value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} /></Field>
       </div>
@@ -107,8 +111,10 @@ export function TransferDetailPage() {
   const lineReady = (l: Tr['lines'][number]) => { const r = recv[l.id]; if (r?.checked) return true; if (!r || r.qty === '') return false; return Number(r.qty) >= l.qtySent || !!r.note.trim(); };
   const setLine = (lineId: string, patch: Partial<{ checked: boolean; qty: string; note: string }>) => setRecv((cur) => ({ ...cur, [lineId]: { ...{ checked: false, qty: '', note: '' }, ...cur[lineId], ...patch } }));
   return <div className="mx-auto max-w-4xl space-y-4">
-    <div className="flex flex-wrap items-center gap-2"><h1 className="text-2xl font-bold tracking-tight text-navy">{d.controlNo}</h1><Badge tone={statusTone(d.status)}>{d.status}</Badge>{!!d.pendingReceipt && <Badge tone="amber">Received · waiting for the In-Charge</Badge>}<Badge>{d.transferType}</Badge><span className="ml-auto flex flex-wrap gap-2">
+    <div className="flex flex-wrap items-center gap-2"><h1 className="text-2xl font-bold tracking-tight text-navy">{d.controlNo}</h1><Badge tone={statusTone(d.status)}>{d.status}</Badge>{!!d.pendingReceipt && <Badge tone="amber">Received · waiting for the In-Charge</Badge>}<Badge>{d.transferType === 'MARKETING_PULLOUT' ? `Given out to ${d.toLocation.name}` : d.transferType}</Badge>{d.transferType === 'MARKETING_PULLOUT' && <Badge tone={d.expenseStatus === 'POSTED' ? 'green' : d.expenseStatus === 'PENDING' ? 'amber' : d.expenseStatus === 'REJECTED' ? 'red' : 'slate'}>{d.expenseStatus === 'POSTED' ? 'expense booked by Accounting' : d.expenseStatus === 'PENDING' ? 'expense: waiting for Accounting' : d.expenseStatus === 'REJECTED' ? 'expense not accepted' : d.endorseExpense ? 'will be endorsed to Accounting' : 'not endorsed as expense'}</Badge>}<span className="ml-auto flex flex-wrap gap-2">
+      {d.transferType === 'MARKETING_PULLOUT' && d.status === 'RECEIVED' && (!d.expenseStatus || d.expenseStatus === 'REJECTED') && (can('transfer.create') || can('approval.act.MARKETING_PULLOUT')) && <EndorseButton id={d.id} />}
       {rights.canEdit && !editing && <Button size="sm" onClick={() => { setEditing(true); setMsg(''); }}>{rights.own ? 'Edit draft' : 'Propose edit'}</Button>}
+      {draft && isSender && d.transferType !== 'ECOMMERCE' && (d.preparedBy === me!.id || ['ADMIN', 'WAREHOUSE_IN_CHARGE'].includes(me!.roleKey)) && <DeleteDraft kind="transfer" id={d.id} name={d.controlNo} to="/transfers" />}
       {isSender && <><Button size="sm" variant="outline" onClick={() => api.download(`/api/reports/forms/pull-out/${d.id}.pdf`, `PullOut-${d.controlNo}${sfx}.pdf`)}>{draft ? 'Print Pull-Out (draft)' : 'Pull-Out form'}</Button><Button size="sm" variant="outline" onClick={() => api.download(`/api/reports/forms/pull-out/${d.id}.xlsx`, `PullOut-${d.controlNo}${sfx}.xlsx`)}>xlsx</Button></>}
       <Button size="sm" variant="outline" onClick={() => api.download(`/api/reports/forms/transfer-in/${d.id}.pdf`, `TransferIn-${d.controlNo}${sfx}.pdf`)}>{draft ? 'Print Transfer-In (draft)' : isSender ? 'Transfer-In form' : 'Transfer-In copy'}</Button>
     </span></div>
@@ -205,4 +211,11 @@ function DiscrepancyPanel({ diff, transferId, fromName, fromId, toName, onChange
     {diff.adjustmentForms.length > 0 && <div className="mt-1 flex flex-wrap gap-2 text-sm">Adjustment forms: {diff.adjustmentForms.map((f) => <Link key={f.id} className="text-brand underline" to={`/transfers/${f.id}`}>{f.controlNo} ({f.fromLocation.name} → {f.toLocation.name})</Link>)}</div>}
     <ul className="mt-3 space-y-1 border-t pt-2 text-xs text-slate-600">{diff.history.map((h, i) => <li key={i}>{new Date(h.at).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' })} · <b>{h.byName}</b> · {h.decision}{h.note ? ` — “${h.note}”` : ''}</li>)}</ul>
   </Card>;
+}
+
+/** Sends an approved Marketing / BO pull-out to Accounting to be booked as an expense. */
+function EndorseButton({ id }: { id: string }) {
+  const qc = useQueryClient();
+  const m = useMutation({ mutationFn: () => api.post(`/api/marketing-pullouts/${id}/endorse`), onSuccess: () => void qc.invalidateQueries(), onError: (e: unknown) => window.alert((e as Error).message) });
+  return <Button size="sm" variant="outline" disabled={m.isPending} onClick={() => { if (window.confirm('Endorse this pull-out to Accounting as an expense?')) m.mutate(); }} data-testid="endorse-btn">Endorse to Accounting as expense</Button>;
 }

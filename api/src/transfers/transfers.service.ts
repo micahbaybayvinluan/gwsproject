@@ -2,7 +2,7 @@ import { BadRequestException, ForbiddenException, Injectable, NotFoundException,
 import { Prisma, TransferType } from '@prisma/client';
 import { PrismaService, Tx } from '../common/prisma.service';
 import { SequenceService } from '../common/sequence.service';
-import { StockService, VIRTUAL_CODES } from '../stock/stock.service';
+import { StockService, VIRTUAL_CODES, MARKETING_DESTINATIONS } from '../stock/stock.service';
 import { ApprovalsService } from '../approvals/approvals.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AuditService } from '../common/audit.service';
@@ -21,8 +21,8 @@ import type { ApprovalType } from '../common/permissions';
 /** An item that arrived but is not on the form (or more than the form says). */
 export interface ExtraItem { productId: string; qty: number; note?: string }
 export interface TransferLineInput { productId: string; qty: number; batchId?: string | null; exactBatch?: boolean; checkerRemarks?: string }
-export interface TransferEditInput { toLocationId?: string; transferType?: TransferType; returnReason?: string | null; docDate?: string; notes?: string | null; lines: TransferLineInput[] }
-export interface TransferInput { fromLocationId?: string; toLocationId: string; transferType: TransferType; returnReason?: string; docDate?: string; notes?: string; lines: TransferLineInput[] }
+export interface TransferEditInput { endorseExpense?: boolean; toLocationId?: string; transferType?: TransferType; returnReason?: string | null; docDate?: string; notes?: string | null; lines: TransferLineInput[] }
+export interface TransferInput { endorseExpense?: boolean; fromLocationId?: string; toLocationId: string; transferType: TransferType; returnReason?: string; docDate?: string; notes?: string; lines: TransferLineInput[] }
 
 /** §7.3 Transfers: one document, two views (Pull-Out for sender, Transfer-In for receiver). In-transit until receiver confirms. */
 @Injectable()
@@ -92,7 +92,7 @@ export class TransfersService implements OnModuleInit {
       const controlNo = await this.seq.form(tx, 'PO', from);
       const transferInNo = await this.seq.form(tx, 'TI', toLoc.id);
       const lines = await this.buildLines(tx, fromLoc, input.transferType, input.lines);
-      return tx.transferDoc.create({ data: { controlNo, transferInNo, docDate: input.docDate ? toDateOnly(input.docDate) : todayManila(), fromLocationId: from, toLocationId: toLoc.id, transferType: input.transferType, returnReason: input.returnReason, notes: input.notes, preparedBy: user.id, createdBy: user.id, lines: { create: lines } }, include: TransfersService.INCLUDE });
+      return tx.transferDoc.create({ data: { controlNo, transferInNo, docDate: input.docDate ? toDateOnly(input.docDate) : todayManila(), fromLocationId: from, toLocationId: toLoc.id, transferType: input.transferType, returnReason: input.returnReason, notes: input.notes, endorseExpense: input.transferType === 'MARKETING_PULLOUT' && !!input.endorseExpense, expenseStatus: null, preparedBy: user.id, createdBy: user.id, lines: { create: lines } }, include: TransfersService.INCLUDE });
     });
     await this.audit.log({ action: 'CREATE', entityType: 'TransferDoc', entityId: doc.id, after: doc });
     return doc;
@@ -108,6 +108,10 @@ export class TransfersService implements OnModuleInit {
     if (user.locationScoped && !user.locationIds.includes(fromLoc.id) && !consigneeReturn) throw new ForbiddenException('Transfer forms are prepared by the sending location. To get stock, send a Stock Request to the warehouse.');
     if (transferType === 'CONSIGNMENT_OUT' && toLoc.type !== 'CONSIGNEE') throw new BadRequestException('Consignment out must target a CONSIGNEE location');
     if ((transferType === 'ECOMMERCE') !== ('code' in toLoc && String(toLoc.code).startsWith('ECOM-'))) throw new BadRequestException('E-commerce pull-outs go from the Warehouse to an e-commerce platform, and are made from the E-commerce page');
+    // stock given out to Prothin Marketing / GWS Marketing, or bad orders: from any branch or the warehouse that holds stock (owner request 2026-10-01)
+    const marketingDest = 'code' in toLoc && (MARKETING_DESTINATIONS as readonly string[]).includes(String(toLoc.code));
+    if ((transferType === 'MARKETING_PULLOUT') !== marketingDest) throw new BadRequestException('Prothin Marketing, GWS Marketing and BO are chosen as the destination of a marketing / bad-order pull-out');
+    if (transferType === 'MARKETING_PULLOUT' && !['WAREHOUSE', 'BRANCH', 'OFFICE'].includes(fromLoc.type)) throw new BadRequestException('Marketing and BO pull-outs are made from the warehouse or a GWS branch');
     if (transferType === 'ECOMMERCE' && fromLoc.type !== 'WAREHOUSE') throw new BadRequestException('E-commerce items come from the Warehouse only');
   }
 
@@ -168,8 +172,10 @@ export class TransfersService implements OnModuleInit {
     await this.prisma.db.$transaction(async (tx) => {
       const lines = await this.buildLines(tx, doc.fromLocation, transferType, input.lines);
       await tx.transferLine.deleteMany({ where: { docId: id } });
+      // a changed destination gets a Transfer-In number of its own branch; the old number is given back so there is no gap
+      if (toLoc.id !== doc.toLocationId && doc.transferInNo) await this.seq.release(tx, 'TI', await this.seq.shortCode(tx, doc.toLocationId), SequenceService.numberOf(doc.transferInNo));
       const transferInNo = toLoc.id !== doc.toLocationId ? await this.seq.form(tx, 'TI', toLoc.id) : undefined;
-      await tx.transferDoc.update({ where: { id }, data: { transferInNo, toLocationId: toLoc.id, transferType, returnReason: input.returnReason === undefined ? undefined : input.returnReason, notes: input.notes === undefined ? undefined : input.notes, docDate: input.docDate ? toDateOnly(input.docDate) : undefined, status: 'DRAFT', approvalRequestId: null, updatedBy: actorId, lines: { create: lines } } });
+      await tx.transferDoc.update({ where: { id }, data: { transferInNo, toLocationId: toLoc.id, transferType, endorseExpense: transferType === 'MARKETING_PULLOUT' ? (input.endorseExpense ?? undefined) : false, returnReason: input.returnReason === undefined ? undefined : input.returnReason, notes: input.notes === undefined ? undefined : input.notes, docDate: input.docDate ? toDateOnly(input.docDate) : undefined, status: 'DRAFT', approvalRequestId: null, updatedBy: actorId, lines: { create: lines } } });
     });
     // the edit came from the In-Charge (or Admin) and the preparer accepted it: no second In-Charge approval
     if (wasSubmitted) await this.submitDoc(id, doc.preparedBy ?? doc.createdBy ?? actorId, true);
@@ -218,7 +224,7 @@ export class TransfersService implements OnModuleInit {
   private async requestRouteApproval(id: string, requestedBy: string, afterInCharge = false) {
     const doc = await this.prisma.db.transferDoc.findUniqueOrThrow({ where: { id }, include: TransfersService.INCLUDE });
     if (doc.status !== (afterInCharge ? 'SUBMITTED' : 'DRAFT')) throw new BadRequestException('Only drafts can be submitted');
-    const type: ApprovalType = doc.transferType === 'ECOMMERCE' ? 'ECOM_PULLOUT' : doc.transferType === 'CONSIGNMENT_OUT' || doc.transferType === 'CONSIGNMENT_RETURN' ? 'CONSIGNMENT_OUT' : doc.toLocation.type === 'FRANCHISE' ? 'TRANSFER_TO_FRANCHISE' : 'TRANSFER_INTERNAL';
+    const type: ApprovalType = doc.transferType === 'MARKETING_PULLOUT' ? 'MARKETING_PULLOUT' : doc.transferType === 'ECOMMERCE' ? 'ECOM_PULLOUT' : doc.transferType === 'CONSIGNMENT_OUT' || doc.transferType === 'CONSIGNMENT_RETURN' ? 'CONSIGNMENT_OUT' : doc.toLocation.type === 'FRANCHISE' ? 'TRANSFER_TO_FRANCHISE' : 'TRANSFER_INTERNAL';
     const totalAtCost = sum(doc.lines.map((l) => l.batch.unitCost.mul(l.qtySent)));
     // Optional auto-approve thresholds (§6.1), default off
     const maxInternal = await this.settings.get<number | null>('approval.transfer_internal_auto_max');

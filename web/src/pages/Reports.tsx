@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { api, peso, today } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
-import { Badge, Button, Card, ErrorBox, Field, Input, Modal, Select } from '@/components/ui/primitives';
+import { Badge, Button, Card, ErrorBox, Field, Input, Modal, Select, statusTone } from '@/components/ui/primitives';
 import { Link, useSearchParams } from 'react-router-dom';
 import { DataTable } from '@/components/ui/table';
 import type { ColumnDef } from '@tanstack/react-table';
@@ -82,15 +82,19 @@ function DailyInventoryReport({ locationId }: { locationId: string }) {
   const movedCount = rows.filter((r) => r.moved).length;
   const sum = (k: keyof (typeof rows)[number]) => rows.reduce((t, r) => t + Number(r[k] ?? 0), 0);
   const num = (v: unknown) => <span className="num block">{String(v ?? 0)}</span>;
+  // click a figure (not Sales) to see the forms behind it (owner request 2026-10-01)
+  const [docs, setDocs] = useState<{ productId?: string; item: string; bucket: string; label: string } | null>(null);
+  const range = day === 'ALL' ? { from, to } : { from: day, to: day };
+  const clickable = (bucket: string, label: string) => (c: { getValue: () => unknown; row: { original: { key: string; name: string } } }) => { const v = Number(c.getValue() ?? 0); return v ? <button type="button" className="num block w-full cursor-pointer text-brand underline decoration-dotted underline-offset-2 hover:font-semibold" title={`Which forms made this ${label}?`} onClick={() => setDocs({ productId: c.row.original.key, item: c.row.original.name, bucket, label })}>{v}</button> : num(v); };
   const money = (v: unknown) => <span className="num block">{peso(v)}</span>;
   type Row = (typeof rows)[number];
   const columns: ColumnDef<Row, unknown>[] = [
     { header: 'SKU', accessorKey: 'sku' }, { header: 'Item', accessorKey: 'name', cell: (c) => <span className={c.row.original.moved ? '' : 'text-slate-500'}>{String(c.getValue())}</span> },
     { header: 'Movement', accessorKey: 'moved', cell: (c) => (c.getValue() ? <Badge tone="green">moved</Badge> : <span className="text-xs text-slate-400">none</span>) },
-    { header: 'Beg', accessorKey: 'beg', cell: (c) => num(c.getValue()) }, { header: 'Receive', accessorKey: 'receive', cell: (c) => num(c.getValue()) },
-    { header: 'Transfer In', accessorKey: 'transferIn', cell: (c) => num(c.getValue()) }, { header: 'Returns', accessorKey: 'returns', cell: (c) => num(c.getValue()) },
-    { header: 'Pull Out', accessorKey: 'pullOut', cell: (c) => num(c.getValue()) }, { header: 'Sales', accessorKey: 'sales', cell: (c) => num(c.getValue()) },
-    { header: 'Other Out', accessorKey: 'other', cell: (c) => num(c.getValue()) }, { header: 'Adj', accessorKey: 'adjust', cell: (c) => num(c.getValue()) },
+    { header: 'Beg', accessorKey: 'beg', cell: (c) => num(c.getValue()) }, { header: 'Receive', accessorKey: 'receive', cell: clickable('receive', 'receiving') },
+    { header: 'Transfer In', accessorKey: 'transferIn', cell: clickable('transferIn', 'transfer in') }, { header: 'Returns', accessorKey: 'returns', cell: clickable('returns', 'return') },
+    { header: 'Pull Out', accessorKey: 'pullOut', cell: clickable('pullOut', 'pull-out') }, { header: 'Sales', accessorKey: 'sales', cell: (c) => num(c.getValue()) },
+    { header: 'Other Out', accessorKey: 'other', cell: clickable('other', 'movement') }, { header: 'Adj', accessorKey: 'adjust', cell: clickable('adjust', 'adjustment') },
     { header: 'End', accessorKey: 'end', cell: (c) => <span className="num block font-semibold">{String(c.getValue())}</span> },
     ...(canCost ? [
       { header: 'Transfer In Cost', accessorKey: 'transferInCost', cell: (c) => money(c.getValue()) }, { header: 'Pull Out Cost', accessorKey: 'pullOutCost', cell: (c) => money(c.getValue()) },
@@ -116,6 +120,7 @@ function DailyInventoryReport({ locationId }: { locationId: string }) {
       <p className="mb-2 text-xs text-slate-500"><b>{movedCount} with movement listed first</b>, then {rows.length - movedCount} without. {rep.location.name} · {day === 'ALL' ? `${rep.from} to ${rep.to}` : day} · Receive = supplier receiving, Transfer In = stock received from warehouse/branches, Pull Out = stock sent out, Other Out = freebies/tasting, Adj = count adjustments & write-offs.{canCost ? ' Values at batch cost.' : ''}</p>
       <DataTable data={rows} columns={columns} footer={footer} />
     </>}
+    {docs && <MovementDocs locationId={locationId} from={range.from} to={range.to} {...docs} onClose={() => setDocs(null)} />}
   </Card>;
 }
 
@@ -155,4 +160,27 @@ export function InventoryReportsPage() {
     </Card>
     <Card title="Stock ledger (latest movements) — click a document to open it"><div className="max-h-96 overflow-auto"><table className="w-full text-xs [&_td]:py-1.5"><thead className="sticky top-0 bg-slate-50 text-left"><tr><th>When</th><th>Type</th><th>Product</th><th>Batch</th><th className="num">Qty</th><th>Document</th></tr></thead><tbody>{ledger.data?.filter((l) => matches(search, l.product.name, l.batch.batchNo)).map((l, i) => <tr key={i} className="border-t"><td>{new Date(l.postedAt).toLocaleString()}</td><td>{l.movementType}</td><td>{l.product.name}</td><td>{l.batch.batchNo}</td><td className={`num ${l.qtyDelta < 0 ? 'text-red-700' : 'text-emerald-700'}`}>{l.qtyDelta}</td><td>{l.documentLink ? <Link className="text-brand underline" to={l.documentLink} title="Open the document">{l.documentLabel} {l.documentNo ?? ''}</Link> : <span>{l.documentLabel} {l.documentNo ?? ''}</span>}</td></tr>)}</tbody></table></div></Card>
   </div>;
+}
+
+
+interface MoveDoc { documentType: string; documentId: string; label: string; number: string | null; link: string | null; qty: number; date: string; items: { name: string; qty: number }[]; from: string | null; to: string | null; status: string | null; note: string | null; forms: { label: string; number: string; pdf: string }[]; attachments: { id: string; name: string; contentType: string }[] }
+
+/** The forms behind a figure of the Daily Inventory Report: pull-out / transfer-in / supplier / count forms to open or print, with their attachments. */
+function MovementDocs({ locationId, productId, item, bucket, label, from, to, onClose }: { locationId: string; productId?: string; item: string; bucket: string; label: string; from: string; to: string; onClose: () => void }) {
+  const q = useQuery({ queryKey: ['movement-docs', locationId, productId, bucket, from, to], queryFn: () => api.get<MoveDoc[]>(`/api/stock/movement-documents?locationId=${locationId}${productId ? `&productId=${productId}` : ''}&from=${from}&to=${to}&bucket=${bucket}`) });
+  return <Modal wide title={`Supporting forms: ${label} of ${item}`} onClose={onClose}>
+    <p className="mb-2 text-xs text-slate-500">{from === to ? from : `${from} to ${to}`}. Press a form to open or print it.</p>
+    {q.isLoading && <p className="text-sm text-slate-500">Loading…</p>}
+    {q.error ? <p className="text-sm text-red-700">{(q.error as Error).message}</p> : null}
+    {q.data && !q.data.length && <p className="text-sm text-slate-500">No form found for this figure.</p>}
+    <div className="max-h-[65vh] space-y-3 overflow-y-auto" data-testid="movement-docs">{q.data?.map((d) => <div key={d.documentType + d.documentId} className="rounded-xl border p-3 text-sm">
+      <div className="flex flex-wrap items-center gap-2"><b>{d.label}</b>{d.number && <span className="font-mono text-xs">{d.number}</span>}{d.status && <Badge tone={statusTone(d.status)}>{d.status}</Badge>}<span className="ml-auto text-xs text-slate-500">{d.date} · qty {d.qty}</span></div>
+      {(d.from || d.to) && <div className="text-xs text-slate-600">{d.from ?? ''}{d.to ? ` → ${d.to}` : ''}</div>}
+      <div className="mt-1 text-xs text-slate-600">{d.items.map((i) => `${i.name} × ${i.qty}`).join(' · ')}</div>
+      {d.note && <div className="text-xs text-slate-500">{d.note}</div>}
+      <div className="mt-2 flex flex-wrap gap-2">{d.forms.map((f) => <Button key={f.label} size="sm" variant="outline" onClick={() => api.download(f.pdf, `${f.number}.pdf`)}>{f.label} {f.number}</Button>)}
+        {d.link && <Link className="self-center text-xs font-semibold text-brand underline" to={d.link} onClick={onClose}>Open the document</Link>}
+        {d.attachments.map((a) => <Button key={a.id} size="sm" variant="ghost" onClick={() => api.download(`/api/attachments/file/${a.id}`, a.name)}>📎 {a.name}</Button>)}</div>
+    </div>)}</div>
+  </Modal>;
 }

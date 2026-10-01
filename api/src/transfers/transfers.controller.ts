@@ -7,7 +7,7 @@ import { Z } from '../common/zod.pipe';
 import type { SessionUser } from '../common/request-context';
 
 const Line = z.object({ productId: z.string().uuid(), qty: z.number().int().positive(), batchId: z.string().uuid().nullable().optional(), exactBatch: z.boolean().optional(), checkerRemarks: z.string().optional() });
-const Create = z.object({ fromLocationId: z.string().uuid().optional(), toLocationId: z.string().uuid(), transferType: z.enum(['RESTOCK', 'RETURN', 'REPLACEMENT', 'CONSIGNMENT_OUT', 'CONSIGNMENT_RETURN', 'INTERNAL']), returnReason: z.string().optional(), docDate: z.string().optional(), notes: z.string().optional(), lines: z.array(Line).min(1) });
+const Create = z.object({ fromLocationId: z.string().uuid().optional(), toLocationId: z.string().uuid(), transferType: z.enum(['RESTOCK', 'RETURN', 'REPLACEMENT', 'CONSIGNMENT_OUT', 'CONSIGNMENT_RETURN', 'INTERNAL', 'MARKETING_PULLOUT']), endorseExpense: z.boolean().optional(), returnReason: z.string().optional(), docDate: z.string().optional(), notes: z.string().optional(), lines: z.array(Line).min(1) });
 const Confirm = z.object({ lines: z.array(z.object({ lineId: z.string().uuid(), checked: z.boolean().optional(), qtyReceived: z.number().int().min(0).optional(), discrepancyNote: z.string().optional() })), extras: z.array(z.object({ productId: z.string().uuid(), qty: z.number().int().positive(), note: z.string().optional() })).optional() });
 const Resolve = z.object({ resolution: z.enum(['TO_SENDER', 'TO_RECEIVER', 'WRITEOFF']) });
 const Void = z.object({ reason: z.string().min(3) });

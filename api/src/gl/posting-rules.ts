@@ -125,6 +125,15 @@ export function r7bFranchiseShipping(r: AccountResolver, e: { fromLocationId: st
   const entry: Entry = { rule: 'R4', book: 'BENTA', lines: consolidate(lines), remarks: `Franchise shipping charge ${e.ref}` };
   assertBalanced(entry.lines); return [entry];
 }
+/** Stock given out to Prothin Marketing / GWS Marketing, or written off as bad orders (BO), endorsed to Accounting as an expense at cost. */
+export function r9bStockExpense(r: AccountResolver, e: { fromLocationId: string; destinationCode: string; controlNo: string; lines: CostLine[] }): Entry[] {
+  const expense = e.destinationCode === 'BO-BAD' ? r.global('SPOILAGE') : r.global('MARKETING_STOCK_EXPENSE');
+  const lines: Line[] = [];
+  for (const l of e.lines) { const amt = D(l.unitCost).mul(l.qty); if (amt.isZero()) continue; lines.push(dr(expense, amt)); lines.push(cr(r.branch(inventoryTemplateFor(l.accountingClass), e.fromLocationId), amt)); }
+  if (!lines.length) return [];
+  const entry: Entry = { rule: 'R9', book: 'GASTOS_DC', lines: consolidate(lines), remarks: `${e.destinationCode === 'BO-BAD' ? 'Bad orders' : 'Marketing'} stock expense ${e.controlNo}` };
+  assertBalanced(entry.lines); return [entry];
+}
 // ── R6 transfer between company locations ──
 export function r6Transfer(r: AccountResolver, e: { fromLocationId: string; toLocationId: string; controlNo: string; lines: CostLine[]; shortfall?: { accountingClass: string; qty: number; unitCost: Decimal.Value; charged?: boolean }[] }): Entry[] {
   const lines: Line[] = [];

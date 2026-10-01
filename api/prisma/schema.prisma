@@ -416,6 +416,18 @@ enum DocStatus {
   VOIDED
 }
 
+/// A form number freed when a draft was deleted and could not be closed up by renumbering later drafts; the next new form of that kind takes the lowest one (owner request 2026-10-01: form numbers adjust by themselves)
+model FormNumberReleased {
+  id        String   @id @default(uuid())
+  docType   String   @map("doc_type")
+  scopeKey  String   @map("scope_key")
+  no        Int
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([docType, scopeKey, no])
+  @@map("form_numbers_released")
+}
+
 model ControlSequence {
   id       String @id @default(uuid())
   docType  String @map("doc_type")
@@ -508,6 +520,8 @@ enum TransferType {
   INTERNAL
   /// E-commerce pull-out: warehouse → the platform's "with courier" holding place (TikTok / Shopee / Lazada); the In-Charge approves
   ECOMMERCE
+  /// Stock given out to Prothin Marketing / GWS Marketing, or bad orders (BO): the Head Auditor approves, it can be endorsed to Accounting as an expense
+  MARKETING_PULLOUT
 }
 
 enum TransferStatus {
@@ -526,6 +540,11 @@ model TransferDoc {
   /// Goods into the warehouse confirmed by a Warehouse Associate wait for the In-Charge (lines as confirmed).
   pendingReceipt    Json?          @map("pending_receipt")
   pendingReceiptBy  String?        @map("pending_receipt_by")
+  /// Marketing / BO pull-outs: endorsed to Accounting as an expense (PENDING → POSTED, or REJECTED)
+  endorseExpense    Boolean        @default(false) @map("endorse_expense")
+  expenseStatus     String?        @map("expense_status")
+  expenseAt         DateTime?      @map("expense_at")
+  expenseBy         String?        @map("expense_by")
   /// the receiving location's own number for the same document (Transfer-In), e.g. MY-TI-000003
   transferInNo      String?        @unique @map("transfer_in_no")
   controlNo         String         @map("control_no")

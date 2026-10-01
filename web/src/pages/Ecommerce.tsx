@@ -72,7 +72,7 @@ function PlatformTab({ p, manage, warehouses, overdueDays, openPayout }: { p: P;
 /** Product search box that returns the chosen product. */
 function ProductSearch({ onPick, placeholder = 'Type the GWS product name or SKU…' }: { onPick: (p: { id: string; name: string; sku: string }) => void; placeholder?: string }) {
   const [search, setSearch] = useState('');
-  const products = useQuery({ queryKey: ['products', search], queryFn: () => api.get<{ id: string; name: string; sku: string }[]>(`/api/products?search=${encodeURIComponent(search)}&take=15`), enabled: search.length >= 2 });
+  const products = useQuery({ queryKey: ['products', search], queryFn: () => api.get<{ id: string; name: string; sku: string }[]>(`/api/products?search=${encodeURIComponent(search)}&take=15&ecomFirst=1`), enabled: search.length >= 2 });
   return <div className="relative">
     <Input placeholder={placeholder} value={search} onChange={(e) => setSearch(e.target.value)} />
     {search.length >= 2 && <ul className="absolute z-10 mt-1 max-h-56 w-full divide-y overflow-auto rounded-xl border bg-white text-sm shadow">{products.data?.map((x) => <li key={x.id}><button className="w-full px-3 py-2 text-left hover:bg-slate-50" onClick={() => { onPick(x); setSearch(''); }}>{x.name} <span className="text-xs text-slate-500">{x.sku}</span></button></li>)}{products.data?.length === 0 && <li className="px-3 py-2 text-slate-500">No product found</li>}</ul>}

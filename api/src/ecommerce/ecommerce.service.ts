@@ -325,7 +325,13 @@ export class EcommerceService implements OnModuleInit {
   async deleteSettlement(id: string) {
     const s = await this.prisma.db.ecomSettlement.findUniqueOrThrow({ where: { id } });
     if (!['DRAFT', 'REJECTED'].includes(s.status)) throw new BadRequestException('Only a draft (or a rejected payout) can be deleted');
-    await this.prisma.db.ecomSettlement.delete({ where: { id } });
+    // the form numbers after a deleted draft payout move down one (drafts only); the number left over is reused
+    await this.prisma.db.$transaction(async (tx) => {
+      await tx.ecomSettlement.delete({ where: { id } });
+      const br = s.controlNo.slice(0, s.controlNo.indexOf('-'));
+      const rows = await tx.ecomSettlement.findMany({ where: { controlNo: { startsWith: `${br}-EP-` } }, select: { id: true, controlNo: true, status: true } });
+      await this.seq.closeGap(tx, 'EP', br, SequenceService.numberOf(s.controlNo), rows.map((x) => ({ id: x.id, no: SequenceService.numberOf(x.controlNo), draft: x.status === 'DRAFT' })), async (i, n) => { await tx.ecomSettlement.update({ where: { id: i }, data: { controlNo: n } }); });
+    });
     await this.audit.log({ action: 'DELETE', entityType: 'EcomSettlement', entityId: id, before: { controlNo: s.controlNo } });
     return { ok: true };
   }

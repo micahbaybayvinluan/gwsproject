@@ -37,6 +37,12 @@ export class StockController {
     const loc = this.scope.resolveLocation(u, locationId); const day = manilaDateStr();
     return this.stock.dailyInventory(loc, from || day, to || from || day);
   }
+  /** The forms behind one figure of the Daily Inventory Report (not for sales). */
+  @Get('movement-documents') @RequireAnyPermission('report.inventory.all', 'report.inventory.own')
+  movementDocuments(@CurrentUser() u: SessionUser, @Query('locationId') locationId: string | undefined, @Query('productId') productId: string | undefined, @Query('from') from: string, @Query('to') to: string, @Query('bucket') bucket: string) {
+    const loc = this.scope.resolveLocation(u, locationId);
+    return this.stock.movementDocuments(u, { locationId: loc, productId, from, to: to || from, bucket });
+  }
   @Get('batches/:productId') @RequireAnyPermission('report.inventory.all', 'report.inventory.own', 'sale.create', 'transfer.create')
   async batches(@CurrentUser() u: SessionUser, @Param('productId') productId: string, @Query('locationId') locationId: string) {
     this.scope.assertLocation(u, locationId);

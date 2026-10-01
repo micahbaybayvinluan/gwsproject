@@ -49,6 +49,8 @@ export const APPROVAL_TYPES = [
   'CASH_DEPOSIT_ACCOUNTING',
   'SIXPACK_OVERRIDE',
   'FRANCHISE_SHIPPING_EDIT',
+  'MARKETING_PULLOUT',
+  'PULLOUT_EXPENSE',
 ] as const;
 export type ApprovalType = (typeof APPROVAL_TYPES)[number];
 
@@ -109,6 +111,8 @@ const BASE_KEYS = [
   'ecom.waybill',
   // franchise sales only (Franchise Coordinators) and the shipping charge billed to a franchise
   'sale.create.franchise', 'franchise.shipping.fill',
+  // summary of the stock given out to Prothin Marketing / GWS Marketing / BO
+  'marketing.summary',
 ] as const;
 
 export const PERMISSION_KEYS: readonly string[] = [
@@ -175,7 +179,7 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
     key: 'HEAD_AUDITOR',
     name: 'Head Auditor',
     description: 'Edits/inputs anything; master data with Admin approval; enters/approves costs; approves internal transfers, post-close edits, write-offs.',
-    permissions: ['sixpack.override', 'ecom.waybill', 'approval.act.CASH_DEPOSIT_AUDIT', 'franchise.ar.view', 'memo.create', 'sixpack.view.all', 'stock.flavor.set', 
+    permissions: ['approval.act.MARKETING_PULLOUT', 'marketing.summary', 'sixpack.override', 'ecom.waybill', 'approval.act.CASH_DEPOSIT_AUDIT', 'franchise.ar.view', 'memo.create', 'sixpack.view.all', 'stock.flavor.set', 
       ...READ_ALL, ...COST_BUNDLE, 'product.edit', 'product.create', 'price.edit', 'cost.edit', 'supplier.edit',
       'receiving.create', 'receiving.approve_cost', 'transfer.create', 'transfer.confirm', 'transfer.approve.internal', 'transfer.resolve_discrepancy',
       'sale.create', 'sale.edit.sameday', 'sale.edit.postclose', 'sale.void', 'ar.collect', 'expense.create.branch',
@@ -189,7 +193,7 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
     key: 'ASST_AUDITOR',
     name: 'Assistant Auditor',
     description: 'Edits/inputs transactions with Admin + Head Auditor approval. No master data edits. Approves internal transfers and post-close edits.',
-    permissions: ['approval.act.CASH_DEPOSIT_AUDIT', 'franchise.ar.view', 'sixpack.view.all', 'stock.flavor.set', 
+    permissions: ['marketing.summary', 'approval.act.CASH_DEPOSIT_AUDIT', 'franchise.ar.view', 'sixpack.view.all', 'stock.flavor.set', 
       ...READ_ALL, ...COST_BUNDLE, 'receiving.create', 'transfer.create', 'transfer.confirm', 'transfer.approve.internal',
       'sale.create', 'sale.edit.sameday', 'ar.collect', 'expense.create.branch', 'count.create', 'writeoff.create', 'gl.view',
       'cashfund.view.all', 'cashfund.check', 'inspection.view', 'inspection.create', 'revision.view', 'cashdeposit.view.all', 'sale.incentive',
@@ -200,7 +204,7 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
     key: 'AUDIT_ASSOCIATE',
     name: 'Audit Associate',
     description: 'Views branch reports including supplier cost. Requests corrections (revisions) of branch documents; the Head Auditor approves; the staff involved are notified and the revision is logged.',
-    permissions: ['approval.act.CASH_DEPOSIT_AUDIT', 'franchise.ar.view', 'sixpack.view.all', ...READ_ALL, ...COST_BUNDLE, 'inspection.view', 'revision.request', 'revision.view', 'cashdeposit.view.all'],
+    permissions: ['marketing.summary', 'approval.act.CASH_DEPOSIT_AUDIT', 'franchise.ar.view', 'sixpack.view.all', ...READ_ALL, ...COST_BUNDLE, 'inspection.view', 'revision.request', 'revision.view', 'cashdeposit.view.all'],
   },
   {
     key: 'WAREHOUSE_IN_CHARGE',
@@ -254,7 +258,7 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
     key: 'ACCOUNTING_HEAD',
     name: 'Accounting Head',
     description: 'Ledger, vouchers, main expenses, payroll (per employee), closes payroll. TB and ledgers; no IS/BS pages.',
-    permissions: ['approval.act.CASH_DEPOSIT_ACCOUNTING', 'franchise.ar.view', 'franchise.ar.pay', 'sixpack.view.all', 
+    permissions: ['approval.act.PULLOUT_EXPENSE', 'marketing.summary', 'approval.act.CASH_DEPOSIT_ACCOUNTING', 'franchise.ar.view', 'franchise.ar.pay', 'sixpack.view.all', 
       ...READ_ALL, ...COST_BUNDLE, ...ACCOUNTING_BASE, 'gl.period.lock', 'gl.beginning_balance',
       'payroll.view.summary', 'payroll.view.detail', 'payroll.close', 'expense.view', 'cashfund.view.all', 'cashfund.manage', 'contribution.remit',
       'ar.collect', 'ar.approve', 'ar.opening', 'incentive.view', 'incentive.release', ...approvals('AR_PAYMENT', 'ECOM_SETTLEMENT', 'AGENT_INCENTIVE'), 'gl.voucher.edit', 'bank.entry', 'bs.accounts.view', 'ecom.view',
@@ -264,7 +268,7 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
     key: 'ACCOUNTING_ASSOCIATE',
     name: 'Accounting Associate',
     description: 'Ledger, vouchers, main expenses. Payroll totals only.',
-    permissions: ['approval.act.CASH_DEPOSIT_ACCOUNTING', 'franchise.ar.view', 'franchise.ar.pay', 'sixpack.view.all', ...READ_ALL, ...COST_BUNDLE, ...ACCOUNTING_BASE, 'payroll.view.summary', 'cashfund.view.all', 'ar.collect', 'ar.approve', 'ar.opening', 'incentive.view', 'incentive.release', ...approvals('AGENT_INCENTIVE'), ...approvals('AR_PAYMENT'), 'gl.voucher.edit', 'bank.entry', 'bs.accounts.view', 'ecom.view'],
+    permissions: ['approval.act.PULLOUT_EXPENSE', 'marketing.summary', 'approval.act.CASH_DEPOSIT_ACCOUNTING', 'franchise.ar.view', 'franchise.ar.pay', 'sixpack.view.all', ...READ_ALL, ...COST_BUNDLE, ...ACCOUNTING_BASE, 'payroll.view.summary', 'cashfund.view.all', 'ar.collect', 'ar.approve', 'ar.opening', 'incentive.view', 'incentive.release', ...approvals('AGENT_INCENTIVE'), ...approvals('AR_PAYMENT'), 'gl.voucher.edit', 'bank.entry', 'bs.accounts.view', 'ecom.view'],
   },
   {
     key: 'HR_STAFF',
@@ -389,6 +393,9 @@ export const APPROVAL_ROUTING: Record<ApprovalType, { roles: RoleKey[]; anyOf?: 
   /** A 6-Pack card that cannot be tagged to a customer (data missing): the Head Auditor asks, the Owner approves. */
   SIXPACK_OVERRIDE: { roles: ['ADMIN'] },
   FRANCHISE_SHIPPING_EDIT: { roles: ['ADMIN'] },
+  // stock given out to Prothin Marketing / GWS Marketing / bad orders: the Head Auditor approves; an expense endorsed to Accounting is accepted by Accounting
+  MARKETING_PULLOUT: { roles: ['HEAD_AUDITOR', 'ADMIN'], anyOf: true },
+  PULLOUT_EXPENSE: { roles: ['ACCOUNTING_ASSOCIATE', 'ACCOUNTING_HEAD', 'ADMIN'], anyOf: true },
   /** A branch's cash deposit slip: the Audit Associate checks it first (the auditors and the Owner may too) ... */
   CASH_DEPOSIT_AUDIT: { roles: ['AUDIT_ASSOCIATE', 'HEAD_AUDITOR', 'ASST_AUDITOR', 'ADMIN'], anyOf: true },
   /** ... then the Accounting Associate (the Accounting Head and the Owner may too). */

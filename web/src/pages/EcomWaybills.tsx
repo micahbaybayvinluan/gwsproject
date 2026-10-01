@@ -59,7 +59,7 @@ export function EcomWaybillsPage() {
 
 function WaybillRow({ row: x, onChanged }: { row: Row; onChanged: () => void }) {
   const [edit, setEdit] = useState(false); const [search, setSearch] = useState('');
-  const prods = useQuery({ queryKey: ['wb-products', search], queryFn: () => api.get<Product[]>(`/api/products?search=${encodeURIComponent(search)}&take=8`), enabled: edit && search.length >= 2 });
+  const prods = useQuery({ queryKey: ['wb-products', search], queryFn: () => api.get<Product[]>(`/api/products?search=${encodeURIComponent(search)}&take=8&ecomFirst=1`), enabled: edit && search.length >= 2 });
   const set = useMutation({ mutationFn: (b: { productId?: string | null; qty?: number }) => api.patch(`/api/ecommerce-waybills/${x.id}`, b), onSuccess: () => { setEdit(false); setSearch(''); onChanged(); } });
   const del = useMutation({ mutationFn: () => api.delete(`/api/ecommerce-waybills/${x.id}`), onSuccess: onChanged });
   return <tr className="border-t align-top">

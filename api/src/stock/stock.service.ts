@@ -1,6 +1,6 @@
 import { addFlavor, batchLabel } from './flavors';
 import { randomUUID } from 'crypto';
-import { buildDailyInventory, dateRange, type DailyInventoryReport } from './daily-inventory';
+import { buildDailyInventory, dateRange, type DailyInventoryReport, RECEIVE, TRANSFER_IN, RETURNS, PULL_OUT, OTHER_OUT, ADJUST } from './daily-inventory';
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { MovementType, Prisma } from '@prisma/client';
 import { PrismaService, Tx } from '../common/prisma.service';
@@ -8,7 +8,9 @@ import { manilaDateStr, toDateOnly, todayManila, dateStr } from '../common/manil
 import type { SessionUser } from '../common/request-context';
 import { requestContext } from '../common/request-context';
 
-export const VIRTUAL_CODES = { IN_TRANSIT: 'V-TRANSIT', OPENING: 'V-OPENING', CUSTOMER_RETURNS: 'V-CUSTRET', OFFICE: 'OFFICE', PULLOUT1: 'V-PULLOUT1', PULLOUT2: 'V-PULLOUT2', PULLOUT3: 'V-PULLOUT3', FOR_REPLACEMENT: 'V-REPLACE' } as const;
+/** Where stock goes when it is given to Prothin Marketing / GWS Marketing, or written off as bad orders (BO). */
+export const MARKETING_DESTINATIONS = ['MKT-PROTHIN', 'MKT-GWS', 'BO-BAD'] as const;
+export const VIRTUAL_CODES = { IN_TRANSIT: 'V-TRANSIT', OPENING: 'V-OPENING', CUSTOMER_RETURNS: 'V-CUSTRET', OFFICE: 'OFFICE', PULLOUT1: 'V-PULLOUT1', PULLOUT2: 'V-PULLOUT2', PULLOUT3: 'V-PULLOUT3', FOR_REPLACEMENT: 'V-REPLACE', MKT_PROTHIN: 'MKT-PROTHIN', MKT_GWS: 'MKT-GWS', BAD_ORDER: 'BO-BAD' } as const;
 
 export interface LedgerPost { locationId: string; productId: string; batchId: string; qtyDelta: number; movementType: MovementType; documentType: string; documentId: string; unitCost: Prisma.Decimal | string | number; businessDate?: Date; createdBy?: string }
 export interface Pick { batchId: string; qty: number; unitCost: Prisma.Decimal; expiryDate: Date | null; isConsignmentIn: boolean }
@@ -188,6 +190,50 @@ export class StockService {
         case 'ConsignmentSaleReport': documentLabel = 'Consignee sale'; documentLink = '/consignment'; break;
       }
       return { ...r, documentLabel, documentNo, documentLink };
+    });
+  }
+
+  /**
+   * The forms behind one figure of the Daily Inventory Report (owner request 2026-10-01): click Transfer In, Pull Out, Receive… of an item and see which
+   * documents made that movement (pull-out and transfer-in forms, supplier form with its delivery receipt, count sheet, write-off …), each with its forms to
+   * open or print and its attachments. Sales have no such view.
+   */
+  async movementDocuments(user: SessionUser, q: { locationId: string; productId?: string; from: string; to: string; bucket: string }) {
+    const types: Record<string, MovementType[]> = { receive: RECEIVE, transferIn: [...TRANSFER_IN, 'CONSIGN_OUT'], returns: RETURNS, pullOut: PULL_OUT, other: OTHER_OUT, adjust: ADJUST };
+    if (q.bucket === 'sales') throw new BadRequestException('Sales are shown in the Sales List, not here');
+    const movementTypes = types[q.bucket]; if (!movementTypes) throw new BadRequestException('Unknown column');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(q.from) || !/^\d{4}-\d{2}-\d{2}$/.test(q.to)) throw new BadRequestException('from/to must be YYYY-MM-DD');
+    const rows = await this.prisma.db.stockLedger.findMany({ where: { locationId: q.locationId, productId: q.productId, movementType: { in: movementTypes }, businessDate: { gte: toDateOnly(q.from), lte: toDateOnly(q.to) } }, select: { documentType: true, documentId: true, locationId: true, qtyDelta: true, businessDate: true, product: { select: { sku: true, name: true } } }, orderBy: { postedAt: 'asc' } });
+    const groups = new Map<string, { documentType: string; documentId: string; locationId: string; qty: number; date: string; items: Map<string, number> }>();
+    for (const r of rows) {
+      const k = `${r.documentType}:${r.documentId}`; const g = groups.get(k) ?? { documentType: r.documentType, documentId: r.documentId, locationId: r.locationId, qty: 0, date: dateStr(r.businessDate), items: new Map() };
+      g.qty += Math.abs(r.qtyDelta); g.items.set(r.product.name, (g.items.get(r.product.name) ?? 0) + Math.abs(r.qtyDelta)); groups.set(k, g);
+    }
+    const list = [...groups.values()];
+    const withDocs = await this.withDocuments(list.map((g) => ({ documentType: g.documentType, documentId: g.documentId, locationId: g.locationId })));
+    return requestContext.runSystem(async () => {
+      const tIds = list.filter((g) => g.documentType === 'TransferDoc').map((g) => g.documentId);
+      const transfers = await this.prisma.db.transferDoc.findMany({ where: { id: { in: tIds } }, select: { id: true, controlNo: true, transferInNo: true, status: true, transferType: true, fromLocationId: true, toLocationId: true, fromLocation: { select: { name: true } }, toLocation: { select: { name: true } }, notes: true, returnReason: true } });
+      const rIds = list.filter((g) => g.documentType === 'ReceivingDoc').map((g) => g.documentId);
+      const receivings = await this.prisma.db.receivingDoc.findMany({ where: { id: { in: rIds } }, select: { id: true, controlNo: true, status: true, supplier: { select: { name: true, code: true } }, supplierRef: true } });
+      const atts = await this.prisma.db.attachment.findMany({ where: { documentId: { in: list.map((g) => g.documentId) } }, select: { id: true, documentId: true, fileName: true, contentType: true } });
+      const free = !user.locationScoped; const mine = (id: string) => free || user.locationIds.includes(id);
+      return list.map((g, i) => {
+        const d = withDocs[i]; const forms: { label: string; number: string; pdf: string }[] = [];
+        let from: string | null = null; let to: string | null = null; let status: string | null = null; let note: string | null = null;
+        if (g.documentType === 'TransferDoc') {
+          const t = transfers.find((x) => x.id === g.documentId);
+          if (t) {
+            from = t.fromLocation.name; to = t.toLocation.name; status = t.status; note = t.returnReason ?? t.notes ?? null;
+            if (mine(t.fromLocationId)) forms.push({ label: 'Pull-Out form', number: t.controlNo, pdf: `/api/reports/forms/pull-out/${t.id}.pdf` });
+            if (mine(t.toLocationId) && t.status !== 'DRAFT') forms.push({ label: 'Transfer-In form', number: t.transferInNo ?? t.controlNo, pdf: `/api/reports/forms/transfer-in/${t.id}.pdf` });
+          }
+        } else if (g.documentType === 'ReceivingDoc') {
+          const r = receivings.find((x) => x.id === g.documentId);
+          if (r) { from = r.supplier ? (user.permissions.has('supplier.view.name') ? r.supplier.name : r.supplier.code) : null; status = r.status; note = r.supplierRef ? `Supplier ref ${r.supplierRef}` : null; forms.push({ label: "Supplier's Form", number: r.controlNo, pdf: `/api/reports/forms/supplier-form/${r.id}.pdf` }); }
+        } else if (g.documentType === 'CountDoc') forms.push({ label: 'Count sheet', number: d.documentNo ?? '', pdf: `/api/reports/forms/count/${g.documentId}.pdf` });
+        return { documentType: g.documentType, documentId: g.documentId, label: d.documentLabel, number: d.documentNo, link: d.documentLink, qty: g.qty, date: g.date, items: [...g.items].map(([name, qty]) => ({ name, qty })), from, to, status, note, forms, attachments: atts.filter((a) => a.documentId === g.documentId).map((a) => ({ id: a.id, name: a.fileName, contentType: a.contentType })) };
+      });
     });
   }
 

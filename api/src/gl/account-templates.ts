@@ -92,6 +92,7 @@ export const GLOBAL_ACCOUNTS: { key: string; code?: string; title: string; class
   { key: 'OTHER_INCOME_DISCREPANCY_RECOVERY', title: 'Other Income - Discrepancy Recovery', class: 'OTHER_INCOME' },
   { key: 'OTHER_INCOME_FRANCHISE_LATE_CHARGES', title: 'Other Income - Franchise Late Payment Charges', class: 'OTHER_INCOME' },
   { key: 'SPOILAGE', title: 'Spoilage, Damage, Expired & Others', class: 'OPEX' },
+  { key: 'MARKETING_STOCK_EXPENSE', title: 'Marketing Expense - Stock Given Out', class: 'OPEX' },
   { key: 'SALARIES_OFFICE', title: 'Salaries and Wages - Office', class: 'DIRECT_COST' },
   { key: 'THIRTEENTH_MONTH', title: '13th Month', class: 'DIRECT_COST' },
   { key: 'SSS_PHIC_EXPENSE', title: 'SSS/Philhealth and HDMF Expense', class: 'DIRECT_COST' },

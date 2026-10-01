@@ -38,9 +38,9 @@ export class MasterController {
   @Get('categories') @RequirePermission('product.view') categories() { return this.m.listCategories(); }
   @Post('categories') @RequirePermission('product.edit') @Audited('Category', 'CREATE') createCategory(@Body(Z(CategoryDto)) dto: z.infer<typeof CategoryDto>, @CurrentUser() u: SessionUser) { return this.md.submit('Category', dto, u, { name: dto.name, accountingClass: dto.accountingClass }, () => this.m.createCategory(dto)); }
 
-  @Get('products') @RequirePermission('product.view') products(@CurrentUser() u: SessionUser, @Query('search') search?: string, @Query('categoryId') categoryId?: string, @Query('all') all?: string, @Query('take') take?: string, @Query('inStockAt') inStockAt?: string, @Query('includeExpired') includeExpired?: string) {
+  @Get('products') @RequirePermission('product.view') products(@CurrentUser() u: SessionUser, @Query('search') search?: string, @Query('categoryId') categoryId?: string, @Query('all') all?: string, @Query('take') take?: string, @Query('inStockAt') inStockAt?: string, @Query('includeExpired') includeExpired?: string, @Query('ecomFirst') ecomFirst?: string) {
     if (inStockAt && u.locationScoped && !u.locationIds.includes(inStockAt)) throw new ForbiddenException('Location outside your assignment');
-    return this.m.listProducts(u, { search, categoryId, includeInactive: all === '1', take: take ? Number(take) : undefined, inStockAt, includeExpired: includeExpired === '1' });
+    return this.m.listProducts(u, { search, categoryId, includeInactive: all === '1', take: take ? Number(take) : undefined, inStockAt, includeExpired: includeExpired === '1', ecomFirst: ecomFirst === '1' });
   }
   @Get('products/tiers') @RequirePermission('product.view') tiers() { return this.m.listTiers(); }
   @Post('products/tiers') @RequirePermission('price.edit', 'settings.thresholds') @Audited('PriceTier', 'CREATE') addTier(@Body(Z(TierDto)) dto: z.infer<typeof TierDto>) { return this.m.addTier(dto.key, dto.name); }

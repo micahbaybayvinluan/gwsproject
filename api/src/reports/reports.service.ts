@@ -23,6 +23,9 @@ const r2 = (n: number) => Math.round(n * 100) / 100;
 const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
 /** §7.8 / §8.5 / §13 reports and exports. Every export is audit-logged (§14). */
+/** Forms that list items and quantities (a checker double-checks them on the printed copy). */
+const CHECKER_FORMS = ['pull-out', 'transfer-in', 'dr-sales', 'supplier-form', 'count'];
+
 @Injectable()
 export class ReportsService {
   constructor(private prisma: PrismaService, private xlsx: XlsxService, private pdf: PdfService, private audit: AuditService, private stock: StockService, private fin: FinReportsService, private payroll: PayrollService, private accounts: AccountsService) {}
@@ -203,6 +206,8 @@ export class ReportsService {
   // ── Paper forms (§13) ──
   async form(type: string, id: string, user: SessionUser, format: 'pdf' | 'xlsx'): Promise<Out> {
     const f = await this.withPeople(await this.formData(type, id, user), id);
+    // item forms get a blank "Checker's qty" column at the far right, for the checker to write the quantity counted by hand (owner request 2026-10-01)
+    if (CHECKER_FORMS.includes(type)) { f.columns = [...f.columns, "Checker's qty (write by hand)"]; f.rows = f.rows.map((r) => [...r, '']); }
     await this.logExport(user, `${type}.${format}`, { id });
     if (format === 'xlsx') return { buffer: await this.xlsx.table(f.title, f.columns.map((c, i) => ({ header: c, key: String(i) })), f.rows.map((r) => Object.fromEntries(r.map((v, i) => [String(i), v]))), { title: `${f.title} — ${f.header.map(([k, v]) => `${k}: ${v}`).join(' | ')}` }), contentType: XLSX, fileName: `${f.title.replace(/\W+/g, '_')}_${id.slice(0, 8)}.xlsx` };
     const r = await this.pdf.render(this.pdf.formHtml(f.title, f.header, f.columns, f.rows, f.footer, f.signatures, f.watermark));
@@ -235,7 +240,7 @@ export class ReportsService {
         // the sending side drafts and prints the Pull-Out; the receiving side gets the Transfer-In copy once the transfer is submitted
         const sender = !user.locationScoped || user.locationIds.includes(t.fromLocationId) || t.createdBy === user.id;
         if (!sender && (t.status === 'DRAFT' || type === 'pull-out')) throw new ForbiddenException(t.status === 'DRAFT' ? 'This transfer has not been sent yet' : 'The Pull-Out form is printed by the sending location; print the Transfer-In copy');
-        return { status: t.status, docType: 'TransferDoc', preparedBy: t.preparedBy ?? t.createdBy, receivedBy: t.receivedBy, title: type === 'pull-out' ? 'Pull-Out Form' : 'Transfer-In Form', header: [['Control #', type === 'transfer-in' ? t.transferInNo ?? t.controlNo : t.controlNo], [type === 'transfer-in' ? 'Pull-Out #' : 'Transfer-In #', type === 'transfer-in' ? t.controlNo : t.transferInNo ?? '—'], ['Date', dateStr(t.docDate)], ['From', t.fromLocation.name], ['Trans. To', t.toLocation.name], ['Type', t.transferType], ['Notes', t.notes ?? '']], columns: ['Qty Out', 'Items', 'Batch / Expiry', "Checker's", 'Received Qty', 'Remarks', 'Type'], rows: t.lines.map((l) => [l.qtySent, l.product.name, batchLabel(l.batch), l.checkerRemarks ?? '', l.qtyReceived ?? '', l.discrepancyNote ?? '', t.transferType]), signatures: ['Prepared by', 'Checked by', 'Received by'] };
+        return { status: t.status, docType: 'TransferDoc', preparedBy: t.preparedBy ?? t.createdBy, receivedBy: t.receivedBy, title: type === 'pull-out' ? 'Pull-Out Form' : 'Transfer-In Form', header: [['Control #', type === 'transfer-in' ? t.transferInNo ?? t.controlNo : t.controlNo], [type === 'transfer-in' ? 'Pull-Out #' : 'Transfer-In #', type === 'transfer-in' ? t.controlNo : t.transferInNo ?? '—'], ['Date', dateStr(t.docDate)], ['From', t.fromLocation.name], ['Trans. To', t.toLocation.name], ['Type', t.transferType], ['Notes', t.notes ?? '']], columns: ['Qty Out', 'Items', 'Batch / Expiry', "Checker's remarks", 'Received Qty', 'Remarks', 'Type'], rows: t.lines.map((l) => [l.qtySent, l.product.name, batchLabel(l.batch), l.checkerRemarks ?? '', l.qtyReceived ?? '', l.discrepancyNote ?? '', t.transferType]), signatures: ['Prepared by', 'Checked by', 'Received by'] };
       }
       case 'dr-sales': {
         const s = await db.salesDoc.findUnique({ where: { id }, include: { location: true, customer: true, lines: { include: { product: true, batch: { select: { batchNo: true, expiryDate: true, flavor: true } } } } } }); if (!s) throw new NotFoundException(); scope(s.locationId);

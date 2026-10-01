@@ -27,6 +27,7 @@ import { FranchiseArPage } from '@/pages/FranchiseAr';
 import { MemosPage } from '@/pages/Memos';
 import { SixPackPage } from '@/pages/SixPack';
 import { EcomAnalysisPage } from '@/pages/EcomAnalysis';
+import { MarketingPulloutsPage } from '@/pages/MarketingPullouts';
 import { EcomWaybillsPage } from '@/pages/EcomWaybills';
 import { IncentivesPage } from './pages/Incentives';
 import { ProductDetailPage, ProductsPage, PriceChangesPage, SuppliersPage } from './pages/Products';
@@ -98,6 +99,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
               <Route path="/memos" element={<MemosPage />} />
               <Route path="/six-pack" element={<SixPackPage />} />
               <Route path="/ecom-analysis" element={<EcomAnalysisPage />} />
+              <Route path="/marketing-pullouts" element={<MarketingPulloutsPage />} />
               <Route path="/ecom-waybills" element={<EcomWaybillsPage />} />
               <Route path="/price-changes" element={<PriceChangesPage />} />
               <Route path="/price-changes/:id" element={<PriceChangesPage />} />

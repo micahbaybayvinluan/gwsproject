@@ -59,7 +59,7 @@ export class DashboardController {
         out.expiring = (await this.alerts.expiring(u)).summary;
         // in transit and waiting for the receiver (owner report 2026-09-30): e-commerce pull-outs and consignments are never confirmed, and a
         // receipt already entered by a warehouse associate waits for the In-Charge (in My Approvals), so neither counts here
-        const awaiting = { status: 'APPROVED' as const, pendingReceiptBy: null, transferType: { notIn: ['CONSIGNMENT_OUT' as const, 'ECOMMERCE' as const] }, toLocation: { type: { notIn: ['VIRTUAL' as const, 'CONSIGNEE' as const] } } };
+        const awaiting = { status: 'APPROVED' as const, pendingReceiptBy: null, transferType: { notIn: ['CONSIGNMENT_OUT' as const, 'ECOMMERCE' as const, 'MARKETING_PULLOUT' as const] }, toLocation: { type: { notIn: ['VIRTUAL' as const, 'CONSIGNEE' as const] } } };
         if (u.locationScoped) {
           // a franchise associate confirms only when the franchise owner allows it
           const mine = u.roleKey === 'FRANCHISE_SALES_ASSOCIATE' ? (await this.prisma.db.location.findMany({ where: { id: { in: u.locationIds }, franchiseAssociateReceives: true }, select: { id: true } })).map((l) => l.id) : u.locationIds;

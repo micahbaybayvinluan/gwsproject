@@ -1,3 +1,4 @@
+import { DeleteDraft } from '@/components/DeleteDraft';
 import { ApprovalTimeline } from '@/components/ApprovalTimeline';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
@@ -67,6 +68,7 @@ export function ReceivingDetailPage() {
     <Card title="Lines"><div className="overflow-x-auto"><table className="rcv-lines w-full text-sm"><thead className="text-left text-xs uppercase tracking-wide text-slate-500"><tr><th>Product</th><th className="text-center">Qty</th><th className="text-center">Free (freebie)</th><th>Flavor</th><th>Expiry</th><th>Batch</th>{can('cost.view') && <><th className="num">Std cost</th><th className="num">Cost</th></>}</tr></thead><tbody>{d.lines.map((l) => <tr key={l.id} className="border-t"><td>{l.product.name}{l.isNewProduct && <Badge tone="blue">new</Badge>}{l.costUnchanged && <Badge tone="green">unchanged</Badge>}</td><td className="text-center tabular-nums">{l.qty}</td><td className="text-center tabular-nums">{l.freeQty || '—'}</td><td>{l.flavor ?? '—'}</td><td className="whitespace-nowrap">{fmtDate(l.expiryDate)}</td><td>{l.batchNo}</td>{can('cost.view') && <><td className="num">{l.currentStandardCost != null ? peso(l.currentStandardCost) : '—'}</td><td className="num">{d.status === 'SUBMITTED' && can('cost.edit') ? <Input type="number" step="0.01" className="w-28" placeholder={l.unitCost ?? l.currentStandardCost ?? ''} value={costs[l.id] ?? ''} onChange={(e) => setCosts({ ...costs, [l.id]: e.target.value })} /> : l.unitCost != null ? peso(l.unitCost) : '—'}</td></>}</tr>)}</tbody></table></div>
       <div className="mt-3 flex flex-wrap gap-2">
         {d.status === 'DRAFT' && can('receiving.create') && (d.preparedBy === me?.id || !me?.locationScoped) && <Button onClick={() => submit.mutate()}>Submit for cost approval</Button>}
+        {d.status === 'DRAFT' && (d.preparedBy === me?.id || ['ADMIN', 'WAREHOUSE_IN_CHARGE'].includes(me?.roleKey ?? '')) && <DeleteDraft kind="receiving" id={d.id} name={d.controlNo} to="/receiving" size="md" />}
         {d.status === 'SUBMITTED' && can('cost.edit') && <Button variant="outline" onClick={() => setCost.mutate()} disabled={!Object.keys(costs).length}>Save costs</Button>}
         {d.status === 'SUBMITTED' && pending && can(`approval.act.${pending.type}`) && <><Button onClick={() => decide.mutate('APPROVE')}>{d.lines.every((l) => l.costUnchanged) ? 'Confirm all unchanged & approve' : 'Approve'}</Button><Button variant="danger" onClick={() => decide.mutate('REJECT')}>Reject</Button></>}
       </div>

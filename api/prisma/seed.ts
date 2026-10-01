@@ -40,6 +40,9 @@ const LOCATIONS: { code: string; shortCode: string; name: string; type: 'WAREHOU
   { code: 'V-PULLOUT2', shortCode: 'P2', name: 'Pull Out 2', type: 'VIRTUAL' },
   { code: 'V-PULLOUT3', shortCode: 'P3', name: 'Pull Out 3', type: 'VIRTUAL' },
   { code: 'V-REPLACE', shortCode: 'RP', name: 'For Replacement', type: 'VIRTUAL' },
+  { code: 'MKT-PROTHIN', shortCode: 'PM', name: 'Prothin Marketing', type: 'VIRTUAL' },
+  { code: 'MKT-GWS', shortCode: 'GM', name: 'GWS Marketing', type: 'VIRTUAL' },
+  { code: 'BO-BAD', shortCode: 'BO', name: 'BO (Bad Orders)', type: 'VIRTUAL' },
   // e-commerce holding places: items pulled out of the Warehouse for platform orders, until the platform pays or the parcel returns
   { code: 'ECOM-TIKTOK', shortCode: 'TT', name: 'TikTok – with courier', type: 'VIRTUAL' },
   { code: 'ECOM-SHOPEE', shortCode: 'SP', name: 'Shopee – with courier', type: 'VIRTUAL' },

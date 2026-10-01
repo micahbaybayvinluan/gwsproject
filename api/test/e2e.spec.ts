@@ -64,7 +64,7 @@ async function resetTransactionalData() {
   await prisma.$executeRawUnsafe(`TRUNCATE stock_ledger, stock_balances, receiving_lines, receiving_docs, transfer_lines, transfer_docs, sales_lines, payment_allocations, payments, sales_docs, expense_docs, count_lines, count_docs, discrepancy_cases, charge_form_allocations, charge_form_lines, charge_forms, expiry_writeoff_lines, expiry_writeoff_docs, approval_decisions, approval_requests, notifications, audit_log, batches, daily_closes, post_close_edits, journal_lines, journal_vouchers, beginning_balances, accounting_periods, voucher_sequences, control_sequences, alert_states, attachments, employee_loans, payroll_lines, payroll_runs, employees, min_stock_levels, revaluation_lines, revaluation_entries, cash_deposits, login_session_records, cash_fund_txns, cash_fund_checks, store_inspections, contribution_remittances, document_revisions, price_change_lines, price_change_docs, price_update_logs, franchise_salaries, franchise_charges, franchise_expenses CASCADE`);
   await prisma.$executeRawUnsafe(`TRUNCATE cash_deposits, cash_deposit_extensions, hr_notices, sales_report_submissions`);
   await prisma.$executeRawUnsafe(`TRUNCATE ecom_orders, ecom_order_lines, ecom_settlements, ecom_returns, ecom_ad_spend, ecom_sku_maps, transfer_discrepancies, sales_targets, opening_ar_entries, agent_incentives`);
-  await prisma.$executeRawUnsafe(`TRUNCATE ecom_waybills, ecom_waybill_hints, franchise_payments, franchise_ar_adjustments, franchise_ar_extensions, franchise_invoices, memo_recipients, memos, six_pack_stickers, six_pack_redemptions CASCADE`);
+  await prisma.$executeRawUnsafe(`TRUNCATE franchise_shipping_charges, form_numbers_released, ecom_waybills, ecom_waybill_hints, franchise_payments, franchise_ar_adjustments, franchise_ar_extensions, franchise_invoices, memo_recipients, memos, six_pack_stickers, six_pack_redemptions CASCADE`);
   await prisma.$executeRawUnsafe(`UPDATE locations SET credit_hold = false, credit_hold_note = NULL`);
   await prisma.$executeRawUnsafe(`UPDATE locations SET franchise_associate_receives = false, cash_deposit_max_days = 1`);
   await prisma.$executeRawUnsafe(`UPDATE cash_funds SET balance = imprest_amount`);
@@ -2108,5 +2108,130 @@ describe('Franchise sales: sales associates and the Franchise Coordinator may se
     const mine = ok(await as('fr.mayon.owner').get(`/api/sales?from=${day(-1)}&to=${day(1)}`)).body as { locationId: string }[];
     expect(mine.length).toBeGreaterThan(0); expect(mine.every((x) => x.locationId === mayon)).toBe(true);
     await as('fr.mayon.owner').post('/api/sales').send({ drSiNo: `FS-${run}-own`, locationId: west, channel: 'WALK_IN', paymentMode: 'CASH', lines: [{ productId: item, qty: 1 }] }).expect(403); // not their franchise
+  });
+});
+
+describe('Deleting unfinished drafts: form numbers adjust by themselves (owner request 2026-10-01)', () => {
+  let wh = ''; let west = ''; let item = '';
+  const mk = async (u = 'wh.incharge') => ok(await as(u).post('/api/transfers').send({ fromLocationId: wh, toLocationId: west, transferType: 'RESTOCK', lines: [{ productId: item, qty: 1 }] }).expect((r) => { if (r.status !== 201) console.log('MK', r.status, JSON.stringify(r.body)); }).expect(201)).body as { id: string; controlNo: string; transferInNo: string };
+  const get = async (id: string) => ok(await as('wh.incharge').get(`/api/transfers/${id}`)).body as { controlNo: string; transferInNo: string; status: string };
+  const num = (no: string) => Number(no.split('-').pop());
+  beforeAll(async () => {
+    const locs = ok(await as('admin').get('/api/locations')).body as { id: string; code: string }[];
+    wh = locs.find((l) => l.code === 'WH')!.id; west = locs.find((l) => l.code === 'WESTAVE')!.id;
+    const cats = ok(await as('admin').get('/api/categories')).body as { id: string; accountingClass: string }[];
+    item = ok(await as('admin').post('/api/products').send({ name: `Draft Whey ${run}`, categoryId: cats.find((c) => c.accountingClass === 'SUPPLEMENT')!.id, prices: { RETAIL: 1000 }, cost: 500 })).body.id;
+    const batch = await prisma.batch.create({ data: { productId: item, batchNo: `DR-${run}`, receivedRef: 'TEST', unitCost: '500.00' } });
+    const day = new Date(`${new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10)}T00:00:00Z`);
+    await prisma.stockLedger.create({ data: { locationId: wh, productId: item, batchId: batch.id, qtyDelta: 50, movementType: 'RECEIVE', documentType: 'OpeningStock', documentId: batch.id, unitCost: '500.00', businessDate: day } });
+    await prisma.stockBalance.create({ data: { locationId: wh, productId: item, batchId: batch.id, qty: 50 } });
+  });
+
+  it('deleting a draft moves the later drafts down one number (both the Pull-Out and the Transfer-In), their owners are told, and the next new form follows without a gap', async () => {
+    const a = await mk(); const b = await mk(); const c = await mk();
+    expect(num(b.controlNo)).toBe(num(a.controlNo) + 1); expect(num(c.controlNo)).toBe(num(a.controlNo) + 2);
+    const r = ok(await as('wh.incharge').delete(`/api/drafts/transfer/${a.id}`)).body;
+    expect(r.deleted).toBe(a.controlNo); expect(r.renumbered.length).toBeGreaterThanOrEqual(2);
+    expect((await get(b.id)).controlNo).toBe(a.controlNo); expect((await get(c.id)).controlNo).toBe(b.controlNo);
+    expect((await get(b.id)).transferInNo).toBe(a.transferInNo); expect((await get(c.id)).transferInNo).toBe(b.transferInNo);
+    await as('wh.incharge').get(`/api/transfers/${a.id}`).expect(404);
+    const d = await mk(); expect(d.controlNo).toBe(c.controlNo); expect(d.transferInNo).toBe(c.transferInNo); // no hole, no jump
+  });
+
+  it('a form that is already submitted keeps its number; the freed number is reused by the next new form; only the preparer, the In-Charge or the Owner may delete', async () => {
+    const a = await mk(); const b = await mk();
+    ok(await as('wh.incharge').post(`/api/transfers/${b.id}/submit`));
+    await as('sales.westave').delete(`/api/drafts/transfer/${a.id}`).expect(403);
+    await as('wh.incharge').delete(`/api/drafts/transfer/${b.id}`).expect(400); // sent: cancel (void) instead
+    const r = ok(await as('wh.incharge').delete(`/api/drafts/transfer/${a.id}`)).body;
+    expect(r.renumbered.length).toBe(0); expect((await get(b.id)).controlNo).toBe(b.controlNo);
+    const next = await mk(); expect(next.controlNo).toBe(a.controlNo); // the freed number comes back
+    ok(await as('admin').delete(`/api/drafts/transfer/${next.id}`)); // the Owner may delete any draft
+    await as('admin').delete(`/api/drafts/nonsense/${next.id}`).expect(400);
+  });
+
+  it('count sheets, receiving drafts and inspection drafts can be deleted too', async () => {
+    const rc = ok(await as('wh.assoc').post('/api/receiving').send({ supplierId: (await prisma.supplier.findFirstOrThrow()).id, supplierRef: `DEL-${run}`, lines: [{ productId: item, qty: 2, expiryDate: '2027-12-31', batchNo: `DX-${run}` }] }).expect(201)).body;
+    expect(ok(await as('wh.assoc').delete(`/api/drafts/receiving/${rc.id}`)).body.deleted).toBe(rc.controlNo);
+    expect(await prisma.receivingDoc.findUnique({ where: { id: rc.id } })).toBeNull();
+    const ins = ok(await as('field.auditor').post('/api/inspections').send({ locationId: west, inspectionDate: new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10), items: [] })).body;
+    ok(await as('field.auditor').delete(`/api/drafts/inspection/${ins.id}`));
+    expect(await prisma.storeInspection.findUnique({ where: { id: ins.id } })).toBeNull();
+  });
+});
+
+describe('Pull-outs to Prothin Marketing / GWS Marketing / BO, and the forms behind a movement (owner requests 2026-10-01)', () => {
+  let wh = ''; let west = ''; let item = ''; let prothin = ''; let bo = '';
+  const day = () => new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);
+  const notes = async (u: string) => JSON.stringify(ok(await as(u).get('/api/notifications')).body);
+  beforeAll(async () => {
+    const locs = ok(await as('admin').get('/api/locations')).body as { id: string; code: string }[];
+    wh = locs.find((l) => l.code === 'WH')!.id; west = locs.find((l) => l.code === 'WESTAVE')!.id; prothin = locs.find((l) => l.code === 'MKT-PROTHIN')!.id; bo = locs.find((l) => l.code === 'BO-BAD')!.id;
+    const cats = ok(await as('admin').get('/api/categories')).body as { id: string; accountingClass: string }[];
+    item = ok(await as('admin').post('/api/products').send({ name: `Mkt Whey ${run}`, categoryId: cats.find((c) => c.accountingClass === 'SUPPLEMENT')!.id, prices: { RETAIL: 1000 }, cost: 500 })).body.id;
+    const b = await prisma.batch.create({ data: { productId: item, batchNo: `MK-${run}`, receivedRef: 'TEST', unitCost: '500.00' } });
+    const d = new Date(`${day()}T00:00:00Z`);
+    for (const loc of [west, wh]) { await prisma.stockLedger.create({ data: { locationId: loc, productId: item, batchId: b.id, qtyDelta: 40, movementType: 'RECEIVE', documentType: 'OpeningStock', documentId: b.id, unitCost: '500.00', businessDate: d } }); await prisma.stockBalance.create({ data: { locationId: loc, productId: item, batchId: b.id, qty: 40 } }); }
+  });
+  const onHand = async (loc: string) => (await prisma.stockBalance.aggregate({ where: { locationId: loc, productId: item }, _sum: { qty: true } }))._sum.qty ?? 0;
+
+  it('a branch gives stock to Prothin Marketing: the Head Auditor approves, the stock leaves at once, it is endorsed to Accounting as an expense and booked; BO needs no endorsement', async () => {
+    // the destination and the type go together
+    await as('sales.westave').post('/api/transfers').send({ toLocationId: prothin, transferType: 'RESTOCK', lines: [{ productId: item, qty: 2 }] }).expect(400);
+    await as('sales.westave').post('/api/transfers').send({ toLocationId: wh, transferType: 'MARKETING_PULLOUT', lines: [{ productId: item, qty: 2 }] }).expect(400);
+    ok(await as('admin').put('/api/settings').send({ 'gl.auto_posting_enabled': true }));
+    const t = ok(await as('sales.westave').post('/api/transfers').send({ toLocationId: prothin, transferType: 'MARKETING_PULLOUT', endorseExpense: true, lines: [{ productId: item, qty: 5 }] }).expect(201)).body;
+    ok(await as('sales.westave').post(`/api/transfers/${t.id}/submit`));
+    expect(await onHand(west)).toBe(40); // nothing moves before approval
+    const req = await prisma.approvalRequest.findFirstOrThrow({ where: { type: 'MARKETING_PULLOUT', documentId: t.id, status: 'PENDING' } });
+    expect(req.requiredApproverRoles).toEqual(expect.arrayContaining(['HEAD_AUDITOR']));
+    await as('acct.head').post(`/api/approvals/${req.id}/decide`).send({ decision: 'APPROVE' }).expect(403);
+    ok(await as('head.auditor').post(`/api/approvals/${req.id}/decide`).send({ decision: 'APPROVE' }));
+    expect(await onHand(west)).toBe(35); expect(await onHand(prothin)).toBe(5);
+    expect((await prisma.transferDoc.findUniqueOrThrow({ where: { id: t.id } })).status).toBe('RECEIVED');
+    // endorsed: Accounting is asked, accepts, and the expense is booked at cost (5 × ₱500)
+    const exp = await prisma.approvalRequest.findFirstOrThrow({ where: { type: 'PULLOUT_EXPENSE', documentId: t.id, status: 'PENDING' } });
+    expect(await notes('acct.assoc')).toContain('PULLOUT_EXPENSE');
+    await as('sales.westave').post(`/api/approvals/${exp.id}/decide`).send({ decision: 'APPROVE' }).expect(403);
+    ok(await as('acct.assoc').post(`/api/approvals/${exp.id}/decide`).send({ decision: 'APPROVE' }));
+    const done = await prisma.transferDoc.findUniqueOrThrow({ where: { id: t.id } }); expect(done.expenseStatus).toBe('POSTED');
+    ok(await as('admin').put('/api/settings').send({ 'gl.auto_posting_enabled': false }));
+    // BO: not endorsed at first; endorsed later; Accounting may refuse with a reason and it can be sent again
+    const b = ok(await as('sales.westave').post('/api/transfers').send({ toLocationId: bo, transferType: 'MARKETING_PULLOUT', lines: [{ productId: item, qty: 3 }] }).expect(201)).body;
+    ok(await as('sales.westave').post(`/api/transfers/${b.id}/submit`));
+    ok(await as('head.auditor').post(`/api/approvals/${(await prisma.approvalRequest.findFirstOrThrow({ where: { type: 'MARKETING_PULLOUT', documentId: b.id, status: 'PENDING' } })).id}/decide`).send({ decision: 'APPROVE' }));
+    expect((await prisma.transferDoc.findUniqueOrThrow({ where: { id: b.id } })).expenseStatus).toBeNull();
+    ok(await as('sales.westave').post(`/api/marketing-pullouts/${b.id}/endorse`));
+    await as('sales.westave').post(`/api/marketing-pullouts/${b.id}/endorse`).expect(400); // already with Accounting
+    const exp2 = await prisma.approvalRequest.findFirstOrThrow({ where: { type: 'PULLOUT_EXPENSE', documentId: b.id, status: 'PENDING' } });
+    ok(await as('acct.head').post(`/api/approvals/${exp2.id}/decide`).send({ decision: 'REJECT', note: 'attach the bad-order list' }));
+    expect((await prisma.transferDoc.findUniqueOrThrow({ where: { id: b.id } })).expenseStatus).toBe('REJECTED');
+    ok(await as('sales.westave').post(`/api/marketing-pullouts/${b.id}/endorse`)); // sent again
+    // the summary: per destination, item by item, expensed vs not
+    const sum = ok(await as('head.auditor').get(`/api/marketing-pullouts/summary?from=${day()}&to=${day()}`)).body;
+    const pm = sum.destinations.find((d: { code: string }) => d.code === 'MKT-PROTHIN'); const bd = sum.destinations.find((d: { code: string }) => d.code === 'BO-BAD');
+    expect(pm.totals.units).toBeGreaterThanOrEqual(5); expect(pm.totals.expensedUnits).toBeGreaterThanOrEqual(5);
+    expect(bd.totals.units).toBeGreaterThanOrEqual(3); expect(bd.totals.pendingExpenseUnits).toBeGreaterThanOrEqual(3);
+    expect(pm.products.find((p: { name: string }) => p.name === `Mkt Whey ${run}`).units).toBe(5); expect(Number(pm.totals.value)).toBeGreaterThanOrEqual(2500);
+    // a branch sees only its own; cost only for cost roles
+    const own = ok(await as('sales.westave').get(`/api/marketing-pullouts/summary?from=${day()}&to=${day()}`)).body;
+    expect(own.canCost).toBe(false); expect(JSON.stringify(own)).not.toContain('"value"');
+  });
+
+  it('click a figure of the Daily Inventory Report: the forms behind it (pull-out and transfer-in), never for sales', async () => {
+    const t = ok(await as('wh.incharge').post('/api/transfers').send({ fromLocationId: wh, toLocationId: west, transferType: 'RESTOCK', lines: [{ productId: item, qty: 4 }] }).expect(201)).body;
+    ok(await as('wh.incharge').post(`/api/transfers/${t.id}/submit`));
+    const r = await prisma.approvalRequest.findFirstOrThrow({ where: { documentId: t.id, status: 'PENDING' } });
+    ok(await as('head.auditor').post(`/api/approvals/${r.id}/decide`).send({ decision: 'APPROVE' }));
+    const fl = ok(await as('sales.westave').get(`/api/transfers/${t.id}`)).body.lines as { id: string }[];
+    ok(await as('sales.westave').post(`/api/transfers/${t.id}/confirm`).send({ lines: fl.map((l) => ({ lineId: l.id, checked: true })) }));
+    const q = (bucket: string, u = 'sales.westave', loc = west) => as(u).get(`/api/stock/movement-documents?locationId=${loc}&productId=${item}&from=${day()}&to=${day()}&bucket=${bucket}`);
+    const docs = ok(await q('transferIn')).body as { number: string; forms: { label: string; pdf: string }[]; qty: number; from: string; to: string }[];
+    const mine = docs.find((d) => d.number.startsWith(t.transferInNo))!;
+    expect(mine.qty).toBe(4); expect(mine.forms.map((f) => f.label)).toContain('Transfer-In form'); expect(mine.forms.map((f) => f.label)).not.toContain('Pull-Out form'); // the receiver gets its own copy only
+    const out = ok(await q('pullOut', 'wh.incharge', wh)).body as { forms: { label: string }[] }[];
+    expect(out.some((d) => d.forms.some((f) => f.label === 'Pull-Out form'))).toBe(true);
+    expect((await q('sales')).status).toBe(400);
+    await as('sales.westave').get(`/api/stock/movement-documents?locationId=${wh}&productId=${item}&from=${day()}&to=${day()}&bucket=transferIn`).expect(403);
   });
 });

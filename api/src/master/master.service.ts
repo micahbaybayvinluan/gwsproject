@@ -70,7 +70,7 @@ export class MasterService {
   createCategory(data: Prisma.CategoryCreateInput) { return this.prisma.db.category.create({ data }); }
 
   // ── Products ──
-  async listProducts(user: SessionUser, q: { search?: string; categoryId?: string; includeInactive?: boolean; take?: number; inStockAt?: string; includeExpired?: boolean }) {
+  async listProducts(user: SessionUser, q: { search?: string; categoryId?: string; includeInactive?: boolean; take?: number; inStockAt?: string; includeExpired?: boolean; ecomFirst?: boolean }) {
     const where: Prisma.ProductWhereInput = {};
     // New Sale / Transfers (owner request 2026-09-30): only what the branch actually has; 0 on hand is not offered
     let onHand: Map<string, number> | null = null;
@@ -91,9 +91,15 @@ export class MasterService {
     if (q.categoryId) where.categoryId = q.categoryId;
     if (user.roleKey.startsWith('FRANCHISE')) where.franchiseVisible = true;
     if (q.search) where.OR = [{ name: { contains: q.search, mode: 'insensitive' } }, { sku: { contains: q.search, mode: 'insensitive' } }, { barcode: q.search }];
-    const products = await this.prisma.db.product.findMany({ where, include: { category: true, supplier: { select: { id: true, code: true, name: true } } }, orderBy: { name: 'asc' }, take: q.take ?? 500 });
+    // e-commerce lists (owner request 2026-10-01): products with a TikTok / Shopee / Lazada price come first, those without any at the bottom
+    const take = q.take ?? 500;
+    let products = await this.prisma.db.product.findMany({ where, include: { category: true, supplier: { select: { id: true, code: true, name: true } } }, orderBy: { name: 'asc' }, take: q.ecomFirst ? Math.max(take, 1000) : take });
     const ids = products.map((p) => p.id);
     const prices = await this.currentPrices(ids);
+    if (q.ecomFirst) {
+      const has = (id: string) => { const m = prices.get(id); return !!m && (m.TIKTOK != null || m.SHOPEE != null || m.LAZADA != null); };
+      products = [...products.filter((p) => has(p.id)), ...products.filter((p) => !has(p.id))].slice(0, take);
+    }
     const costs = user.permissions.has('cost.view') ? await this.currentCosts(ids) : new Map<string, string>();
     return products.map((p) => ({ ...p, tierPrices: prices.get(p.id) ?? {}, cost: costs.get(p.id) ?? null, ...(onHand ? { onHand: onHand.get(p.id) ?? 0 } : {}) }));
   }

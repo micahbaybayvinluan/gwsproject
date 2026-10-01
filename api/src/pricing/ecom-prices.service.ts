@@ -35,7 +35,10 @@ export class EcomPricesService {
   async list(q?: string) {
     const products = await this.prisma.db.product.findMany({ where: { active: true, isBundle: false, category: { accountingClass: { in: ['SUPPLEMENT', 'APPAREL', 'EQUIPMENT', 'OTHER', 'REPACKED'] } }, ...(q ? { OR: [{ name: { contains: q, mode: 'insensitive' } }, { sku: { contains: q, mode: 'insensitive' } }] } : {}) }, select: { id: true, sku: true, name: true, brand: true }, orderBy: [{ brand: 'asc' }, { name: 'asc' }] });
     const prices = await this.master.currentPrices(products.map((p) => p.id));
-    return products.map((p) => { const m = prices.get(p.id) ?? {}; return { ...p, retail: m.RETAIL ?? null, cc: m.CC ?? null, tiktok: m.TIKTOK ?? null, shopee: m.SHOPEE ?? null, lazada: m.LAZADA ?? null }; });
+    const rows = products.map((p) => { const m = prices.get(p.id) ?? {}; return { ...p, retail: m.RETAIL ?? null, cc: m.CC ?? null, tiktok: m.TIKTOK ?? null, shopee: m.SHOPEE ?? null, lazada: m.LAZADA ?? null }; });
+    // products with a TikTok / Shopee / Lazada price first; those with none at the bottom (owner request 2026-10-01)
+    const priced = (r: (typeof rows)[number]) => r.tiktok != null || r.shopee != null || r.lazada != null;
+    return [...rows.filter(priced), ...rows.filter((r) => !priced(r))];
   }
 
   /** Set platform prices (today onward); an empty price removes the platform's own price (Lazada then follows Shopee). */

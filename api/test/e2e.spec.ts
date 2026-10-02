@@ -18,6 +18,7 @@ import { FranchiseArService } from '../src/franchise/franchise-ar.service';
 import { FranchiseShippingService } from '../src/franchise/franchise-shipping.service';
 import { ensurePlasticFranchisePrices } from '../src/pricing/plastic-prices';
 import { MonitorService } from '../src/agents/monitor.service';
+import { MessagingService } from '../src/members/messaging.service';
 import { makePdf } from './pdf';
 
 const PW = process.env.SEED_PASSWORD || 'ChangeMe!2026';
@@ -67,6 +68,7 @@ async function resetTransactionalData() {
   await prisma.$executeRawUnsafe(`TRUNCATE ecom_orders, ecom_order_lines, ecom_settlements, ecom_returns, ecom_ad_spend, ecom_sku_maps, transfer_discrepancies, sales_targets, opening_ar_entries, agent_incentives`);
   await prisma.$executeRawUnsafe(`TRUNCATE replacement_receipts, replacement_tickets, franchise_shipping_charges, form_numbers_released, ecom_waybills, ecom_waybill_hints, franchise_payments, franchise_ar_adjustments, franchise_ar_extensions, franchise_invoices, memo_recipients, memos, six_pack_stickers, six_pack_redemptions CASCADE`);
   await prisma.$executeRawUnsafe(`TRUNCATE outlet_changes, outlet_shares, itinerary_claims, itinerary_stops, itineraries, agent_consignment_limits, outlets, sales_areas CASCADE`);
+  await prisma.$executeRawUnsafe(`TRUNCATE campaign_recipients, campaigns, message_opt_outs, members CASCADE`);
   await prisma.$executeRawUnsafe(`UPDATE consignment_agreements SET agent_key = NULL, agent_name = NULL, outlet_id = NULL`);
   await prisma.$executeRawUnsafe(`UPDATE locations SET credit_hold = false, credit_hold_note = NULL`);
   await prisma.$executeRawUnsafe(`UPDATE locations SET franchise_associate_receives = false, cash_deposit_max_days = 1`);
@@ -2613,5 +2615,134 @@ describe('Days of stock left per item, most critical first (owner request 2026-1
     await as('sales.dasma').get(`/api/alerts/days-of-stock?locationId=${west}`).expect(403);
     const own = ok(await as('sales.dasma').get('/api/alerts/days-of-stock')).body.rows as { location: { id: string } }[];
     expect(own.every((x) => x.location.id === dasma)).toBe(true);
+  });
+});
+
+
+describe('Wheysted members: QR card, counter lookup, portal, stats and campaigns (owner request 2026-10-03)', () => {
+  const today = () => new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);
+  const portal = (m: 'get' | 'post', p: string, token?: string) => (m === 'get' ? http.get(p) : http.post(p)).set(...(token ? ['Authorization', `Bearer ${token}`] as [string, string] : ['X-None', '1'] as [string, string]));
+  let pid = ''; let pid2 = ''; let memberId = ''; let memberNo = ''; let qr = ''; const phone = '0917 555 0101';
+
+  it('the counter makes a member (past sales with that number join them), finds them by number / name / phone / QR, and tags a sale; stats, favorites and segments follow', async () => {
+    await prisma.salesReportSubmission.deleteMany({});
+    delete process.env.SMTP_URL; delete process.env.SEMAPHORE_API_KEY;
+    const west = (await prisma.location.findUniqueOrThrow({ where: { code: 'WESTAVE' } })).id;
+    const cats = ok(await as('admin').get('/api/categories')).body as { id: string; accountingClass: string }[];
+    const mk = async (tag: string, brand: string) => { const id = ok(await as('admin').post('/api/products').send({ name: `MEM ${tag} ${run}`, brand, categoryId: cats.find((c) => c.accountingClass === 'SUPPLEMENT')!.id, prices: { RETAIL: 1000 }, cost: 400 })).body.id as string; const b = await prisma.batch.create({ data: { productId: id, batchNo: `M-${tag}-${run}`, receivedRef: 'TEST', unitCost: '400' } }); await prisma.stockLedger.create({ data: { locationId: west, productId: id, batchId: b.id, qtyDelta: 50, movementType: 'RECEIVE', documentType: 'Opening', documentId: `M-${tag}-${run}`, unitCost: '400', businessDate: new Date(`${today()}T00:00:00Z`) } }); await prisma.stockBalance.create({ data: { locationId: west, productId: id, batchId: b.id, qty: 50 } }); return id; };
+    pid = await mk('Whey', 'Prothin'); pid2 = await mk('Creatine', 'Optimum');
+    // a walk-in who left a number BEFORE becoming a member
+    ok(await as('sales.westave').post('/api/sales').send({ channel: 'WALK_IN', paymentMode: 'CASH', drSiNo: `MEM-${run}-0`, customerName: 'Mia Member', customerPhone: '+63 917 555 0101', lines: [{ productId: pid, qty: 1 }] }));
+    const created = ok(await as('sales.westave').post('/api/members').send({ fullName: 'Mia Member', phone, email: `mia${run}@x.test` })).body;
+    memberId = created.id; memberNo = created.memberNo; expect(memberNo).toMatch(/^WHY-\d{6}$/);
+    const dup = await as('sales.csr').post('/api/members').send({ fullName: 'Other', phone: '09175550101' }).expect(400); expect(JSON.stringify(dup.body)).toMatch(/already uses that mobile number/);
+    qr = ok(await as('admin').get(`/api/members/${memberId}`)).body.qr; expect(qr).toMatch(/^WHY:[0-9a-f]{24}$/);
+    for (const q of [memberNo, memberNo.toLowerCase().replace('-', ''), '09175550101', '+639175550101', 'mia memb', qr]) expect((ok(await as('sales.westave').get(`/api/members/lookup?q=${encodeURIComponent(q)}`)).body as { id: string }[]).map((m) => m.id)).toContain(memberId);
+    // the old walk-in sale is already on the account
+    expect((ok(await as('admin').get(`/api/members/${memberId}`)).body.purchases as unknown[]).length).toBe(1);
+    // tag two more sales: favorite = the most bought item
+    ok(await as('sales.westave').post('/api/sales').send({ channel: 'WALK_IN', paymentMode: 'CASH', drSiNo: `MEM-${run}-1`, memberId, customerName: 'Mia Member', customerPhone: phone, lines: [{ productId: pid, qty: 2 }, { productId: pid2, qty: 1 }] }));
+    ok(await as('sales.westave').post('/api/sales').send({ channel: 'WALK_IN', paymentMode: 'CASH', drSiNo: `MEM-${run}-2`, memberId, lines: [{ productId: pid, qty: 1 }] }));
+    const d = ok(await as('admin').get(`/api/members/${memberId}`)).body;
+    expect(d.orders).toBe(3); expect(d.spent).toBe(5000); expect(d.avgOrder).toBeCloseTo(1666.67, 1); expect(d.favoriteProduct).toBe(`MEM Whey ${run}`); expect(d.favoriteBrand).toBe('Prothin'); expect(d.topBranch).toBe('West Ave');
+    expect(d.favorites[0]).toMatchObject({ qty: 4, times: 3 }); expect(d.purchases[0].items.length).toBeGreaterThanOrEqual(1);
+    expect(has(d, /unitCost|"cost"/)).toBe(false);
+    // a member who never bought; segments; listing
+    const never = ok(await as('sales.westave').post('/api/members').send({ fullName: 'Nina Never', email: `nina${run}@x.test`, birthday: `2000-${today().slice(5, 7)}-15` })).body;
+    const list = ok(await as('sales.manager').get('/api/members')).body as { id: string; segments: string[]; orders: number }[];
+    expect(list.find((m) => m.id === never.id)!.segments).toEqual(expect.arrayContaining(['NEVER', 'NEW', 'BIRTHDAY']));
+    expect((ok(await as('sales.manager').get('/api/members?segment=NEVER')).body as { id: string }[]).map((m) => m.id)).toContain(never.id);
+    expect((ok(await as('sales.manager').get('/api/members?search=prothin')).body as { id: string }[]).map((m) => m.id)).toContain(memberId);
+    // who bought this item
+    const who = ok(await as('sales.manager').get(`/api/members/who-bought?productId=${pid2}`)).body as { memberNo: string; qty: number }[];
+    expect(who[0]).toMatchObject({ memberNo, qty: 1 });
+    expect((ok(await as('head.auditor').get(`/api/members/who-bought?search=MEM%20Whey`)).body as { qty: number }[])[0].qty).toBe(4);
+    // sale shows the member; a blocked member cannot be tagged
+    expect((ok(await as('sales.manager').get('/api/sales')).body as { drSiNo: string; member?: { memberNo: string } }[]).find((x) => x.drSiNo === `MEM-${run}-1`)!.member!.memberNo).toBe(memberNo);
+    ok(await as('sales.manager').post(`/api/members/${never.id}`).send({ status: 'BLOCKED' }));
+    await as('sales.westave').post('/api/sales').send({ channel: 'WALK_IN', paymentMode: 'CASH', drSiNo: `MEM-${run}-3`, memberId: never.id, lines: [{ productId: pid, qty: 1 }] }).expect(400);
+    ok(await as('sales.manager').post(`/api/members/${never.id}`).send({ status: 'ACTIVE' }));
+    // who sees what
+    await as('sales.westave').get('/api/members').expect(403); await as('sales.westave').get(`/api/members/${memberId}`).expect(403); await as('sales.westave').get('/api/members/who-bought?search=whey').expect(403);
+    await as('head.auditor').post(`/api/members/${memberId}`).send({ notes: 'x' }).expect(403); await as('head.auditor').post('/api/campaigns/preview').send({ channel: 'EMAIL', audience: { source: 'MEMBERS' } }).expect(403);
+    // making members from the customers already in the sales
+    ok(await as('sales.westave').post('/api/sales').send({ channel: 'WALK_IN', paymentMode: 'CASH', drSiNo: `MEM-${run}-4`, customerName: 'Walter Walkin', customerPhone: '09189990002', customerEmail: `walter${run}@x.test`, lines: [{ productId: pid, qty: 1 }] }));
+    const imp = ok(await as('sales.manager').post('/api/members/import-from-sales')).body; expect(imp.created).toBeGreaterThanOrEqual(1);
+    expect((ok(await as('sales.manager').get('/api/members?search=walter')).body as { orders: number }[])[0].orders).toBe(1);
+  });
+
+  it('the portal: a customer signs up, gets a QR card, claims a counter-made account with the member number, signs in and sees only their own purchases; no way into staff screens', async () => {
+    const bad = await portal('post', '/api/portal/signup').send({ fullName: 'Pat Portal', phone: '09175550222', password: 'longenough1', agree: false }).expect(400); expect(JSON.stringify(bad.body)).toMatch(/agree/i);
+    const s = ok(await portal('post', '/api/portal/signup').send({ fullName: 'Pat Portal', phone: '0917 555 0222', email: `pat${run}@x.test`, password: 'longenough1', agree: true })).body; expect(s.token).toBeTruthy(); expect(s.claimed).toBe(false);
+    const me = ok(await portal('get', '/api/portal/me', s.token)).body; expect(me.memberNo).toMatch(/^WHY-/); expect(me.qr).toMatch(/^WHY:/); expect(me.purchases).toEqual([]);
+    // a sale tagged by the counter shows up
+    const patId = (await prisma.member.findFirstOrThrow({ where: { memberNo: me.memberNo } })).id;
+    ok(await as('sales.westave').post('/api/sales').send({ channel: 'WALK_IN', paymentMode: 'CASH', drSiNo: `MEM-${run}-5`, memberId: patId, lines: [{ productId: pid2, qty: 2 }] }));
+    const me2 = ok(await portal('get', '/api/portal/me', s.token)).body; expect(me2.purchases.length).toBe(1); expect(me2.stats.orders).toBe(1); expect(me2.purchases[0].items[0]).toMatchObject({ qty: 2 }); expect(has(me2, /unitCost|"cost"/)).toBe(false);
+    // the counter's QR scan finds Pat with the card's code
+    expect((ok(await as('sales.westave').get(`/api/members/lookup?q=${encodeURIComponent(me2.qr)}`)).body as { id: string }[])[0].id).toBe(patId);
+    // a person the store made a member must prove it with the member number
+    const noNo = await portal('post', '/api/portal/signup').send({ fullName: 'Mia Member', phone, password: 'longenough2', agree: true }).expect(400); expect(JSON.stringify(noNo.body)).toMatch(/member number/i);
+    await portal('post', '/api/portal/signup').send({ fullName: 'Mia Member', phone, password: 'longenough2', memberNo: 'WHY-999999', agree: true }).expect(400);
+    const claim = ok(await portal('post', '/api/portal/signup').send({ fullName: 'Mia Member', phone, password: 'longenough2', memberNo, agree: true })).body; expect(claim.claimed).toBe(true);
+    const mia = ok(await portal('get', '/api/portal/me', claim.token)).body; expect(mia.memberNo).toBe(memberNo); expect(mia.purchases.length).toBe(3); expect(mia.stats.spent).toBe(5000);
+    await portal('post', '/api/portal/signup').send({ fullName: 'Mia', phone, password: 'longenough3', memberNo, agree: true }).expect(400); // already has an account
+    // sign in / out; wrong password; no token
+    const lg = ok(await portal('post', '/api/portal/login').send({ identifier: '09175550101', password: 'longenough2' })).body; expect(lg.token).toBeTruthy();
+    expect(ok(await portal('post', '/api/portal/login').send({ identifier: memberNo, password: 'longenough2' })).body.token).toBeTruthy();
+    await portal('post', '/api/portal/login').send({ identifier: '09175550101', password: 'nope-nope' }).expect(401);
+    await portal('get', '/api/portal/me').expect(401); await portal('get', '/api/portal/me', 'garbage.token').expect(401);
+    // a member token opens nothing on the staff side
+    for (const p of ['/api/members', '/api/sales', '/api/campaigns', '/api/auth/me']) expect([401, 403]).toContain((await portal('get', p, lg.token)).status);
+    // profile and password
+    ok(await portal('post', '/api/portal/me', lg.token).send({ birthday: '1999-05-05', smsOptIn: false }));
+    expect((await prisma.member.findUniqueOrThrow({ where: { id: memberId } })).smsOptIn).toBe(false);
+    await portal('post', '/api/portal/password', lg.token).send({ current: 'wrong-one', next: 'newpassword1' }).expect(400);
+    ok(await portal('post', '/api/portal/password', lg.token).send({ current: 'longenough2', next: 'newpassword1' }));
+    ok(await portal('post', '/api/portal/login').send({ identifier: '09175550101', password: 'newpassword1' }));
+    // the store resets a forgotten password: the member claims it again
+    ok(await as('sales.manager').post(`/api/members/${memberId}/reset-portal`)); await portal('post', '/api/portal/login').send({ identifier: '09175550101', password: 'newpassword1' }).expect(401);
+  });
+
+  it('campaigns: preview the audience, email through the company email (unsubscribe link, merge fields, opt-outs left out), SMS, and the not-configured case', async () => {
+    delete process.env.SMTP_URL; delete process.env.SEMAPHORE_API_KEY;
+    const cfg = ok(await as('sales.manager').get('/api/campaigns/config')).body; expect(cfg.emailConfigured).toBe(false); expect(cfg.segments.length).toBeGreaterThan(3);
+    const pre = ok(await as('sales.manager').post('/api/campaigns/preview').send({ channel: 'EMAIL', audience: { source: 'MEMBERS' } })).body; expect(pre.count).toBeGreaterThanOrEqual(2);
+    const wholeDb = ok(await as('sales.manager').post('/api/campaigns/preview').send({ channel: 'EMAIL', audience: { source: 'ALL_CONTACTS' } })).body; expect(wholeDb.count).toBeGreaterThanOrEqual(pre.count);
+    const byItem = ok(await as('sales.manager').post('/api/campaigns/preview').send({ channel: 'EMAIL', audience: { source: 'MEMBERS', productId: pid2 } })).body; expect(byItem.count).toBeGreaterThanOrEqual(1); expect(byItem.count).toBeLessThan(pre.count);
+    // not configured: recorded as such, nothing is sent
+    const c0 = ok(await as('sales.manager').post('/api/campaigns').send({ channel: 'EMAIL', name: 'No setup', subject: 'Hi', body: 'Hello {firstName}', audience: { source: 'MEMBERS' } })).body;
+    ok(await as('sales.manager').post(`/api/campaigns/${c0.id}/send`));
+    for (let i = 0; i < 40; i++) { const g = ok(await as('sales.manager').get(`/api/campaigns/${c0.id}`)).body; if (g.status !== 'SENDING') break; await new Promise((r) => setTimeout(r, 150)); }
+    const g0 = ok(await as('sales.manager').get(`/api/campaigns/${c0.id}`)).body; expect(g0.status).toBe('FAILED'); expect(g0.recipients.every((r: { status: string }) => r.status === 'NOT_CONFIGURED')).toBe(true);
+    // a working email: merge fields and the unsubscribe link
+    const sent: { to: string; subject: string; text: string; unsub?: string }[] = [];
+    const ms = app.get(MessagingService); const origEmail = ms.email.bind(ms); const origSms = ms.sms.bind(ms); const origCfg = ms.config.bind(ms);
+    ms.config = () => ({ emailConfigured: true, from: 'shop@gws.test', smsConfigured: true, smsSender: 'GWS' });
+    ms.email = async (to, subject, text, _h, unsub) => { sent.push({ to, subject, text, unsub }); return { status: 'SENT' }; };
+    const smsSent: { to: string; message: string }[] = []; ms.sms = async (to, message) => { smsSent.push({ to, message }); return { status: 'SENT' }; };
+    try {
+      const c1 = ok(await as('sales.manager').post('/api/campaigns').send({ channel: 'EMAIL', name: 'Promo', subject: '20% off, {firstName}', body: 'Hi {name}, your number is {memberNo}', audience: { source: 'MEMBERS' } })).body;
+      ok(await as('sales.manager').post(`/api/campaigns/${c1.id}/send`));
+      for (let i = 0; i < 80; i++) { const g = ok(await as('sales.manager').get(`/api/campaigns/${c1.id}`)).body; if (g.status !== 'SENDING') break; await new Promise((r) => setTimeout(r, 150)); }
+      const g1 = ok(await as('sales.manager').get(`/api/campaigns/${c1.id}`)).body; expect(g1.status).toBe('DONE'); expect(g1.sent).toBe(c1.total); expect(sent.length).toBe(c1.total);
+      const mia = sent.find((x) => x.to === `mia${run}@x.test`)!; expect(mia.subject).toBe('20% off, Mia'); expect(mia.text).toContain(`your number is ${memberNo}`); expect(mia.text).toMatch(/\/api\/portal\/unsubscribe\?t=/); expect(mia.unsub).toContain('/api/portal/unsubscribe');
+      await as('sales.manager').post(`/api/campaigns/${c1.id}/send`).expect(400); // already sent
+      // unsubscribe through the link: the next blast leaves Mia out
+      const t = decodeURIComponent(/unsubscribe\?t=([^\s]+)/.exec(mia.text)![1]);
+      ok(await http.get(`/api/portal/unsubscribe?t=${encodeURIComponent(t)}`));
+      expect((await prisma.member.findUniqueOrThrow({ where: { id: memberId } })).emailOptIn).toBe(false);
+      const after = ok(await as('sales.manager').post('/api/campaigns/preview').send({ channel: 'EMAIL', audience: { source: 'MEMBERS' } })).body; expect(after.count).toBe(pre.count - 1); expect(after.excluded.optedOut).toBeGreaterThanOrEqual(1);
+      await http.get('/api/portal/unsubscribe?t=forged.token').expect(400);
+      // SMS: valid PH numbers only, members who opted out of SMS are left out
+      const smsPre = ok(await as('sales.manager').post('/api/campaigns/preview').send({ channel: 'SMS', audience: { source: 'MEMBERS' } })).body; expect(smsPre.count).toBeGreaterThanOrEqual(1);
+      const c2 = ok(await as('sales.manager').post('/api/campaigns').send({ channel: 'SMS', name: 'Flash sale', body: 'Hi {firstName}! Wheysted flash sale today.', audience: { source: 'MEMBERS' } })).body;
+      ok(await as('sales.manager').post(`/api/campaigns/${c2.id}/send`));
+      for (let i = 0; i < 80; i++) { const g = ok(await as('sales.manager').get(`/api/campaigns/${c2.id}`)).body; if (g.status !== 'SENDING') break; await new Promise((r) => setTimeout(r, 150)); }
+      expect(smsSent.length).toBe(c2.total); expect(smsSent.every((m) => /^09\d{9}$/.test(m.to))).toBe(true); expect(smsSent.some((m) => m.to === '09175550101')).toBe(false); // Mia opted out of SMS
+      await as('sales.manager').post('/api/campaigns').send({ channel: 'SMS', name: 'x', body: 'y'.repeat(481), audience: { source: 'MEMBERS' } }).expect(400);
+      const tst = ok(await as('sales.manager').post('/api/campaigns/test').send({ channel: 'EMAIL', to: 'me@x.test', subject: 'T', body: 'Hello {name}' })).body; expect(tst.status).toBe('SENT'); expect(sent.at(-1)!.subject).toBe('[TEST] T');
+    } finally { ms.email = origEmail; ms.sms = origSms; ms.config = origCfg; }
+    expect((ok(await as('sales.manager').get('/api/campaigns')).body as unknown[]).length).toBeGreaterThanOrEqual(3);
   });
 });

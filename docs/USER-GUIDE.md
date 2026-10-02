@@ -511,6 +511,29 @@ Each platform has its own tab, reports and accounts; nothing is mixed. E-commerc
 <!-- for: sale.create, sale.create.warehouse -->
 In **New Sale**, under **Agent's outlet / gym (optional)**, pick the **agent** first and then one of that agent's **approved outlets**. The sale shows the outlet in the Sales list and the agent sees the order under My Sales and on the outlet. Tagging does not change the price or the agent's incentive. If the outlet is not listed, the agent uploads it under Outlets and the Sales Manager approves it first.
 
+## Wheysted members: customers with a QR card
+<!-- for: member.view, member.manage, member.blast, sale.create, sale.create.warehouse -->
+**What it is.** A customer who joins becomes a **Wheysted member** with a member number (WHY-000001) and a **QR card**. Every purchase tagged to the member builds their profile, and the member can see their own purchases online.
+
+**At the counter (every sale).** In **New Sale**, under **Wheysted member**: scan the customer's QR card (a USB / Bluetooth QR scanner types the code into the box; on a phone or tablet press **📷 Scan**), or type the member number, name or phone and pick them. Their name, number and email fill in, and the sale goes on their account. New customer? Press **+ New member** (name and mobile number; the number and QR card are made at once). Past sales that carry the same mobile number join the new member automatically.
+
+**Wheysted Members** (Sales Manager, Owner; the Head Auditor can view).
+- The list shows every member with orders, amount spent, average order, orders per month, last purchase and days since, **favorite item, brand and category**, main branch, segments, joined date and whether they have an online account. **Click a title to sort** (for example by amount spent or by days since the last purchase) and use the **filter under each title**. **Export xlsx / CSV** exports what is shown.
+- **Segments:** VIP (top 10% spenders with 2+ orders), Frequent buyers (3+ orders and at least one a month), New (joined in the last 30 days), At risk (no purchase for 46–90 days), Lapsed (over 90 days), Never bought, Birthday this month. Choose one under **Show**.
+- Click a member to see their **QR card (Print card)**, contact details, what they buy most, spending by month and every purchase with its items. The Sales Manager can edit the details, set whether they agreed to emails / SMS, put past sales with their number on the account, reset their online password, or block them.
+- **Who bought this item:** type an item (or part of its name), pick it, optionally choose dates: the customers who bought it are listed with times, quantity, amount and last purchase (members and also customers who only left a number or name at the counter).
+- **Make members from my sales** turns the customers already in your sales (name with a mobile number or email) into members, and puts their past purchases on their accounts. Do this once, after checking.
+
+**The member page for customers.** Customers open **your web address followed by /member** (for example `https://your-site/member`) on their phone: **Become a member** (name, mobile, email, password; they tick that they agree to the terms and, if they want, to emails / SMS), then **My card** (the QR code and number to show at the counter), **My purchases** (every purchase with its items) and **My details**. If the store already made them a member, they type the **member number** when signing up to open that account (the mobile number must match). A customer's own sign-up never shows other people's past purchases. A forgotten password is reset by the store (Reset online password).
+
+## Email and SMS campaigns
+<!-- for: member.blast -->
+1. Open **Email & SMS**. The two boxes at the top say whether email and SMS are ready. Setup (once, in `api/.env`, then restart): **email** = `SMTP_URL` (your mail server) and `MAIL_FROM` (the one company email all blasts come from), **SMS** = `SEMAPHORE_API_KEY` (and `SEMAPHORE_SENDER`), and `PUBLIC_URL` (the web address customers use, so the unsubscribe link works).
+2. Choose **Email blast** or **SMS blast**. **Send to** the Wheysted members, or everyone in your customer database (members plus customers who left a number or email at the counter). Narrow it to a **segment** (for example At risk or Lapsed) and / or to those **who bought a given item**. Press **Count who will receive it**: people who unsubscribed, did not agree, or have no valid email / mobile number are left out and counted.
+3. Type the message. You can use **{name}**, **{firstName}** and **{memberNo}**. An SMS can be up to 480 characters (3 SMS). Every email gets an **unsubscribe link** (the person is taken off the list at once). Press **Send me a test** first.
+4. **Prepare campaign**, open it in the list, check the count and press **Send**. It goes out one by one; the page shows sent / failed / left out and each person's result. A campaign that could not go out because email / SMS was not set up can be sent again after the setup.
+5. Send sparingly: customers can unsubscribe, and SMS has no unsubscribe reply.
+
 ## Searching any list
 <!-- for: all -->
 Every list with six or more rows has a **Search this list** box above it. Type part of a name, a number, a product, a branch or a date: every word you type must appear in the row (in any order), and the other rows are hidden. Clear the box to see everything again. In long lists the **column titles stay frozen** at the top while you scroll the rows (and the totals row stays at the bottom), so you always see which column is which. A search on the list only looks at what is loaded; on **6-Pack Card** the search looks through the whole period you chose (change **from / to** to look further back), and on **Notifications** it looks through all your notifications.

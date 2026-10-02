@@ -10,7 +10,7 @@ async function req<T>(method: string, path: string, body?: unknown, opts: { raw?
   if (token) headers.Authorization = `Bearer ${token}`;
   if (body !== undefined && !opts.form) headers['Content-Type'] = 'application/json';
   const res = await fetch(`${BASE}${path}`, { method, headers, credentials: 'include', body: opts.form ?? (body !== undefined ? JSON.stringify(body) : undefined) });
-  if (res.status === 401 && !path.includes('/auth/login')) { const j = await res.json().catch(() => ({})); if (j.code === 'TOTP_REQUIRED') { window.location.href = '/login?totp=1'; } else if (j.code === 'SESSION_REPLACED') { setToken(null); window.location.href = '/login?replaced=1'; } else { setToken(null); if (!window.location.pathname.startsWith('/login')) window.location.href = '/login'; } throw new ApiError(401, j); }
+  if (res.status === 401 && !path.includes('/auth/login')) { const j = await res.json().catch(() => ({})); if (j.code === 'TOTP_REQUIRED') { window.location.href = '/login?totp=1'; } else if (j.code === 'SESSION_REPLACED') { setToken(null); window.location.href = '/login?replaced=1'; } else { setToken(null); if (!window.location.pathname.startsWith('/login') && window.location.pathname !== '/member') window.location.href = '/login'; } throw new ApiError(401, j); }
   if (!res.ok) { const body = await res.json().catch(() => ({ message: res.statusText })); if (res.status === 403 && ['PASSWORD_CHANGE_REQUIRED', 'ACCOUNTABILITY_REQUIRED'].includes((body as { code?: string }).code ?? '') && window.location.pathname !== '/') window.location.href = '/'; throw new ApiError(res.status, body); }
   if (opts.raw) return (await res.blob()) as unknown as T;
   const text = await res.text(); return (text ? JSON.parse(text) : null) as T;

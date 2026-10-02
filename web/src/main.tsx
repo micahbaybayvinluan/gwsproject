@@ -26,6 +26,9 @@ import { OutletsPage } from './pages/Outlets';
 import { ItineraryPage } from './pages/Itinerary';
 import { FieldMonitorPage } from './pages/FieldMonitor';
 import { AgentConsignmentsPage } from './pages/AgentConsignments';
+import { MembersPage } from './pages/Members';
+import { CampaignsPage } from './pages/Campaigns';
+import { PortalPage } from './pages/Portal';
 import { EcomPricesPage } from '@/pages/EcomPrices';
 import { FranchiseArPage } from '@/pages/FranchiseAr';
 import { MemosPage } from '@/pages/Memos';
@@ -70,6 +73,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         <BrowserRouter>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
+            <Route path="/member" element={<PortalPage />} />
             <Route element={<Guard><Layout /></Guard>}>
               <Route path="/" element={<DashboardPage />} />
               <Route path="/approvals" element={<ApprovalsPage />} />
@@ -96,6 +100,8 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
               <Route path="/ecommerce" element={<EcommercePage />} />
               <Route path="/targets" element={<TargetsPage />} />
               <Route path="/my-sales" element={<MySalesPage />} />
+              <Route path="/members" element={<MembersPage />} />
+              <Route path="/campaigns" element={<CampaignsPage />} />
               <Route path="/outlets" element={<OutletsPage />} />
               <Route path="/itinerary" element={<ItineraryPage />} />
               <Route path="/field" element={<FieldMonitorPage />} />

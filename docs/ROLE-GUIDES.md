@@ -25,9 +25,10 @@ You run one branch: sales, expenses, stock received and sent, the weekly count, 
    - **Credit card:** choose the account, then type MID, slip no., approval code and batch no., and upload the slip.
    - **AR / PDC (credit):** choose the customer and the due date; add the cheque details if any.
    - **Delivery:** choose the rider and type the delivery fee.
-5. **Incentive paid from the sale:** press **+ Add incentive expense**, choose the type (sales or rider/driver), who receives it and the amount. It is taken from the cash to deposit and recorded as your branch's expense.
-6. A price lower than the list price is a **special price**: it is saved, and the Owner approves it.
-7. Press **Review sale**. Check every detail on the review screen (items, flavor / expiry, quantities, prices, payment, customer, total), then press **Confirm and save sale**, or **Go back and edit**. Stock is deducted at once.
+5. **Wheysted member:** if the customer is a member, scan their QR card (or type the member number, name or phone) under **Wheysted member**: the sale goes on their account and their details fill in. A new customer who wants to join: **+ New member** (name and mobile number). The member sees the purchase on their own member page.
+6. **Incentive paid from the sale:** press **+ Add incentive expense**, choose the type (sales or rider/driver), who receives it and the amount. It is taken from the cash to deposit and recorded as your branch's expense.
+7. A price lower than the list price is a **special price**: it is saved, and the Owner approves it.
+8. Press **Review sale**. Check every detail on the review screen (items, flavor / expiry, quantities, prices, payment, customer, total), then press **Confirm and save sale**, or **Go back and edit**. Stock is deducted at once.
 
 **Mistakes on a sale**
 - Before today's report is submitted: open the sale in **Sales List** and **Void** it with a reason, then record it again.
@@ -576,6 +577,10 @@ You follow the sales of every branch, agent and e-commerce platform, and you set
 1. Choose the month. Each agent's total sales (every branch), what is collected and what is unpaid are listed.
 2. Type the incentive as a % of sales or as an amount and press **Confirm**.
 3. It goes to the Accounting Associate, the Accounting Head and the Owner. After the Owner approves, the release form goes to HR, and Accounting tags the payment. You are told at each step.
+
+**Wheysted members and campaigns** (menus: Wheysted Members, Email & SMS)
+1. **Wheysted Members:** every member with what they buy, how often, how much and when they last bought. Click a title to sort, use the filter under it, or choose a segment (VIP, Frequent, At risk, Lapsed, New, Never bought, Birthday). **Who bought this item** lists the customers of one item. **Make members from my sales** turns the customers already in your sales into members.
+2. **Email & SMS:** choose the audience (members, or everyone in the database; a segment; those who bought an item), **Count who will receive it**, write the message with {firstName}, send a test to yourself, then **Prepare campaign** and **Send**. Unsubscribed people are left out automatically.
 
 **Outlets, itineraries and consignments of your agents** (menus: Outlets, Field Monitoring, Agent Consignments)
 1. **Outlets → Waiting for approval:** the outlets the agents uploaded (with contact person, number, email, picture). Tick and **Approve**, or **Reject** with the reason. Only approved outlets can be tagged on sales and itineraries.

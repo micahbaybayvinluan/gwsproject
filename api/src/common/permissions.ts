@@ -121,6 +121,8 @@ const BASE_KEYS = [
   'replacement.create', 'replacement.view',
   // agent field work: see every agent outlets, itineraries and visit photos (Sales Manager, Head Auditor, Owner); manage areas, approve outlets, set consignment limits (Sales Manager)
   'outlet.view.all', 'outlet.manage',
+  // Wheysted members (customers with a QR card and a portal): see and sort them, add / edit / import them, send email and SMS campaigns
+  'member.view', 'member.manage', 'member.blast',
 ] as const;
 
 export const PERMISSION_KEYS: readonly string[] = [
@@ -187,7 +189,7 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
     key: 'HEAD_AUDITOR',
     name: 'Head Auditor',
     description: 'Edits/inputs anything; master data with Admin approval; enters/approves costs; approves internal transfers, post-close edits, write-offs.',
-    permissions: ['outlet.view.all', 'approval.act.REPLACEMENT_TICKET', 'approval.act.SUPPLIER_RETURN', 'replacement.create', 'replacement.view', 'approval.act.MARKETING_PULLOUT', 'marketing.summary', 'sixpack.override', 'ecom.waybill', 'approval.act.CASH_DEPOSIT_AUDIT', 'franchise.ar.view', 'memo.create', 'sixpack.view.all', 'stock.flavor.set', 
+    permissions: ['member.view', 'outlet.view.all', 'approval.act.REPLACEMENT_TICKET', 'approval.act.SUPPLIER_RETURN', 'replacement.create', 'replacement.view', 'approval.act.MARKETING_PULLOUT', 'marketing.summary', 'sixpack.override', 'ecom.waybill', 'approval.act.CASH_DEPOSIT_AUDIT', 'franchise.ar.view', 'memo.create', 'sixpack.view.all', 'stock.flavor.set', 
       ...READ_ALL, ...COST_BUNDLE, 'product.edit', 'product.create', 'price.edit', 'cost.edit', 'supplier.edit',
       'receiving.create', 'receiving.approve_cost', 'transfer.create', 'transfer.confirm', 'transfer.approve.internal', 'transfer.resolve_discrepancy',
       'sale.create', 'sale.edit.sameday', 'sale.edit.postclose', 'sale.void', 'ar.collect', 'expense.create.branch',
@@ -306,7 +308,7 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
     key: 'SALES_MANAGER',
     name: 'Sales Manager',
     description: 'Monitors sales targets and their achievement. Sees the sales of every branch, agent and e-commerce platform (amounts, channels, payment types, top products), the Daily Sales Reports, customer contacts and the receivables of dealers, franchises and agents. Sets monthly targets per branch and per agent (the Owner approves) and links agents to their accounts. Assigns areas to agents, approves the outlets / gyms agents upload, follows their daily itineraries, visit photos and consignments, and sets each agent\'s maximum consignment (the Owner approves). Never sees cost, margin, supplier data, cash counts, payroll or the books; records no sales or money.',
-    permissions: ['outlet.view.all', 'outlet.manage', 'replacement.view', 'sixpack.view.all', 'incentive.prepare', 'incentive.view', 'target.manage', 'target.view', 'report.sales.all', 'ar.view', 'product.view', 'location.view.all', 'price.view.RETAIL', 'price.view.CC', 'price.view.DEALER', 'price.view.AGENT', 'price.view.FRANCHISE', 'dashboard.view', 'notification.view'],
+    permissions: ['member.view', 'member.manage', 'member.blast', 'outlet.view.all', 'outlet.manage', 'replacement.view', 'sixpack.view.all', 'incentive.prepare', 'incentive.view', 'target.manage', 'target.view', 'report.sales.all', 'ar.view', 'product.view', 'location.view.all', 'price.view.RETAIL', 'price.view.CC', 'price.view.DEALER', 'price.view.AGENT', 'price.view.FRANCHISE', 'dashboard.view', 'notification.view'],
   },
   {
     key: 'FRANCHISE_COORDINATOR',

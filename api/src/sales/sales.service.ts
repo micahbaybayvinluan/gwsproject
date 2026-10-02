@@ -26,7 +26,7 @@ import { FranchiseShippingService } from '../franchise/franchise-shipping.servic
 
 export interface SalesLineInput { productId: string; qty: number; unitPrice?: number | null; batchId?: string | null; exactBatch?: boolean; isFreebie?: boolean; lineRemarks?: string; priceTier?: string }
 export interface SalesInput {
-  locationId?: string; docDate?: string; channel: SalesChannel; channelSub?: string | null; customerId?: string | null; agentId?: string | null; outletId?: string | null; riderId?: string | null; customerName?: string | null; customerPhone?: string | null; customerEmail?: string | null; drSiNo: string;
+  locationId?: string; docDate?: string; channel: SalesChannel; channelSub?: string | null; customerId?: string | null; agentId?: string | null; outletId?: string | null; memberId?: string | null; riderId?: string | null; customerName?: string | null; customerPhone?: string | null; customerEmail?: string | null; drSiNo: string;
   paymentMode: PaymentMode; paymentAccountId?: string | null; proofOfPaymentAttachmentId?: string | null; cardMid?: string; cardSlipNo?: string; cardApprovalCode?: string; cardBatchNo?: string;
   deliveryFee?: number; riderIncentive?: number; incentive?: { amount: number; payee: string; kind?: 'SALES' | 'RIDER' } | null; sixPackSticker?: boolean; franchiseShipping?: { mode: 'NONE' | 'TO_FOLLOW' | 'AMOUNT'; amount?: number; courier?: string; reference?: string }; shippingFee?: number; shippingExpense?: number; marketplaceCharges?: number; dueDate?: string | null; pdcBank?: string; pdcChequeNo?: string; pdcDate?: string | null; notes?: string;
   lines: SalesLineInput[];
@@ -44,7 +44,7 @@ export class SalesService implements OnModuleInit {
     this.approvals.register('AR_PAYMENT', (req, outcome, actor) => this.onPaymentDecision(req.documentId, outcome, actor?.id ?? null, actor?.note));
   }
 
-  private include = { location: { select: { id: true, code: true, name: true, type: true } }, customer: { select: { id: true, code: true, name: true, type: true } }, agent: { select: { id: true, name: true } }, outlet: { select: { id: true, name: true, agentName: true } }, rider: { select: { id: true, name: true } }, paymentAccount: { select: { id: true, title: true, paymentAccountType: true } }, lines: { include: { product: { select: { id: true, sku: true, name: true, category: { select: { accountingClass: true, name: true } } } }, batch: { select: { id: true, batchNo: true, expiryDate: true, flavor: true, isConsignmentIn: true } } } }, payments: { include: { payment: true } } } as const;
+  private include = { location: { select: { id: true, code: true, name: true, type: true } }, customer: { select: { id: true, code: true, name: true, type: true } }, agent: { select: { id: true, name: true } }, outlet: { select: { id: true, name: true, agentName: true } }, member: { select: { id: true, memberNo: true, fullName: true } }, rider: { select: { id: true, name: true } }, paymentAccount: { select: { id: true, title: true, paymentAccountType: true } }, lines: { include: { product: { select: { id: true, sku: true, name: true, category: { select: { accountingClass: true, name: true } } } }, batch: { select: { id: true, batchNo: true, expiryDate: true, flavor: true, isConsignmentIn: true } } } }, payments: { include: { payment: true } } } as const;
 
   list(user: SessionUser, q: { locationId?: string; from?: string; to?: string; channel?: string; paymentMode?: string; open?: boolean; take?: number }) {
     const where: Prisma.SalesDocWhereInput = { locationId: this.scope.locationFilter(user, q.locationId) as never, channel: q.channel as SalesChannel | undefined, paymentMode: q.paymentMode as PaymentMode | undefined, voidedAt: null, docDate: q.from || q.to ? { gte: q.from ? toDateOnly(q.from) : undefined, lte: q.to ? toDateOnly(q.to) : undefined } : undefined };
@@ -63,6 +63,8 @@ export class SalesService implements OnModuleInit {
     if (user.locationScoped && !user.locationIds.includes(locationId)) throw new ForbiddenException('Outside your branch');
     // the agent's outlet this sale is tagged to (owner request 2026-10-02): only approved outlets
     if (input.outletId) await this.outlets.assertTaggable(input.outletId);
+    // the Wheysted member this sale is for (owner request 2026-10-03)
+    if (input.memberId) { const mem = await this.prisma.db.member.findUnique({ where: { id: input.memberId }, select: { status: true, fullName: true } }); if (!mem) throw new BadRequestException('Unknown member'); if (mem.status !== 'ACTIVE') throw new BadRequestException(`${mem.fullName}'s membership is blocked`); }
     const loc = await this.prisma.db.location.findUniqueOrThrow({ where: { id: locationId } });
     if (!loc.isSelling) throw new BadRequestException('This location does not sell');
     // Franchise Coordinators (owner requests 2026-10-01 and 2026-10-02) record sales from the warehouse: franchises and every other channel, any payment mode
@@ -152,7 +154,7 @@ export class SalesService implements OnModuleInit {
       const grandTotal = round2(productTotal.plus(deliveryFee).plus(shippingFee));
       const created = await tx.salesDoc.create({
         data: {
-          controlNo, docDate, locationId, channel: input.channel, channelSub: input.channelSub ?? null, customerId: input.customerId ?? null, agentId: input.agentId ?? null, outletId: input.outletId ?? null, riderId: input.riderId ?? null, customerName: input.customerName ?? null, customerPhone: input.customerPhone || null, customerEmail: input.customerEmail || null, drSiNo: input.drSiNo.trim(),
+          controlNo, docDate, locationId, channel: input.channel, channelSub: input.channelSub ?? null, customerId: input.customerId ?? null, agentId: input.agentId ?? null, outletId: input.outletId ?? null, memberId: input.memberId ?? null, riderId: input.riderId ?? null, customerName: input.customerName ?? null, customerPhone: input.customerPhone || null, customerEmail: input.customerEmail || null, drSiNo: input.drSiNo.trim(),
           paymentMode: input.paymentMode, paymentAccountId: input.paymentAccountId ?? null, proofOfPaymentAttachmentId: input.proofOfPaymentAttachmentId ?? null, cardMid: input.cardMid, cardSlipNo: input.cardSlipNo, cardApprovalCode: input.cardApprovalCode, cardBatchNo: input.cardBatchNo,
           deliveryFee: deliveryFee.toFixed(2), riderIncentive: D(input.riderIncentive ?? 0).toFixed(2), shippingFee: shippingFee.toFixed(2), shippingExpense: D(input.shippingExpense ?? 0).toFixed(2), marketplaceCharges: D(input.marketplaceCharges ?? 0).toFixed(2),
           productTotal: productTotal.toFixed(2), grandTotal: grandTotal.toFixed(2), amountPaid: input.paymentMode === 'AR_PDC' ? '0.00' : grandTotal.toFixed(2),

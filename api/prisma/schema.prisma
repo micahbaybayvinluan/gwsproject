@@ -697,6 +697,8 @@ model SalesDoc {
   agentId                    String?      @map("agent_id")
   /// the agent's outlet / gym this sale is tagged to (owner request 2026-10-02): the agent sees the orders of their outlets
   outletId                   String?      @map("outlet_id")
+  /// the Wheysted member this sale belongs to (owner request 2026-10-03)
+  memberId                   String?      @map("member_id")
   riderId                    String?      @map("rider_id")
   customerName               String?      @map("customer_name")
   /// walk-in / online customer contact details captured at the sale (for the customer contact list)
@@ -745,6 +747,7 @@ model SalesDoc {
   customer       Customer?           @relation(fields: [customerId], references: [id])
   agent          Agent?              @relation(fields: [agentId], references: [id])
   outlet         Outlet?             @relation(fields: [outletId], references: [id])
+  member         Member?             @relation(fields: [memberId], references: [id])
   rider          Rider?              @relation(fields: [riderId], references: [id])
   paymentAccount Account?            @relation(fields: [paymentAccountId], references: [id])
   lines          SalesLine[]
@@ -2718,4 +2721,89 @@ model ItineraryClaim {
   itinerary Itinerary @relation(fields: [itineraryId], references: [id], onDelete: Cascade)
 
   @@map("itinerary_claims")
+}
+
+// ── Wheysted members (owner request 2026-10-03): customers who are members, a QR card, a portal of their own, and campaigns ──
+model Member {
+  id           String    @id @default(uuid())
+  /// printed on the card: WHY-000001
+  memberNo     String    @unique @map("member_no")
+  /// secret behind the QR code (the QR says WHY:<token>)
+  qrToken      String    @unique @map("qr_token")
+  fullName     String    @map("full_name")
+  phone        String?
+  /// last 10 digits of the mobile number: one member per number
+  phoneKey     String?   @unique @map("phone_key")
+  email        String?
+  /// lower-case email: one member per email
+  emailKey     String?   @unique @map("email_key")
+  birthday     DateTime? @db.Date
+  passwordHash String?   @map("password_hash")
+  emailOptIn   Boolean   @default(true) @map("email_opt_in")
+  smsOptIn     Boolean   @default(true) @map("sms_opt_in")
+  /// PORTAL (signed up) | STAFF (added at the counter) | IMPORT (made from the customer database)
+  source       String    @default("STAFF")
+  status       String    @default("ACTIVE") // ACTIVE | BLOCKED
+  notes        String?
+  consentAt    DateTime? @map("consent_at")
+  lastLoginAt  DateTime? @map("last_login_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  createdBy    String?   @map("created_by")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  salesDocs  SalesDoc[]
+  recipients CampaignRecipient[]
+
+  @@map("members")
+}
+
+/// An email or SMS blast. Recipients are fixed when it is prepared; sending goes one by one.
+model Campaign {
+  id         String    @id @default(uuid())
+  channel    String // EMAIL | SMS
+  name       String
+  subject    String?
+  body       String
+  audience   Json
+  status     String    @default("DRAFT") // DRAFT | SENDING | DONE | FAILED
+  total      Int       @default(0)
+  sent       Int       @default(0)
+  failed     Int       @default(0)
+  skipped    Int       @default(0)
+  createdAt  DateTime  @default(now()) @map("created_at")
+  createdBy  String    @map("created_by")
+  sentAt     DateTime? @map("sent_at")
+  finishedAt DateTime? @map("finished_at")
+
+  recipients CampaignRecipient[]
+
+  @@map("campaigns")
+}
+
+model CampaignRecipient {
+  id         String    @id @default(uuid())
+  campaignId String    @map("campaign_id")
+  memberId   String?   @map("member_id")
+  name       String
+  toAddr     String    @map("to_addr")
+  status     String    @default("PENDING") // PENDING | SENT | FAILED | SKIPPED | NOT_CONFIGURED
+  error      String?
+  sentAt     DateTime? @map("sent_at")
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  member   Member?  @relation(fields: [memberId], references: [id])
+
+  @@index([campaignId, status])
+  @@map("campaign_recipients")
+}
+
+/// People (members or not) who asked not to get emails / SMS; kept by email or by phone key.
+model MessageOptOut {
+  id        String   @id @default(uuid())
+  channel   String // EMAIL | SMS
+  key       String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([channel, key])
+  @@map("message_opt_outs")
 }

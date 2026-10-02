@@ -264,6 +264,10 @@ Waybill Report → **Choose waybill PDF files** (TikTok or Shopee labels) → pi
 83. **Search notifications** (any user): Notifications → type a product name or DR number in the search bar.
 84. **Search lists** (any user): open a list with 6+ rows (for example Chart of Accounts or Cash Fund) and type in **Search this list**. On 6-Pack Card, choose from / to and search a customer name, mobile or DR number: both lists filter.
 85. **Days of stock** (`head.auditor` or `wh.incharge`): Expiry & Low Stock → the top card lists every item by days left, most critical first. Change the last 30 → 60 days; tick All locations together; type in a column's filter box (for example Level or Brand).
+86. **Members at the counter** (`sales.westave`): New Sale → Wheysted member → **+ New member** (name, mobile) → sell something. Then type the number, name or phone in the same box for the next sale (a QR scanner types `WHY:…` into it).
+87. **Members list** (`sales.manager`): Wheysted Members: sort by Spent, filter a column, choose a segment, open a member (QR card, favorites, purchases); **Who bought this item**; **Make members from my sales**.
+88. **Member page** (a phone browser, `/member`): Become a member with a new mobile number; open **My card** (QR) and **My purchases** after the counter tags a sale; sign out and sign in again. A member made at the counter signs up with their member number to claim the account.
+89. **Campaigns** (`sales.manager`): Email & SMS: choose a segment, **Count who will receive it**, type a message with {firstName}, **Prepare campaign**, **Send**. Without SMTP / Semaphore settings the result is "not configured" (nothing is sent).
 
 ## Where the files come out
 

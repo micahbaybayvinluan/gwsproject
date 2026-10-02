@@ -699,6 +699,9 @@ model SalesDoc {
   outletId                   String?      @map("outlet_id")
   /// the Wheysted member this sale belongs to (owner request 2026-10-03)
   memberId                   String?      @map("member_id")
+  /// a member's voucher used on this sale and the discount it gave
+  voucherId                  String?      @map("voucher_id")
+  voucherDiscount            Decimal      @default(0) @map("voucher_discount") @db.Decimal(14, 2)
   riderId                    String?      @map("rider_id")
   customerName               String?      @map("customer_name")
   /// walk-in / online customer contact details captured at the sale (for the customer contact list)
@@ -2725,34 +2728,54 @@ model ItineraryClaim {
 
 // ── Wheysted members (owner request 2026-10-03): customers who are members, a QR card, a portal of their own, and campaigns ──
 model Member {
-  id           String    @id @default(uuid())
+  id                 String    @id @default(uuid())
   /// printed on the card: WHY-000001
-  memberNo     String    @unique @map("member_no")
+  memberNo           String    @unique @map("member_no")
   /// secret behind the QR code (the QR says WHY:<token>)
-  qrToken      String    @unique @map("qr_token")
-  fullName     String    @map("full_name")
-  phone        String?
+  qrToken            String    @unique @map("qr_token")
+  fullName           String    @map("full_name")
+  phone              String?
   /// last 10 digits of the mobile number: one member per number
-  phoneKey     String?   @unique @map("phone_key")
-  email        String?
+  phoneKey           String?   @unique @map("phone_key")
+  email              String?
   /// lower-case email: one member per email
-  emailKey     String?   @unique @map("email_key")
-  birthday     DateTime? @db.Date
-  passwordHash String?   @map("password_hash")
-  emailOptIn   Boolean   @default(true) @map("email_opt_in")
-  smsOptIn     Boolean   @default(true) @map("sms_opt_in")
+  emailKey           String?   @unique @map("email_key")
+  birthday           DateTime? @db.Date
+  passwordHash       String?   @map("password_hash")
+  emailOptIn         Boolean   @default(true) @map("email_opt_in")
+  smsOptIn           Boolean   @default(true) @map("sms_opt_in")
   /// PORTAL (signed up) | STAFF (added at the counter) | IMPORT (made from the customer database)
-  source       String    @default("STAFF")
-  status       String    @default("ACTIVE") // ACTIVE | BLOCKED
-  notes        String?
-  consentAt    DateTime? @map("consent_at")
-  lastLoginAt  DateTime? @map("last_login_at")
-  createdAt    DateTime  @default(now()) @map("created_at")
-  createdBy    String?   @map("created_by")
-  updatedAt    DateTime  @updatedAt @map("updated_at")
+  source             String    @default("STAFF")
+  status             String    @default("ACTIVE") // ACTIVE | BLOCKED
+  notes              String?
+  /// fitness profile and how they came to us (owner request 2026-10-03)
+  goal               String?
+  gym                String?
+  trainingDays       String?   @map("training_days")
+  budget             String?
+  dietary            String?
+  flavorLikes        String?   @map("flavor_likes")
+  flavorDislikes     String?   @map("flavor_dislikes")
+  heardFrom          String?   @map("heard_from")
+  /// the agent's outlet / gym this member trains at
+  outletId           String?   @map("outlet_id")
+  preferredChannel   String?   @map("preferred_channel") // SMS | EMAIL | WHATSAPP | VIBER | MESSENGER
+  bestTime           String?   @map("best_time") // MORNING | AFTERNOON | EVENING
+  messengerHandle    String?   @map("messenger_handle")
+  referredById       String?   @map("referred_by_id")
+  referralRewardedAt DateTime? @map("referral_rewarded_at")
+  consentAt          DateTime? @map("consent_at")
+  lastLoginAt        DateTime? @map("last_login_at")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  createdBy          String?   @map("created_by")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
 
-  salesDocs  SalesDoc[]
-  recipients CampaignRecipient[]
+  salesDocs    SalesDoc[]
+  recipients   CampaignRecipient[]
+  vouchers     MemberVoucher[]
+  points       MemberPointsEntry[]
+  notes_       MemberNote[]
+  reservations Reservation[]
 
   @@map("members")
 }
@@ -2781,14 +2804,15 @@ model Campaign {
 }
 
 model CampaignRecipient {
-  id         String    @id @default(uuid())
-  campaignId String    @map("campaign_id")
-  memberId   String?   @map("member_id")
-  name       String
-  toAddr     String    @map("to_addr")
-  status     String    @default("PENDING") // PENDING | SENT | FAILED | SKIPPED | NOT_CONFIGURED
-  error      String?
-  sentAt     DateTime? @map("sent_at")
+  id          String    @id @default(uuid())
+  campaignId  String    @map("campaign_id")
+  memberId    String?   @map("member_id")
+  name        String
+  toAddr      String    @map("to_addr")
+  voucherCode String?   @map("voucher_code")
+  status      String    @default("PENDING") // PENDING | SENT | FAILED | SKIPPED | NOT_CONFIGURED
+  error       String?
+  sentAt      DateTime? @map("sent_at")
 
   campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   member   Member?  @relation(fields: [memberId], references: [id])
@@ -2806,4 +2830,180 @@ model MessageOptOut {
 
   @@unique([channel, key])
   @@map("message_opt_outs")
+}
+
+/// A single-use voucher for one member (birthday, win-back, referral, points, manual); the counter applies it to a sale.
+model MemberVoucher {
+  id              String    @id @default(uuid())
+  code            String    @unique
+  memberId        String    @map("member_id")
+  kind            String // PERCENT | AMOUNT
+  value           Decimal   @db.Decimal(14, 2)
+  minPurchase     Decimal   @default(0) @map("min_purchase") @db.Decimal(14, 2)
+  source          String // BIRTHDAY | ANNIVERSARY | WINBACK | REFERRAL | POINTS | CAMPAIGN | MANUAL
+  note            String?
+  expiresOn       DateTime  @map("expires_on") @db.Date
+  usedAt          DateTime? @map("used_at")
+  usedSaleId      String?   @map("used_sale_id")
+  discountApplied Decimal?  @map("discount_applied") @db.Decimal(14, 2)
+  createdAt       DateTime  @default(now()) @map("created_at")
+  createdBy       String?   @map("created_by")
+
+  member Member @relation(fields: [memberId], references: [id])
+
+  @@index([memberId, usedAt])
+  @@map("member_vouchers")
+}
+
+/// Points: earned from purchases (computed), these are the redemptions and adjustments.
+model MemberPointsEntry {
+  id        String   @id @default(uuid())
+  memberId  String   @map("member_id")
+  points    Int
+  reason    String
+  refId     String?  @map("ref_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  createdBy String?  @map("created_by")
+
+  member Member @relation(fields: [memberId], references: [id])
+
+  @@index([memberId])
+  @@map("member_points_entries")
+}
+
+/// Contact log: calls, complaints, notes.
+model MemberNote {
+  id            String   @id @default(uuid())
+  memberId      String   @map("member_id")
+  kind          String // CALL | COMPLAINT | NOTE | MESSAGE
+  text          String
+  createdAt     DateTime @default(now()) @map("created_at")
+  createdBy     String?  @map("created_by")
+  createdByName String?  @map("created_by_name")
+
+  member Member @relation(fields: [memberId], references: [id])
+
+  @@index([memberId, createdAt])
+  @@map("member_notes")
+}
+
+/// A member-only price for a product while it runs.
+model MemberOffer {
+  id        String    @id @default(uuid())
+  productId String    @map("product_id")
+  price     Decimal   @db.Decimal(14, 2)
+  startsOn  DateTime  @map("starts_on") @db.Date
+  endsOn    DateTime? @map("ends_on") @db.Date
+  active    Boolean   @default(true)
+  note      String?
+  createdAt DateTime  @default(now()) @map("created_at")
+  createdBy String?   @map("created_by")
+
+  @@index([productId, active])
+  @@map("member_offers")
+}
+
+/// A "how was it?" invitation for one purchase; the link has the token.
+model SurveyInvite {
+  id         String    @id @default(uuid())
+  token      String    @unique
+  memberId   String    @map("member_id")
+  saleId     String    @unique @map("sale_id")
+  sentAt     DateTime? @map("sent_at")
+  answeredAt DateTime? @map("answered_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  response SurveyResponse?
+
+  @@map("survey_invites")
+}
+
+model SurveyResponse {
+  id        String   @id @default(uuid())
+  inviteId  String   @unique @map("invite_id")
+  memberId  String   @map("member_id")
+  saleId    String   @map("sale_id")
+  rating    Int
+  comment   String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  invite SurveyInvite @relation(fields: [inviteId], references: [id])
+  items  SurveyItem[]
+
+  @@index([memberId])
+  @@map("survey_responses")
+}
+
+model SurveyItem {
+  id            String  @id @default(uuid())
+  responseId    String  @map("response_id")
+  productId     String  @map("product_id")
+  wouldBuyAgain Boolean @map("would_buy_again")
+  comment       String?
+
+  response SurveyResponse @relation(fields: [responseId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+  @@map("survey_items")
+}
+
+/// An item a customer asked for that the store did not have (demand we lost).
+model LostSale {
+  id         String   @id @default(uuid())
+  productId  String?  @map("product_id")
+  itemText   String   @map("item_text")
+  qty        Int      @default(1)
+  memberId   String?  @map("member_id")
+  locationId String   @map("location_id")
+  note       String?
+  createdAt  DateTime @default(now()) @map("created_at")
+  createdBy  String?  @map("created_by")
+
+  @@index([productId, createdAt])
+  @@index([locationId, createdAt])
+  @@map("lost_sales")
+}
+
+/// A member reserves an item for pick-up at a branch.
+model Reservation {
+  id         String   @id @default(uuid())
+  memberId   String   @map("member_id")
+  productId  String   @map("product_id")
+  qty        Int      @default(1)
+  locationId String   @map("location_id")
+  status     String   @default("REQUESTED") // REQUESTED | READY | PICKED_UP | CANCELLED
+  note       String?
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  member Member @relation(fields: [memberId], references: [id])
+
+  @@index([locationId, status])
+  @@map("reservations")
+}
+
+/// "Tell me when it is available".
+model StockAlertRequest {
+  id         String    @id @default(uuid())
+  memberId   String    @map("member_id")
+  productId  String    @map("product_id")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  notifiedAt DateTime? @map("notified_at")
+
+  @@index([productId, notifiedAt])
+  @@map("stock_alert_requests")
+}
+
+/// Automatic messages already sent (one per key), so a reminder never goes twice.
+model MemberAutoMessage {
+  id       String   @id @default(uuid())
+  kind     String
+  key      String
+  memberId String   @map("member_id")
+  channel  String
+  status   String
+  sentAt   DateTime @default(now()) @map("sent_at")
+
+  @@unique([kind, key])
+  @@map("member_auto_messages")
 }

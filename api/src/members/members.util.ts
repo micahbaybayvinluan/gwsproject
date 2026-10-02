@@ -31,3 +31,7 @@ export function phMobile(raw?: string | null): string | null {
   const n = d.startsWith('63') ? `0${d.slice(2)}` : d.startsWith('9') && d.length === 10 ? `0${d}` : d;
   return /^09\d{9}$/.test(n) ? n : null;
 }
+
+/** The public web address customers use (the unsubscribe and survey links point to it). */
+export const publicUrl = () => (process.env.PUBLIC_URL || 'http://localhost:5173').replace(/\/$/, '');
+export const unsubscribeUrl = (channel: 'EMAIL' | 'SMS', key: string) => `${publicUrl()}/api/portal/unsubscribe?t=${encodeURIComponent(signToken({ c: channel, k: key }, 3650))}`;

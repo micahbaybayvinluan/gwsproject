@@ -1,3 +1,4 @@
+import { EngageService } from '../members/engage.service';
 import { Injectable, Logger, Module, OnModuleInit } from '@nestjs/common';
 import { Queue, Worker } from 'bullmq';
 import Redis from 'ioredis';
@@ -42,6 +43,7 @@ export const JOBS = {
   CASH_DEPOSIT_REMINDERS: { name: 'cash-deposit-reminders', cron: '0 2 * * *' }, // 10:00 Manila: cash on hand due / overdue
   TRANSFER_DIFF_DEADLINES: { name: 'transfer-diff-deadlines', cron: '20 * * * *' }, // hourly: sending branch reminder after 1 day, Owner after 2 days
   FRANCHISE_AR: { name: 'franchise-ar', cron: '15 1 * * *' }, // 9:15 AM Manila: penalty notices, due / overdue reminders and the two-month flag on franchise invoices
+  MEMBER_AUTOMATION: { name: 'member-automation', cron: '0 1 * * *' }, // 9:00 AM Manila: birthday, anniversary, re-order, win-back, survey and back-in-stock messages to members
   AGENT_FIELD: { name: 'agent-field', cron: '30 1 * * *' }, // 9:30 AM Manila: missing / unreported itineraries, old consignments, maximums nearly used
   ECOM_OVERDUE: { name: 'ecom-overdue', cron: '0 1 * * 5' }, // Friday 9:00 AM Manila: e-commerce orders shipped long ago, not paid nor returned
   MONTH_END_DEPRECIATION: { name: 'month-end-depreciation', cron: '0 17 1 * *' }, // 1st 01:00 Manila for previous month
@@ -52,7 +54,7 @@ export const JOBS = {
 export class JobsService implements OnModuleInit {
   private log = new Logger('Jobs');
   private queue!: Queue; private worker!: Worker;
-  constructor(private franchiseAr: FranchiseArService, private franchiseShipping: FranchiseShippingService, private replacements: ReplacementsService, private agentMonitor: MonitorService, private transferDiff: TransferDiscrepancyService, private ecom: EcommerceService, private followUps: CustomerFollowUpsService, private reportSubmission: ReportSubmissionService, private cashOnHand: CashOnHandService, private closing: ClosingService, private alerts: AlertsService, private approvals: ApprovalsService, private counts: CountsService, private sales: SalesService, private notifications: NotificationsService, private prices: PriceChangeService, private payroll: PayrollService) {}
+  constructor(private franchiseAr: FranchiseArService, private franchiseShipping: FranchiseShippingService, private replacements: ReplacementsService, private agentMonitor: MonitorService, private transferDiff: TransferDiscrepancyService, private ecom: EcommerceService, private followUps: CustomerFollowUpsService, private reportSubmission: ReportSubmissionService, private cashOnHand: CashOnHandService, private closing: ClosingService, private alerts: AlertsService, private approvals: ApprovalsService, private counts: CountsService, private sales: SalesService, private notifications: NotificationsService, private prices: PriceChangeService, private payroll: PayrollService, private engage: EngageService) {}
 
   async onModuleInit() {
     if (process.env.DISABLE_JOBS === 'true' || process.env.NODE_ENV === 'test') return;
@@ -76,6 +78,7 @@ export class JobsService implements OnModuleInit {
       case JOBS.SALES_REPORT_REMINDER.name: return this.reportSubmission.remind();
       case JOBS.SALES_REPORT_CUTOFF.name: return this.reportSubmission.autoSubmit();
       case JOBS.CUSTOMER_FOLLOW_UPS.name: return this.followUps.runDaily();
+      case JOBS.MEMBER_AUTOMATION.name: return this.engage.runDaily();
       case JOBS.CASH_DEPOSIT_REMINDERS.name: return this.cashOnHand.remind();
       case JOBS.TRANSFER_DIFF_DEADLINES.name: return this.transferDiff.runDeadlines();
       case JOBS.FRANCHISE_AR.name: return { ...(await this.franchiseAr.runDaily()), shipping: await this.franchiseShipping.runDaily(), replacements: await this.replacements.runDaily() };

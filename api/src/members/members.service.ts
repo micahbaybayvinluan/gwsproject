@@ -6,8 +6,24 @@ import { dateStr, daysBetween, todayManila } from '../common/manila';
 import type { SessionUser } from '../common/request-context';
 import { requestContext } from '../common/request-context';
 import { emailKeyOf, memberNoOf, newQrToken, phoneKeyOf, qrValue } from './members.util';
+import { LoyaltyService } from './loyalty.service';
 
-export interface MemberInput { fullName: string; phone?: string | null; email?: string | null; birthday?: string | null; emailOptIn?: boolean; smsOptIn?: boolean; notes?: string | null; status?: 'ACTIVE' | 'BLOCKED' }
+export interface MemberProfile { goal?: string | null; gym?: string | null; trainingDays?: string | null; budget?: string | null; dietary?: string | null; flavorLikes?: string | null; flavorDislikes?: string | null; heardFrom?: string | null; outletId?: string | null; preferredChannel?: string | null; bestTime?: string | null; messengerHandle?: string | null }
+export interface MemberInput extends MemberProfile { fullName: string; phone?: string | null; email?: string | null; birthday?: string | null; emailOptIn?: boolean; smsOptIn?: boolean; notes?: string | null; status?: 'ACTIVE' | 'BLOCKED'; referredByNo?: string | null }
+export const GOALS = ['MUSCLE_GAIN', 'WEIGHT_LOSS', 'ENDURANCE', 'GENERAL_HEALTH', 'STRENGTH', 'OTHER'] as const;
+export const HEARD_FROM = ['FACEBOOK', 'TIKTOK', 'INSTAGRAM', 'GYM', 'FRIEND', 'WALK_IN', 'SHOPEE_LAZADA', 'OTHER'] as const;
+export const CHANNELS = ['SMS', 'EMAIL', 'WHATSAPP', 'VIBER', 'MESSENGER'] as const;
+const clean = (v: unknown) => { const t = typeof v === 'string' ? v.trim() : ''; return t ? t.slice(0, 200) : null; };
+/** The profile fields that are plain text or one of a list. */
+function profileData(i: MemberProfile): Prisma.MemberUpdateInput {
+  const d: Prisma.MemberUpdateInput = {};
+  for (const k of ['gym', 'trainingDays', 'budget', 'dietary', 'flavorLikes', 'flavorDislikes', 'messengerHandle'] as const) if (i[k] !== undefined) d[k] = clean(i[k]);
+  if (i.goal !== undefined) { const g = clean(i.goal); if (g && !(GOALS as readonly string[]).includes(g)) throw new BadRequestException('Unknown goal'); d.goal = g; }
+  if (i.heardFrom !== undefined) { const g = clean(i.heardFrom); if (g && !(HEARD_FROM as readonly string[]).includes(g)) throw new BadRequestException('Unknown source'); d.heardFrom = g; }
+  if (i.preferredChannel !== undefined) { const g = clean(i.preferredChannel); if (g && !(CHANNELS as readonly string[]).includes(g)) throw new BadRequestException('Unknown channel'); d.preferredChannel = g; }
+  if (i.bestTime !== undefined) { const g = clean(i.bestTime); if (g && !['MORNING', 'AFTERNOON', 'EVENING'].includes(g)) throw new BadRequestException('Unknown time'); d.bestTime = g; }
+  return d;
+}
 export interface Stats { orders: number; spent: number; firstDate: Date | null; lastDate: Date | null; favProduct: string | null; favProductQty: number; favBrand: string | null; favCategory: string | null; topBranch: string | null }
 export const SEGMENTS: Record<string, string> = { VIP: 'VIP (top spenders)', FREQUENT: 'Frequent buyers', NEW: 'New (joined in the last 30 days)', AT_RISK: 'At risk (no purchase for 46–90 days)', LAPSED: 'Lapsed (no purchase for over 90 days)', NEVER: 'Never bought', BIRTHDAY: 'Birthday this month' };
 
@@ -20,7 +36,7 @@ const num = (x: unknown) => Number(x ?? 0);
  */
 @Injectable()
 export class MembersService {
-  constructor(private prisma: PrismaService, private audit: AuditService) {}
+  constructor(private prisma: PrismaService, private audit: AuditService, private loyalty: LoyaltyService) {}
 
   // ── creation ──
   private async nextNo(): Promise<string> {
@@ -38,9 +54,13 @@ export class MembersService {
     if (!phoneKey && !emailKey) throw new BadRequestException('A mobile number or an email address is needed');
     const dup = await this.prisma.db.member.findFirst({ where: { OR: [...(phoneKey ? [{ phoneKey }] : []), ...(emailKey ? [{ emailKey }] : [])] } });
     if (dup) throw new BadRequestException({ message: `${dup.fullName} (${dup.memberNo}) already uses that ${dup.phoneKey === phoneKey ? 'mobile number' : 'email address'}`, existingId: dup.id });
+    let referredById: string | null = null;
+    if (input.referredByNo?.trim()) { const ref = await this.prisma.db.member.findFirst({ where: { memberNo: input.referredByNo.trim().toUpperCase() }, select: { id: true } }); if (!ref) throw new BadRequestException('That member number (who referred you) was not found'); referredById = ref.id; }
+    if (input.outletId && !(await this.prisma.db.outlet.findFirst({ where: { id: input.outletId, deletedAt: null }, select: { id: true } }))) throw new BadRequestException('Unknown gym / outlet');
+    const profile = profileData(input) as Prisma.MemberUncheckedCreateInput;
     for (let attempt = 0; ; attempt++) {
       try {
-        const m = await this.prisma.db.member.create({ data: { memberNo: await this.nextNo(), qrToken: newQrToken(), fullName, phone, phoneKey, email, emailKey, birthday: input.birthday ? new Date(`${input.birthday}T00:00:00Z`) : null, passwordHash: opts.passwordHash ?? null, emailOptIn: input.emailOptIn ?? true, smsOptIn: input.smsOptIn ?? true, source: opts.source, notes: input.notes ?? null, consentAt: input.consent ? new Date() : null, createdBy: opts.userId ?? null } });
+        const m = await this.prisma.db.member.create({ data: { ...profile, outletId: input.outletId ?? null, referredById, memberNo: await this.nextNo(), qrToken: newQrToken(), fullName, phone, phoneKey, email, emailKey, birthday: input.birthday ? new Date(`${input.birthday}T00:00:00Z`) : null, passwordHash: opts.passwordHash ?? null, emailOptIn: input.emailOptIn ?? true, smsOptIn: input.smsOptIn ?? true, source: opts.source, notes: input.notes ?? null, consentAt: input.consent ? new Date() : null, createdBy: opts.userId ?? null } });
         await this.audit.log({ action: 'CREATE', entityType: 'Member', entityId: m.id, after: { memberNo: m.memberNo, fullName, source: opts.source }, userId: opts.userId ?? undefined });
         // staff vouch for the person: past sales with the same number belong to them (never done for a customer's own sign-up)
         if (opts.backfill && phoneKey) await this.linkPastSales(m.id);
@@ -84,6 +104,8 @@ export class MembersService {
     if (input.smsOptIn !== undefined) data.smsOptIn = input.smsOptIn;
     if (input.notes !== undefined) data.notes = input.notes;
     if (input.status) data.status = input.status;
+    Object.assign(data, profileData(input));
+    if (input.outletId !== undefined) { if (input.outletId && !(await this.prisma.db.outlet.findFirst({ where: { id: input.outletId, deletedAt: null }, select: { id: true } }))) throw new BadRequestException('Unknown gym / outlet'); data.outletId = input.outletId || null; }
     const after = await this.prisma.db.member.update({ where: { id }, data });
     await this.audit.log({ action: 'UPDATE', entityType: 'Member', entityId: id, before: { fullName: m.fullName, phone: m.phone, email: m.email, status: m.status }, after: { fullName: after.fullName, phone: after.phone, email: after.email, status: after.status }, userId: user?.id });
     return after;
@@ -132,6 +154,8 @@ export class MembersService {
   async list(q: { segment?: string; search?: string } = {}) {
     const members = await this.prisma.db.member.findMany({ orderBy: { createdAt: 'desc' }, take: 20000 });
     const stats = await this.stats();
+    const standing = await this.loyalty.standing();
+    const outlets = await this.prisma.db.outlet.findMany({ where: { id: { in: [...new Set(members.map((m) => m.outletId).filter((x): x is string => !!x))] } }, select: { id: true, name: true } });
     const today = todayManila();
     const buyers = members.filter((m) => (stats.get(m.id)?.orders ?? 0) >= 2).map((m) => stats.get(m.id)!.spent).sort((a, b) => b - a);
     const vipFrom = buyers.length ? buyers[Math.max(0, Math.ceil(buyers.length * 0.1) - 1)] : Infinity;
@@ -145,10 +169,10 @@ export class MembersService {
       if (orders >= 3 && perMonth >= 1) segments.push('FREQUENT');
       if (orders >= 2 && s && s.spent >= vipFrom) segments.push('VIP');
       if (m.birthday && m.birthday.getUTCMonth() === today.getUTCMonth()) segments.push('BIRTHDAY');
-      return { id: m.id, memberNo: m.memberNo, fullName: m.fullName, phone: m.phone, email: m.email, birthday: m.birthday ? dateStr(m.birthday) : null, source: m.source, status: m.status, emailOptIn: m.emailOptIn, smsOptIn: m.smsOptIn, hasPortal: !!m.passwordHash, joined: dateStr(m.createdAt), orders, spent: Math.round((s?.spent ?? 0) * 100) / 100, avgOrder: orders ? Math.round(((s?.spent ?? 0) / orders) * 100) / 100 : 0, firstPurchase: s?.firstDate ? dateStr(s.firstDate) : null, lastPurchase: s?.lastDate ? dateStr(s.lastDate) : null, daysSince, ordersPerMonth: perMonth, favoriteProduct: s?.favProduct ?? null, favoriteBrand: s?.favBrand ?? null, favoriteCategory: s?.favCategory ?? null, topBranch: s?.topBranch ?? null, segments };
+      return { id: m.id, memberNo: m.memberNo, fullName: m.fullName, phone: m.phone, email: m.email, birthday: m.birthday ? dateStr(m.birthday) : null, source: m.source, status: m.status, emailOptIn: m.emailOptIn, smsOptIn: m.smsOptIn, hasPortal: !!m.passwordHash, joined: dateStr(m.createdAt), orders, spent: Math.round((s?.spent ?? 0) * 100) / 100, avgOrder: orders ? Math.round(((s?.spent ?? 0) / orders) * 100) / 100 : 0, firstPurchase: s?.firstDate ? dateStr(s.firstDate) : null, lastPurchase: s?.lastDate ? dateStr(s.lastDate) : null, daysSince, ordersPerMonth: perMonth, favoriteProduct: s?.favProduct ?? null, favoriteBrand: s?.favBrand ?? null, favoriteCategory: s?.favCategory ?? null, topBranch: s?.topBranch ?? null, segments, tier: standing.get(m.id)?.tier ?? 'BRONZE', points: standing.get(m.id)?.points ?? 0, spent12m: standing.get(m.id)?.spent12m ?? 0, goal: m.goal, gym: m.gym, heardFrom: m.heardFrom, preferredChannel: m.preferredChannel, bestTime: m.bestTime, outletId: m.outletId, outletName: outlets.find((o) => o.id === m.outletId)?.name ?? null, referredById: m.referredById, messengerHandle: m.messengerHandle };
     });
     const words = (q.search ?? '').toLowerCase().split(/\s+/).filter(Boolean);
-    return rows.filter((r) => (!q.segment || r.segments.includes(q.segment)) && (!words.length || words.every((w) => `${r.memberNo} ${r.fullName} ${r.phone ?? ''} ${r.email ?? ''} ${r.favoriteProduct ?? ''} ${r.favoriteBrand ?? ''}`.toLowerCase().includes(w))));
+    return rows.filter((r) => (!q.segment || r.segments.includes(q.segment)) && (!words.length || words.every((w) => `${r.memberNo} ${r.fullName} ${r.phone ?? ''} ${r.email ?? ''} ${r.favoriteProduct ?? ''} ${r.favoriteBrand ?? ''} ${r.goal ?? ''} ${r.gym ?? ''}`.toLowerCase().includes(w))));
   }
 
   /** One member: contact, numbers, favorites, monthly spending and the purchases with their items. */
@@ -158,7 +182,8 @@ export class MembersService {
     const purchases = await this.purchases(id, 100);
     const favProducts = await this.prisma.db.$queryRaw<{ name: string; qty: number; times: number; amount: Prisma.Decimal }[]>(Prisma.sql`SELECT p.name, SUM(l.qty)::int AS qty, COUNT(DISTINCT d.id)::int AS times, SUM(l.amount) AS amount FROM sales_lines l JOIN sales_docs d ON d.id = l.doc_id JOIN products p ON p.id = l.product_id WHERE d.member_id = ${id} AND d.voided_at IS NULL AND NOT l.is_freebie GROUP BY p.name ORDER BY qty DESC, p.name LIMIT 10`);
     const monthly = await this.prisma.db.$queryRaw<{ month: string; total: Prisma.Decimal; orders: number }[]>(Prisma.sql`SELECT to_char(d.doc_date, 'YYYY-MM') AS month, SUM(d.grand_total) AS total, COUNT(*)::int AS orders FROM sales_docs d WHERE d.member_id = ${id} AND d.voided_at IS NULL GROUP BY 1 ORDER BY 1 DESC LIMIT 12`);
-    return { ...row, notes: m.notes, qr: qrValue(m.qrToken), consentAt: m.consentAt, lastLoginAt: m.lastLoginAt, purchases, favorites: favProducts.map((f) => ({ name: f.name, qty: f.qty, times: f.times, amount: num(f.amount) })), monthly: monthly.map((x) => ({ month: x.month, total: num(x.total), orders: x.orders })).reverse() };
+    const profile = { dietary: m.dietary, flavorLikes: m.flavorLikes, flavorDislikes: m.flavorDislikes, trainingDays: m.trainingDays, budget: m.budget, messengerHandle: m.messengerHandle, referralNo: m.referredById ? (await this.prisma.db.member.findUnique({ where: { id: m.referredById }, select: { memberNo: true } }))?.memberNo ?? null : null };
+    return { ...row, ...profile, notes: m.notes, qr: qrValue(m.qrToken), consentAt: m.consentAt, lastLoginAt: m.lastLoginAt, purchases, favorites: favProducts.map((f) => ({ name: f.name, qty: f.qty, times: f.times, amount: num(f.amount) })), monthly: monthly.map((x) => ({ month: x.month, total: num(x.total), orders: x.orders })).reverse() };
   }
 
   /** The member's sales (not voided) with items; no cost. */

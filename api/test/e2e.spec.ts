@@ -69,6 +69,7 @@ async function resetTransactionalData() {
   await prisma.$executeRawUnsafe(`TRUNCATE replacement_receipts, replacement_tickets, franchise_shipping_charges, form_numbers_released, ecom_waybills, ecom_waybill_hints, franchise_payments, franchise_ar_adjustments, franchise_ar_extensions, franchise_invoices, memo_recipients, memos, six_pack_stickers, six_pack_redemptions CASCADE`);
   await prisma.$executeRawUnsafe(`TRUNCATE outlet_changes, outlet_shares, itinerary_claims, itinerary_stops, itineraries, agent_consignment_limits, outlets, sales_areas CASCADE`);
   await prisma.$executeRawUnsafe(`TRUNCATE campaign_recipients, campaigns, message_opt_outs, members CASCADE`);
+  await prisma.$executeRawUnsafe(`TRUNCATE member_vouchers, member_points_entries, member_notes, member_offers, survey_items, survey_responses, survey_invites, lost_sales, reservations, stock_alert_requests, member_auto_messages CASCADE`);
   await prisma.$executeRawUnsafe(`UPDATE consignment_agreements SET agent_key = NULL, agent_name = NULL, outlet_id = NULL`);
   await prisma.$executeRawUnsafe(`UPDATE locations SET credit_hold = false, credit_hold_note = NULL`);
   await prisma.$executeRawUnsafe(`UPDATE locations SET franchise_associate_receives = false, cash_deposit_max_days = 1`);
@@ -2744,5 +2745,176 @@ describe('Wheysted members: QR card, counter lookup, portal, stats and campaigns
       const tst = ok(await as('sales.manager').post('/api/campaigns/test').send({ channel: 'EMAIL', to: 'me@x.test', subject: 'T', body: 'Hello {name}' })).body; expect(tst.status).toBe('SENT'); expect(sent.at(-1)!.subject).toBe('[TEST] T');
     } finally { ms.email = origEmail; ms.sms = origSms; ms.config = origCfg; }
     expect((ok(await as('sales.manager').get('/api/campaigns')).body as unknown[]).length).toBeGreaterThanOrEqual(3);
+  });
+});
+
+describe('Wheysted member program: points and tiers, vouchers, member prices, referral, surveys, lost sales, reservations, automation and insights (owner request 2026-10-06)', () => {
+  const today = () => new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);
+  const portal = (m: 'get' | 'post', p: string, token?: string) => (m === 'get' ? http.get(p) : http.post(p)).set(...(token ? ['Authorization', `Bearer ${token}`] as [string, string] : ['X-None', '1'] as [string, string]));
+  let west = ''; let pid = ''; let pidNone = ''; let a = { id: '', memberNo: '', token: '' }; let b = { id: '', memberNo: '', token: '' };
+  const sale = async (n: string, memberId: string | null, lines: { productId: string; qty: number; unitPrice?: number }[], extra: Record<string, unknown> = {}) => ok(await as('sales.westave').post('/api/sales').send({ channel: 'WALK_IN', paymentMode: 'CASH', drSiNo: `MP-${run}-${n}`, ...(memberId ? { memberId } : {}), lines, ...extra })).body;
+  const withMessaging = async (fn: (sent: { to: string; text: string }[]) => Promise<void>) => {
+    const sent: { to: string; text: string }[] = []; const ms = app.get(MessagingService); const e = ms.email.bind(ms); const s = ms.sms.bind(ms); const c = ms.config.bind(ms);
+    ms.config = () => ({ emailConfigured: true, from: 'shop@gws.test', smsConfigured: true, smsSender: 'GWS' });
+    ms.email = async (to, _subject, text) => { sent.push({ to, text }); return { status: 'SENT' }; }; ms.sms = async (to, message) => { sent.push({ to, text: message }); return { status: 'SENT' }; };
+    try { await fn(sent); } finally { ms.email = e; ms.sms = s; ms.config = c; }
+  };
+
+  it('setup: a product with stock, two members (one signed up on the portal) with fitness profile and heard-from', async () => {
+    await prisma.salesReportSubmission.deleteMany({});
+    west = (await prisma.location.findUniqueOrThrow({ where: { code: 'WESTAVE' } })).id;
+    const cats = ok(await as('admin').get('/api/categories')).body as { id: string; accountingClass: string }[];
+    const mk = async (tag: string, stock: number) => {
+      const id = ok(await as('admin').post('/api/products').send({ name: `MP ${tag} ${run}`, brand: 'Prothin', categoryId: cats.find((c) => c.accountingClass === 'SUPPLEMENT')!.id, prices: { RETAIL: 1000 }, cost: 400 })).body.id as string;
+      if (stock) { const bt = await prisma.batch.create({ data: { productId: id, batchNo: `MP-${tag}-${run}`, receivedRef: 'TEST', unitCost: '400' } }); await prisma.stockLedger.create({ data: { locationId: west, productId: id, batchId: bt.id, qtyDelta: stock, movementType: 'RECEIVE', documentType: 'Opening', documentId: `MP-${tag}-${run}`, unitCost: '400', businessDate: new Date(`${today()}T00:00:00Z`) } }); await prisma.stockBalance.create({ data: { locationId: west, productId: id, batchId: bt.id, qty: stock } }); }
+      return id;
+    };
+    pid = await mk('Whey', 60); pidNone = await mk('Scarce', 0);
+    const ca = ok(await as('sales.westave').post('/api/members').send({ fullName: 'Ana Program', phone: '0917 666 0001', email: `ana${run}@x.test`, birthday: `1995-${today().slice(5)}`, goal: 'MUSCLE_GAIN', gym: 'Iron Den', heardFrom: 'GYM', preferredChannel: 'SMS', flavorLikes: 'chocolate' })).body;
+    a = { id: ca.id, memberNo: ca.memberNo, token: '' };
+    const g = ok(await as('sales.manager').get(`/api/members/${a.id}`)).body; expect(g).toMatchObject({ goal: 'MUSCLE_GAIN', gym: 'Iron Den', heardFrom: 'GYM', preferredChannel: 'SMS' });
+    await as('sales.westave').post('/api/members').send({ fullName: 'Bad', phone: '0917 666 0009', goal: 'FLYING' }).expect(400);
+    const s = ok(await portal('post', '/api/portal/signup').send({ fullName: 'Ben Referred', phone: '0917 666 0002', email: `ben${run}@x.test`, password: 'longenough1', agree: true, referredByNo: a.memberNo, goal: 'WEIGHT_LOSS', heardFrom: 'FRIEND' })).body;
+    b.token = s.token; const mb = ok(await portal('get', '/api/portal/me', b.token)).body; b.memberNo = mb.memberNo; b.id = (await prisma.member.findFirstOrThrow({ where: { memberNo: b.memberNo } })).id;
+    expect(mb.profile).toMatchObject({ goal: 'WEIGHT_LOSS', heardFrom: 'FRIEND' }); expect(mb.loyalty.tier).toBe('BRONZE');
+    await portal('post', '/api/portal/signup').send({ fullName: 'Cy Bad', phone: '0917 666 0003', password: 'longenough1', agree: true, referredByNo: 'WHY-999999' }).expect(400);
+  });
+
+  it('points and tiers: points follow spending, the Owner sets the rules, points redeem into a voucher (portal), manual adjustments are logged', async () => {
+    ok(await as('sales.manager').post('/api/member-program/settings').send({ pesoPerPoint: 100, pointValue: 1, minRedeemPoints: 5, silverFrom: 2500, goldFrom: 6000 }));
+    await sale('1', a.id, [{ productId: pid, qty: 1 }]);
+    let st = ok(await as('sales.westave').get(`/api/members/${a.id}/standing`)).body; expect(st).toMatchObject({ tier: 'BRONZE', points: 10, spent12m: 1000, nextTier: 'SILVER', toNextTier: 1500 });
+    await sale('2', a.id, [{ productId: pid, qty: 2 }]);
+    st = ok(await as('sales.westave').get(`/api/members/${a.id}/standing`)).body; expect(st).toMatchObject({ tier: 'SILVER', points: 30 }); expect(has(st, /unitCost|"cost"/)).toBe(false);
+    const list = ok(await as('sales.manager').get('/api/members')).body as { id: string; tier: string; points: number }[]; expect(list.find((m) => m.id === a.id)).toMatchObject({ tier: 'SILVER', points: 30 });
+    ok(await as('sales.manager').post(`/api/members/${a.id}/points`).send({ points: 5, reason: 'Goodwill' }));
+    await as('sales.manager').post(`/api/members/${a.id}/points`).send({ points: -500, reason: 'Too many' }).expect(400);
+    await as('sales.westave').post(`/api/members/${a.id}/points`).send({ points: 5, reason: 'Nope nope' }).expect(403);
+    // sign in to the portal as Ana (claim the counter-made account) and redeem
+    const claim = ok(await portal('post', '/api/portal/signup').send({ fullName: 'Ana Program', phone: '0917 666 0001', password: 'longenough2', memberNo: a.memberNo, agree: true })).body; a.token = claim.token;
+    const v = ok(await portal('post', '/api/portal/redeem', a.token).send({ points: 20 })).body; expect(v.value).toBe(20); expect(v.code).toMatch(/^V-[0-9A-F]{8}$/);
+    const me = ok(await portal('get', '/api/portal/me', a.token)).body; expect(me.loyalty.points).toBe(15); expect(me.vouchers.some((x: { code: string }) => x.code === v.code)).toBe(true);
+    await portal('post', '/api/portal/redeem', a.token).send({ points: 99 }).expect(400); await portal('post', '/api/portal/redeem').send({ points: 5 }).expect(401);
+  });
+
+  it('vouchers at the counter: the member\'s own voucher takes its value off the supplements, once; wrong member, used, expired and below-minimum are refused; a void gives it back', async () => {
+    const v1 = ok(await as('sales.manager').post(`/api/members/${a.id}/vouchers`).send({ kind: 'AMOUNT', value: 100, note: 'Test' })).body;
+    expect((ok(await as('sales.westave').get(`/api/members/${a.id}/vouchers?active=1`)).body as { code: string }[]).map((x) => x.code)).toContain(v1.code);
+    const s1 = await sale('3', a.id, [{ productId: pid, qty: 2 }], { voucherCode: v1.code });
+    expect(Number(s1.productTotal)).toBe(1900); expect(Number(s1.grandTotal)).toBe(1900); expect(Number(s1.voucherDiscount)).toBe(100);
+    expect(s1.lines.reduce((t: number, l: { amount: string }) => t + Number(l.amount), 0)).toBe(1900);
+    const used = (ok(await as('sales.manager').get(`/api/members/${a.id}/vouchers`)).body as { code: string; used: boolean }[]).find((x) => x.code === v1.code)!; expect(used.used).toBe(true);
+    const again = await as('sales.westave').post('/api/sales').send({ channel: 'WALK_IN', paymentMode: 'CASH', drSiNo: `MP-${run}-4`, memberId: a.id, voucherCode: v1.code, lines: [{ productId: pid, qty: 1 }] }).expect(400); expect(JSON.stringify(again.body)).toMatch(/already used/);
+    const vb = ok(await as('sales.manager').post(`/api/members/${b.id}/vouchers`).send({ kind: 'AMOUNT', value: 50 })).body;
+    const other = await as('sales.westave').post('/api/sales').send({ channel: 'WALK_IN', paymentMode: 'CASH', drSiNo: `MP-${run}-5`, memberId: a.id, voucherCode: vb.code, lines: [{ productId: pid, qty: 1 }] }).expect(400); expect(JSON.stringify(other.body)).toMatch(/another member/);
+    await as('sales.westave').post('/api/sales').send({ channel: 'WALK_IN', paymentMode: 'CASH', drSiNo: `MP-${run}-6`, voucherCode: vb.code, lines: [{ productId: pid, qty: 1 }] }).expect(400); // no member tagged
+    const vmin = ok(await as('sales.manager').post(`/api/members/${a.id}/vouchers`).send({ kind: 'PERCENT', value: 10, minPurchase: 3000 })).body;
+    const low = await as('sales.westave').post('/api/sales').send({ channel: 'WALK_IN', paymentMode: 'CASH', drSiNo: `MP-${run}-7`, memberId: a.id, voucherCode: vmin.code, lines: [{ productId: pid, qty: 1 }] }).expect(400); expect(JSON.stringify(low.body)).toMatch(/at least 3000/);
+    const s2 = await sale('8', a.id, [{ productId: pid, qty: 3 }], { voucherCode: vmin.code }); expect(Number(s2.productTotal)).toBe(2700);
+    await prisma.memberVoucher.update({ where: { code: vb.code }, data: { expiresOn: new Date(Date.UTC(2020, 0, 1)) } });
+    const exp = await as('sales.westave').post('/api/sales').send({ channel: 'WALK_IN', paymentMode: 'CASH', drSiNo: `MP-${run}-9`, memberId: b.id, voucherCode: vb.code, lines: [{ productId: pid, qty: 1 }] }).expect(400); expect(JSON.stringify(exp.body)).toMatch(/expired/);
+    // void gives the voucher back
+    ok(await as('admin').post(`/api/sales/${s1.id}/void`).send({ reason: 'Customer changed mind' }));
+    expect((await prisma.memberVoucher.findUniqueOrThrow({ where: { code: v1.code } })).usedAt).toBeNull();
+    // privacy: the counter sees vouchers, never cost; a portal token cannot reach the staff program
+    await as('hr.staff').get(`/api/members/${a.id}/vouchers`).expect(403);
+    for (const p of ['/api/member-program/settings', '/api/member-program/top-spenders']) expect([401, 403]).toContain((await portal('get', p, a.token)).status);
+  });
+
+  it('member prices: a member offer applies by itself for tagged members (no special-price approval), not for walk-ins; referral gives both a voucher once', async () => {
+    const o = ok(await as('sales.manager').post('/api/member-program/offers').send({ productId: pid, price: 850, note: 'Members week' })).body; expect(o.id).toBeTruthy();
+    expect((ok(await as('sales.westave').get(`/api/members/lookup?q=${b.memberNo}`)).body as unknown[]).length).toBe(1);
+    const walk = await sale('10', null, [{ productId: pid, qty: 1 }]); expect(Number(walk.productTotal)).toBe(1000);
+    const first = await sale('11', b.id, [{ productId: pid, qty: 2 }]); expect(Number(first.productTotal)).toBe(1700); expect(first.specialPriceStatus ?? null).toBeNull();
+    const typed = await sale('12', b.id, [{ productId: pid, qty: 1, unitPrice: 1000 }]); expect(Number(typed.productTotal)).toBe(1000); // a typed price wins
+    await as('sales.westave').get('/api/member-program/offers').expect(403);
+    // referral: Ben was referred by Ana; his first purchase gave each a voucher, once
+    const rv = await prisma.memberVoucher.findMany({ where: { source: 'REFERRAL' } }); expect(rv.filter((v) => v.memberId === a.id).length).toBe(1); expect(rv.filter((v) => v.memberId === b.id).length).toBe(1);
+    await sale('13', b.id, [{ productId: pid, qty: 1 }]); expect(await prisma.memberVoucher.count({ where: { source: 'REFERRAL' } })).toBe(2);
+    ok(await as('sales.manager').post('/api/member-program/offers').send({ id: o.id, productId: pid, price: 850, active: false }));
+    expect(Number((await sale('14', b.id, [{ productId: pid, qty: 1 }])).productTotal)).toBe(1000);
+  });
+
+  it('contact log, survey and feedback: a low rating becomes a complaint note and a notification; one answer per purchase; ratings are summarised', async () => {
+    ok(await as('sales.manager').post(`/api/members/${a.id}/notes`).send({ kind: 'CALL', text: 'Called to thank her' }));
+    await as('sales.westave').post(`/api/members/${a.id}/notes`).send({ kind: 'CALL', text: 'x y z' }).expect(403);
+    const me = ok(await portal('get', '/api/portal/me', a.token)).body; const p = me.purchases.find((x: { survey: { token: string } | null }) => x.survey);
+    const tok = p.survey.token; const view = ok(await http.get(`/api/portal/survey/${tok}`)).body; expect(view.items.length).toBeGreaterThanOrEqual(1); expect(view.member).toBe('Ana');
+    await http.post(`/api/portal/survey/${tok}`).send({ rating: 9 }).expect(400);
+    ok(await http.post(`/api/portal/survey/${tok}`).send({ rating: 2, comment: 'Tub was dented', items: [{ productId: view.items[0].productId, wouldBuyAgain: false }] }));
+    await http.post(`/api/portal/survey/${tok}`).send({ rating: 5 }).expect(400); await http.get('/api/portal/survey/not-a-token').expect(404);
+    const notes = ok(await as('sales.manager').get(`/api/members/${a.id}/notes`)).body as { kind: string; text: string }[]; expect(notes.some((n) => n.kind === 'COMPLAINT' && /Rated 2\/5/.test(n.text))).toBe(true); expect(notes.some((n) => n.kind === 'CALL')).toBe(true);
+    expect(await prisma.notification.count({ where: { type: 'MEMBER_LOW_RATING' } })).toBeGreaterThanOrEqual(1);
+    const fb = ok(await as('sales.manager').get('/api/member-program/feedback')).body; expect(fb.responses ?? fb.total ?? fb.count).toBeTruthy();
+  });
+
+  it('lost sales and the days-of-stock "asked" column; reservations from the portal reach the branch; back-in-stock tells the member once the item is back', async () => {
+    ok(await as('sales.westave').post('/api/member-program/lost-sales').send({ productId: pidNone, qty: 2, memberId: a.id, note: 'Asked for it' }));
+    ok(await as('sales.westave').post('/api/member-program/lost-sales').send({ itemText: 'Pink creatine gummies', qty: 1 }));
+    await as('sales.westave').post('/api/member-program/lost-sales').send({ qty: 1 }).expect(400);
+    const ls = ok(await as('sales.manager').get('/api/member-program/lost-sales?days=30')).body; expect(ls.total).toBe(2); expect(ls.items[0]).toMatchObject({ qty: 2 });
+    await as('sales.westave').get('/api/member-program/lost-sales').expect(403);
+    const dos = ok(await as('admin').get('/api/alerts/days-of-stock?days=30&combine=1')).body as { rows: { product: { id: string }; asked: number }[] };
+    expect(dos.rows.every((r) => typeof r.asked === 'number')).toBe(true);
+    // reservation
+    const br = ok(await portal('get', '/api/portal/branches', a.token)).body as { id: string }[]; expect(br.map((x) => x.id)).toContain(west);
+    const cat = ok(await portal('get', `/api/portal/catalog?search=MP%20Whey%20${run}`, a.token)).body as { productId: string; price: number; available: boolean }[]; expect(cat[0]).toMatchObject({ productId: pid, price: 1000, available: true }); expect(has(cat, /cost/i)).toBe(false);
+    const r = ok(await portal('post', '/api/portal/reserve', a.token).send({ productId: pid, qty: 2, locationId: west })).body;
+    const rs = ok(await as('sales.westave').get('/api/member-program/reservations')).body as { id: string; status: string; memberNo: string }[]; expect(rs.find((x) => x.id === r.id)).toMatchObject({ status: 'REQUESTED', memberNo: a.memberNo });
+    await withMessaging(async (sent) => { ok(await as('sales.westave').post(`/api/member-program/reservations/${r.id}`).send({ status: 'READY' })); expect(sent.some((m) => /ready/i.test(m.text))).toBe(true); });
+    ok(await as('sales.westave').post(`/api/member-program/reservations/${r.id}`).send({ status: 'PICKED_UP' }));
+    const r2 = ok(await portal('post', '/api/portal/reserve', b.token).send({ productId: pid, qty: 1, locationId: west })).body; ok(await portal('post', `/api/portal/reservations/${r2.id}/cancel`, b.token)); await portal('post', `/api/portal/reservations/${r2.id}/cancel`, a.token).expect(400);
+    await portal('post', '/api/portal/reserve', a.token).send({ productId: pid, qty: 0, locationId: west }).expect(400);
+    // back in stock
+    ok(await portal('post', '/api/portal/alert', a.token).send({ productId: pidNone })); expect(ok(await portal('post', '/api/portal/alert', a.token).send({ productId: pidNone })).body.already).toBe(true);
+    await withMessaging(async (sent) => {
+      const run1 = ok(await as('sales.manager').post('/api/member-program/run-automation')).body; expect(run1.backInStock).toBe(0);
+      const bt = await prisma.batch.create({ data: { productId: pidNone, batchNo: `MP-S-${run}`, receivedRef: 'TEST', unitCost: '400' } }); await prisma.stockLedger.create({ data: { locationId: west, productId: pidNone, batchId: bt.id, qtyDelta: 5, movementType: 'RECEIVE', documentType: 'Opening', documentId: `MP-S-${run}`, unitCost: '400', businessDate: new Date(`${today()}T00:00:00Z`) } }); await prisma.stockBalance.create({ data: { locationId: west, productId: pidNone, batchId: bt.id, qty: 5 } });
+      const run2 = ok(await as('sales.manager').post('/api/member-program/run-automation')).body; expect(run2.backInStock).toBe(1); expect(sent.some((m) => /is available again/.test(m.text))).toBe(true);
+      expect(ok(await as('sales.manager').post('/api/member-program/run-automation')).body.backInStock).toBe(0); // told once
+    });
+  });
+
+  it('automatic messages: birthday voucher + message once a year (off until the Owner turns it on), win-back, and a not-set-up channel is recorded not sent', async () => {
+    const before = await prisma.memberVoucher.count({ where: { source: 'BIRTHDAY' } });
+    await withMessaging(async (sent) => {
+      ok(await as('sales.manager').post('/api/member-program/run-automation')); expect(await prisma.memberVoucher.count({ where: { source: 'BIRTHDAY' } })).toBe(before); // off by default
+      ok(await as('sales.manager').post('/api/member-program/settings').send({ birthdayAuto: true, birthdayKind: 'AMOUNT', birthdayValue: 150 }));
+      const r1 = ok(await as('sales.manager').post('/api/member-program/run-automation')).body; expect(r1.birthday).toBe(1);
+      const bv = await prisma.memberVoucher.findMany({ where: { source: 'BIRTHDAY', memberId: a.id } }); expect(bv.length).toBe(1); expect(Number(bv[0].value)).toBe(150);
+      expect(sent.some((m) => m.text.includes(bv[0].code))).toBe(true);
+      expect(ok(await as('sales.manager').post('/api/member-program/run-automation')).body.birthday).toBe(0); expect(await prisma.memberVoucher.count({ where: { source: 'BIRTHDAY', memberId: a.id } })).toBe(1);
+    });
+    // nothing set up: recorded, no duplicate voucher
+    ok(await as('sales.manager').post('/api/member-program/settings').send({ winbackAuto: true, winbackValue: 75, winbackMinPurchase: 300 }));
+    await prisma.member.update({ where: { id: b.id }, data: { createdAt: new Date(Date.now() - 200 * 86400e3) } });
+    await prisma.salesDoc.updateMany({ where: { memberId: b.id }, data: { docDate: new Date(Date.now() - 120 * 86400e3) } });
+    delete process.env.SMTP_URL; delete process.env.SEMAPHORE_API_KEY;
+    const nc = ok(await as('sales.manager').post('/api/member-program/run-automation')).body; expect(nc.notConfigured).toBeGreaterThanOrEqual(1);
+    const wb = await prisma.memberVoucher.count({ where: { source: 'WINBACK', memberId: b.id } });
+    ok(await as('sales.manager').post('/api/member-program/run-automation')); expect(await prisma.memberVoucher.count({ where: { source: 'WINBACK', memberId: b.id } })).toBe(wb);
+    ok(await as('sales.manager').post('/api/member-program/settings').send({ birthdayAuto: false, winbackAuto: false }));
+  });
+
+  it('insights: top spenders (with last contact), when customers buy, where members come from, how many sales are tagged to a member, what to suggest at the counter', async () => {
+    const top = ok(await as('sales.manager').get('/api/member-program/top-spenders')).body as { id: string; tier: string; spent12m: number; lastContact: string | null }[]; expect(top[0].id).toBe(a.id); expect(top[0].lastContact).toBeTruthy(); expect(top[0].spent12m).toBeGreaterThan(top[1].spent12m);
+    const hm = ok(await as('sales.manager').get('/api/member-program/heatmap?membersOnly=1')).body; expect(hm.total).toBeGreaterThanOrEqual(3); expect(hm.cells[0]).toHaveProperty('dow'); expect(hm.cells[0]).toHaveProperty('hour');
+    const acq = ok(await as('sales.manager').get('/api/member-program/acquisition')).body; expect(acq.heardFrom.map((x: { label: string }) => x.label)).toEqual(expect.arrayContaining(['GYM', 'FRIEND'])); expect(acq.goal.map((x: { label: string }) => x.label)).toContain('MUSCLE_GAIN');
+    const cap = ok(await as('sales.manager').get('/api/member-program/capture')).body; expect(cap.targetPct).toBe(30); const wb = cap.branches.find((x: { branch: string }) => x.branch === 'West Ave'); expect(wb.tagged).toBeGreaterThanOrEqual(3); expect(wb.sales).toBeGreaterThan(wb.tagged);
+    const sg = ok(await as('sales.westave').get(`/api/members/${a.id}/suggestions`)).body; expect(sg.usual[0].productId).toBe(pid); expect(sg.likes).toBe('chocolate'); expect(sg.goal).toBe('MUSCLE_GAIN');
+    await as('sales.westave').get('/api/member-program/heatmap').expect(403);
+  });
+
+  it('chat-app campaigns (WhatsApp / Viber / Messenger) are lists the staff send by hand; a voucher is made for each person when marked sent; results show who bought', async () => {
+    const pre = ok(await as('sales.manager').post('/api/campaigns/preview').send({ channel: 'WHATSAPP', audience: { source: 'MEMBERS', goal: 'MUSCLE_GAIN' } })).body; expect(pre.count).toBe(1);
+    await as('sales.manager').post('/api/campaigns/preview').send({ channel: 'WHATSAPP', audience: { source: 'ALL_CONTACTS' } }).expect(400);
+    const c = ok(await as('sales.manager').post('/api/campaigns').send({ channel: 'WHATSAPP', name: 'Gym push', body: 'Hi {firstName}, use {voucher}', audience: { source: 'MEMBERS', goal: 'MUSCLE_GAIN', voucher: { kind: 'AMOUNT', value: 60, validDays: 14 } } })).body;
+    ok(await as('sales.manager').post(`/api/campaigns/${c.id}/send`));
+    let g = ok(await as('sales.manager').get(`/api/campaigns/${c.id}`)).body; expect(g.status).toBe('MANUAL'); expect(g.recipients.length).toBe(1);
+    const mk = ok(await as('sales.manager').post(`/api/member-program/campaign-recipients/${g.recipients[0].id}/mark`).send({ status: 'SENT' })).body; expect(mk.voucher).toMatch(/^V-/); expect(mk.text).toContain(mk.voucher);
+    g = ok(await as('sales.manager').get(`/api/campaigns/${c.id}`)).body; expect(g.status).toBe('DONE'); expect(g.results).toMatchObject({ reached: 1, vouchersGiven: 1, vouchersUsed: 0 });
+    await sale('20', a.id, [{ productId: pid, qty: 1 }], { voucherCode: mk.voucher });
+    g = ok(await as('sales.manager').get(`/api/campaigns/${c.id}`)).body; expect(g.results).toMatchObject({ buyers: 1, vouchersUsed: 1 });
+    await as('sales.westave').post(`/api/member-program/campaign-recipients/${g.recipients[0].id}/mark`).send({ status: 'SENT' }).expect(403);
   });
 });

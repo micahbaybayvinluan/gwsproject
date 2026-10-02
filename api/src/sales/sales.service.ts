@@ -23,21 +23,23 @@ import { OutletsService } from '../agents/outlets.service';
 import { MonitorService } from '../agents/monitor.service';
 import { CustomerFollowUpsService } from './customer-followups.service';
 import { FranchiseShippingService } from '../franchise/franchise-shipping.service';
+import { LoyaltyService } from '../members/loyalty.service';
 
 export interface SalesLineInput { productId: string; qty: number; unitPrice?: number | null; batchId?: string | null; exactBatch?: boolean; isFreebie?: boolean; lineRemarks?: string; priceTier?: string }
 export interface SalesInput {
-  locationId?: string; docDate?: string; channel: SalesChannel; channelSub?: string | null; customerId?: string | null; agentId?: string | null; outletId?: string | null; memberId?: string | null; riderId?: string | null; customerName?: string | null; customerPhone?: string | null; customerEmail?: string | null; drSiNo: string;
+  locationId?: string; docDate?: string; channel: SalesChannel; channelSub?: string | null; customerId?: string | null; agentId?: string | null; outletId?: string | null; memberId?: string | null; voucherCode?: string | null; riderId?: string | null; customerName?: string | null; customerPhone?: string | null; customerEmail?: string | null; drSiNo: string;
   paymentMode: PaymentMode; paymentAccountId?: string | null; proofOfPaymentAttachmentId?: string | null; cardMid?: string; cardSlipNo?: string; cardApprovalCode?: string; cardBatchNo?: string;
   deliveryFee?: number; riderIncentive?: number; incentive?: { amount: number; payee: string; kind?: 'SALES' | 'RIDER' } | null; sixPackSticker?: boolean; franchiseShipping?: { mode: 'NONE' | 'TO_FOLLOW' | 'AMOUNT'; amount?: number; courier?: string; reference?: string }; shippingFee?: number; shippingExpense?: number; marketplaceCharges?: number; dueDate?: string | null; pdcBank?: string; pdcChequeNo?: string; pdcDate?: string | null; notes?: string;
   lines: SalesLineInput[];
 }
 
+const franchiseUserOf = (u: SessionUser) => u.roleKey.startsWith('FRANCHISE');
 export const TIER_BY_CHANNEL: Record<SalesChannel, string> = { WALK_IN: 'RETAIL', DELIVERY: 'RETAIL', SHIPPING_COURIER: 'RETAIL', SHIPPING_MARKETPLACE: 'RETAIL', FRANCHISE: 'FRANCHISE', DEALER: 'DEALER', AGENT: 'AGENT', PERSONAL: 'RETAIL', OTHER: 'RETAIL' };
 
 /** §8 Sales module: entry (all channels/modes), agents, AR/PDC, payments, credit notes. Stock is deducted on save (FEFO). */
 @Injectable()
 export class SalesService implements OnModuleInit {
-  constructor(private prisma: PrismaService, private seq: SequenceService, private stock: StockService, private approvals: ApprovalsService, private master: MasterService, private notify: NotificationsService, private audit: AuditService, private settings: SettingsService, private attachments: AttachmentsService, private posting: PostingService, private closing: ClosingService, private scope: ScopeService, private expenses: ExpensesService, private followUps: CustomerFollowUpsService, private outlets: OutletsService, private agentMonitor: MonitorService, private sixPack: SixPackService, private franchiseShipping: FranchiseShippingService) {}
+  constructor(private prisma: PrismaService, private seq: SequenceService, private stock: StockService, private approvals: ApprovalsService, private master: MasterService, private notify: NotificationsService, private audit: AuditService, private settings: SettingsService, private attachments: AttachmentsService, private posting: PostingService, private closing: ClosingService, private scope: ScopeService, private expenses: ExpensesService, private followUps: CustomerFollowUpsService, private outlets: OutletsService, private agentMonitor: MonitorService, private sixPack: SixPackService, private franchiseShipping: FranchiseShippingService, private loyalty: LoyaltyService) {}
 
   onModuleInit() {
     this.approvals.register('SPECIAL_PRICE', (req, outcome) => this.onSpecialPriceDecision(req.documentId, outcome));
@@ -106,6 +108,14 @@ export class SalesService implements OnModuleInit {
     const platformTier = input.channel === 'SHIPPING_MARKETPLACE' && input.channelSub && ['TIKTOK', 'SHOPEE', 'LAZADA'].includes(input.channelSub.toUpperCase()) ? input.channelSub.toUpperCase() : null;
     const defaultTier = input.agentId && input.channel !== 'AGENT' ? 'AGENT' : platformTier ?? (input.paymentMode === 'CREDIT_CARD' && TIER_BY_CHANNEL[input.channel] === 'RETAIL' ? 'CC' : TIER_BY_CHANNEL[input.channel]);
 
+    // member voucher (owner request 2026-10-06): the member's own, unused, in date; takes its value off the supplement lines
+    let voucher: Awaited<ReturnType<LoyaltyService['validate']>> | null = null;
+    if (input.voucherCode?.trim()) { if (!input.memberId) throw new BadRequestException('Tag the member first, then use their voucher'); voucher = await this.loyalty.validate(input.voucherCode, input.memberId, docDate); }
+    // member prices running today (owner request 2026-10-06): applied when no price is typed and a member is tagged
+    const offers = input.memberId && !franchiseUserOf(user) ? await this.loyalty.offerPrices(docDate) : new Map<string, Prisma.Decimal>();
+    const voucherLines: Prisma.SalesLineUncheckedCreateWithoutDocInput[] = [];
+    let voucherDiscount = ZERO;
+
     const doc = await this.prisma.db.$transaction(async (tx) => {
       const controlNo = await this.seq.form(tx, 'DR', locationId);
       const lineRows: Prisma.SalesLineUncheckedCreateWithoutDocInput[] = [];
@@ -121,6 +131,8 @@ export class SalesService implements OnModuleInit {
         const classFree = !isPlastic && (!!l.isFreebie || product.category.accountingClass === 'FREEBIE');
         const tierPrice = classFree ? ZERO : tier === 'FRANCHISE' || !isPlastic ? D(await this.master.priceFor(product.id, tier, docDate, tx)) : ZERO;
         let unitPrice = classFree ? ZERO : l.unitPrice != null ? D(l.unitPrice) : tierPrice;
+        let memberBacked = false;
+        if (!classFree && l.unitPrice == null && (tier === 'RETAIL' || tier === 'CC') && offers.has(product.id) && D(offers.get(product.id)!).lt(tierPrice)) { unitPrice = D(offers.get(product.id)!); memberBacked = true; }
         const isFreebie = classFree || (isPlastic && unitPrice.isZero());
         if (!isFreebie && product.category.accountingClass === 'SUPPLEMENT') supplementUnits += l.qty;
         if (franchiseUser && l.unitPrice != null && !unitPrice.equals(tierPrice)) {
@@ -128,7 +140,7 @@ export class SalesService implements OnModuleInit {
           // Franchise owner sells at their own retail price: no SPECIAL_PRICE approval applies (§18.2)
         }
         let flag: string | null = null;
-        if (!franchiseUser && !classFree && unitPrice.lt(tierPrice)) {
+        if (!franchiseUser && !classFree && !memberBacked && unitPrice.lt(tierPrice)) {
           const discountPct = tierPrice.isZero() ? D(0) : tierPrice.minus(unitPrice).div(tierPrice).mul(100);
           if (discountPct.gt(autoDiscountPct)) { special = true; flag = 'PENDING'; }
         }
@@ -144,17 +156,30 @@ export class SalesService implements OnModuleInit {
             // for bundles: the sale line records the bundle product once; component picks record cost with qty 0 price
             lineRows.push({ productId: product.isBundle ? product.id : c.productId, batchId: p.batchId, qty: product.isBundle ? (first ? l.qty : p.qty) : p.qty, priceTier: tier, tierPrice: tierPrice.toFixed(2), unitPrice: unitPrice.toFixed(2), unitCost: p.unitCost, amount: amount.toFixed(2), isFreebie, lineRemarks: l.lineRemarks, nearExpiryWarn: near, specialPriceFlag: flag });
             productTotal = productTotal.plus(amount);
+            if (voucher && !isFreebie && product.category.accountingClass === 'SUPPLEMENT' && amount.gt(0)) voucherLines.push(lineRows[lineRows.length - 1]!);
             await this.stock.post(tx, [{ locationId, productId: c.productId, batchId: p.batchId, qtyDelta: -p.qty, movementType: isFreebie ? 'FREEBIE_ISSUE' : 'SALE', documentType: 'SalesDoc', documentId: controlNo /* replaced below */, unitCost: p.unitCost, businessDate: docDate, createdBy: user.id }]);
             first = false;
           }
         }
         unitPrice = ZERO;
       }
+      if (voucher) {
+        const base = voucherLines.reduce((t, r) => t.plus(D(r.amount as string)), ZERO);
+        if (base.isZero()) throw new BadRequestException(`The voucher ${voucher.code} takes off supplements only; this sale has none`);
+        if (base.lt(D(voucher.minPurchase))) throw new BadRequestException(`The voucher ${voucher.code} needs at least ${D(voucher.minPurchase).toFixed(2)} of supplements`);
+        voucherDiscount = round2(voucher.kind === 'PERCENT' ? base.mul(D(voucher.value)).div(100) : D(voucher.value)); if (voucherDiscount.gt(base)) voucherDiscount = base;
+        let left = voucherDiscount;
+        voucherLines.forEach((r, i) => {
+          const a = D(r.amount as string); const share = i === voucherLines.length - 1 ? left : round2(voucherDiscount.mul(a).div(base)); left = left.minus(share);
+          const na = a.minus(share); r.amount = na.toFixed(2); r.unitPrice = round2(na.div(r.qty as number)).toFixed(2);
+        });
+        productTotal = productTotal.minus(voucherDiscount);
+      }
       const deliveryFee = D(input.deliveryFee ?? 0), shippingFee = D(input.shippingFee ?? 0);
       const grandTotal = round2(productTotal.plus(deliveryFee).plus(shippingFee));
       const created = await tx.salesDoc.create({
         data: {
-          controlNo, docDate, locationId, channel: input.channel, channelSub: input.channelSub ?? null, customerId: input.customerId ?? null, agentId: input.agentId ?? null, outletId: input.outletId ?? null, memberId: input.memberId ?? null, riderId: input.riderId ?? null, customerName: input.customerName ?? null, customerPhone: input.customerPhone || null, customerEmail: input.customerEmail || null, drSiNo: input.drSiNo.trim(),
+          controlNo, docDate, locationId, channel: input.channel, channelSub: input.channelSub ?? null, customerId: input.customerId ?? null, agentId: input.agentId ?? null, outletId: input.outletId ?? null, memberId: input.memberId ?? null, voucherId: voucher?.id ?? null, voucherDiscount: voucherDiscount.toFixed(2), riderId: input.riderId ?? null, customerName: input.customerName ?? null, customerPhone: input.customerPhone || null, customerEmail: input.customerEmail || null, drSiNo: input.drSiNo.trim(),
           paymentMode: input.paymentMode, paymentAccountId: input.paymentAccountId ?? null, proofOfPaymentAttachmentId: input.proofOfPaymentAttachmentId ?? null, cardMid: input.cardMid, cardSlipNo: input.cardSlipNo, cardApprovalCode: input.cardApprovalCode, cardBatchNo: input.cardBatchNo,
           deliveryFee: deliveryFee.toFixed(2), riderIncentive: D(input.riderIncentive ?? 0).toFixed(2), shippingFee: shippingFee.toFixed(2), shippingExpense: D(input.shippingExpense ?? 0).toFixed(2), marketplaceCharges: D(input.marketplaceCharges ?? 0).toFixed(2),
           productTotal: productTotal.toFixed(2), grandTotal: grandTotal.toFixed(2), amountPaid: input.paymentMode === 'AR_PDC' ? '0.00' : grandTotal.toFixed(2),
@@ -163,6 +188,7 @@ export class SalesService implements OnModuleInit {
           lines: { create: lineRows },
         }, include: this.include,
       });
+      if (voucher) { const claim = await tx.memberVoucher.updateMany({ where: { id: voucher.id, usedAt: null }, data: { usedAt: new Date(), usedSaleId: created.id, discountApplied: voucherDiscount.toFixed(2) } }); if (!claim.count) throw new BadRequestException(`The voucher ${voucher.code} was just used`); }
       // 6-Pack Card: one sticker per supplement on the DR, with the customer tagged (owner request 2026-09-30)
       if (input.sixPackSticker) await this.sixPack.issue(tx, { saleId: created.id, locationId, docDate, name: input.customerName, phone: input.customerPhone, email: input.customerEmail, supplementUnits, userId: user.id });
       if (incentive) {
@@ -192,6 +218,8 @@ export class SalesService implements OnModuleInit {
     // re-order reminder for items with a known consumption period (best effort: never blocks the sale)
     await this.followUps.createForSale(doc.id).catch(() => 0);
     if (input.outletId) await this.agentMonitor.onSaleTagged(input.outletId).catch(() => undefined);
+    // a referred member's first purchase gives both a voucher (best effort: never blocks the sale)
+    if (input.memberId) await this.loyalty.onFirstPurchase(input.memberId).catch(() => undefined);
     // shipping charged to the franchise: "to follow" for the Franchise Coordinator, or typed now; either way its own receivable, separate from the order
     if (ship) await this.franchiseShipping.createForSale({ id: doc.id, controlNo: doc.controlNo, drSiNo: doc.drSiNo, locationId }, franchiseCustomer!.locationId!, { mode: ship.mode as 'TO_FOLLOW' | 'AMOUNT', amount: ship.amount, courier: ship.courier, reference: ship.reference }, user);
     return this.get(doc.id, user);
@@ -224,6 +252,7 @@ export class SalesService implements OnModuleInit {
       await this.stock.post(tx, doc.lines.map((l) => ({ locationId: doc.locationId, productId: l.productId, batchId: l.batchId, qtyDelta: l.qty, movementType: 'SALE_RETURN' as const, documentType: 'SalesDoc', documentId: doc.id, unitCost: l.unitCost, createdBy: user.id })));
       await tx.salesDoc.update({ where: { id }, data: { status: 'VOIDED', voidedAt: new Date(), voidedBy: user.id, voidReason: reason } });
       await this.sixPack.voidForSale(tx, doc.id);
+      await tx.memberVoucher.updateMany({ where: { usedSaleId: doc.id }, data: { usedAt: null, usedSaleId: null, discountApplied: null } });
       // the incentive paid from this sale is voided with it
       if (doc.incentiveExpenseId) { const ex = await tx.expenseDoc.findUnique({ where: { id: doc.incentiveExpenseId } }); if (ex && !ex.voidedAt) await this.expenses.voidInTx(tx, ex, `Sale ${doc.drSiNo} voided: ${reason}`, user.id); }
       // reverse journal

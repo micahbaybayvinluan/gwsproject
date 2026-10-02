@@ -7,7 +7,7 @@ import { addMonths, todayManila, dateStr, daysBetween } from '../common/manila';
 import { D, ZERO } from '../common/money';
 import type { SessionUser } from '../common/request-context';
 
-export interface DaysRow { location: { id: string; name: string }; product: { id: string; sku: string; name: string; brand: string | null }; onHand: number; sold: number; avgPerDay: number; daysLeft: number | null; level: string; runsOutOn: string | null; suggestedQty: number; warehouseAvailable: number }
+export interface DaysRow { location: { id: string; name: string }; product: { id: string; sku: string; name: string; brand: string | null }; onHand: number; sold: number; avgPerDay: number; daysLeft: number | null; level: string; runsOutOn: string | null; suggestedQty: number; warehouseAvailable: number; asked: number }
 
 /** §7.5 minimum stock and §7.6 expiry alerts. Runs nightly and (min stock) after ledger posts. */
 @Injectable()
@@ -118,6 +118,8 @@ export class AlertsService {
     const products = await this.prisma.db.product.findMany({ where: { id: { in: [...new Set(rows.map((r) => r.productId))] }, active: true }, select: { id: true, sku: true, name: true, brand: true } });
     const wh = locations.find((l) => l.type === 'WAREHOUSE') ?? (await this.prisma.db.location.findFirst({ where: { type: 'WAREHOUSE' }, select: { id: true, name: true, type: true } }));
     const whAvail = wh ? await this.prisma.db.stockBalance.groupBy({ by: ['productId'], where: { locationId: wh.id, productId: { in: products.map((p) => p.id) } }, _sum: { qty: true } }) : [];
+    // customers who asked for the item and it was not available (counter's lost-sale log, owner request 2026-10-06)
+    const askedBy = new Map((await this.prisma.db.lostSale.groupBy({ by: ['productId'], where: { productId: { in: products.map((p) => p.id) }, createdAt: { gte: from } }, _sum: { qty: true } })).map((x) => [x.productId, x._sum.qty ?? 0]));
     const out: DaysRow[] = [];
     for (const r of rows) {
       const p = products.find((x) => x.id === r.productId); if (!p) continue;
@@ -125,7 +127,7 @@ export class AlertsService {
       const daysLeft = avg > 0 ? Math.round((r.onHand / avg) * 10) / 10 : null;
       const level = r.onHand <= 0 && net > 0 ? 'OUT' : daysLeft == null ? 'NO_SALES' : daysLeft <= 7 ? 'CRITICAL' : daysLeft <= 14 ? 'LOW' : daysLeft <= 30 ? 'WATCH' : 'OK';
       const loc = q.combine ? null : locations.find((l) => l.id === r.locationId);
-      out.push({ location: loc ? { id: loc.id, name: loc.name } : { id: '', name: 'All locations' }, product: p, onHand: r.onHand, sold: net, avgPerDay: Math.round(avg * 100) / 100, daysLeft, level, runsOutOn: daysLeft != null && r.onHand > 0 ? dateStr(new Date(today.getTime() + Math.floor(daysLeft) * 86400000)) : null, suggestedQty: avg > 0 ? Math.max(0, Math.ceil(avg * cover - r.onHand)) : 0, warehouseAvailable: whAvail.find((w) => w.productId === r.productId)?._sum.qty ?? 0 });
+      out.push({ location: loc ? { id: loc.id, name: loc.name } : { id: '', name: 'All locations' }, product: p, onHand: r.onHand, sold: net, avgPerDay: Math.round(avg * 100) / 100, daysLeft, level, runsOutOn: daysLeft != null && r.onHand > 0 ? dateStr(new Date(today.getTime() + Math.floor(daysLeft) * 86400000)) : null, suggestedQty: avg > 0 ? Math.max(0, Math.ceil(avg * cover - r.onHand)) : 0, warehouseAvailable: whAvail.find((w) => w.productId === r.productId)?._sum.qty ?? 0, asked: askedBy.get(r.productId) ?? 0 });
     }
     // most critical first: out of stock but selling, then the fewest days left; no sales last
     const rank = (x: DaysRow) => (x.level === 'OUT' ? -1 : x.daysLeft ?? Number.MAX_SAFE_INTEGER);

@@ -2580,3 +2580,38 @@ describe('Agent field work: outlets, areas, itineraries with photos, consignment
     await as('wh.assoc').post('/api/expenses').send({ accountId: main.id, amount: 1, paidFrom: 'BANK_ACCOUNT' }).expect(403);
   });
 });
+
+
+describe('Days of stock left per item, most critical first (owner request 2026-10-02)', () => {
+  it('on hand ÷ average daily sales: out of stock but selling first, then the fewest days left, items without sales last; company-wide view; branch scope', async () => {
+    await prisma.salesReportSubmission.deleteMany({});
+    const west = (await prisma.location.findUniqueOrThrow({ where: { code: 'WESTAVE' } })).id; const dasma = (await prisma.location.findUniqueOrThrow({ where: { code: 'DASMA' } })).id;
+    const cats = ok(await as('admin').get('/api/categories')).body as { id: string; accountingClass: string }[];
+    const mk = async (tag: string, stock: number) => {
+      const id = ok(await as('admin').post('/api/products').send({ name: `DOS ${tag} ${run}`, categoryId: cats.find((c) => c.accountingClass === 'SUPPLEMENT')!.id, prices: { RETAIL: 500 }, cost: 200 })).body.id as string;
+      const b = await prisma.batch.create({ data: { productId: id, batchNo: `D-${tag}-${run}`, receivedRef: 'TEST', unitCost: '200' } });
+      await prisma.stockLedger.create({ data: { locationId: west, productId: id, batchId: b.id, qtyDelta: stock, movementType: 'RECEIVE', documentType: 'Opening', documentId: `D-${tag}-${run}`, unitCost: '200', businessDate: new Date(`${new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10)}T00:00:00Z`) } });
+      await prisma.stockBalance.create({ data: { locationId: west, productId: id, batchId: b.id, qty: stock } });
+      return id;
+    };
+    const A = await mk('A', 10), B = await mk('B', 6), C = await mk('C', 5), D = await mk('D', 3);
+    const sell = async (pid: string, qty: number, n: string) => ok(await as('sales.westave').post('/api/sales').send({ channel: 'WALK_IN', paymentMode: 'CASH', drSiNo: `DOS-${run}-${n}`, lines: [{ productId: pid, qty }] }));
+    await sell(A, 3, 'A'); await sell(B, 4, 'B'); await sell(D, 3, 'D'); // A: 7 left, 3 sold; B: 2 left, 4 sold; D: 0 left, 3 sold; C: 5 left, no sales
+    const r = ok(await as('head.auditor').get(`/api/alerts/days-of-stock?locationId=${west}&days=30&cover=30`)).body;
+    const mine = (r.rows as { product: { name: string }; level: string; daysLeft: number | null; onHand: number; sold: number; avgPerDay: number; suggestedQty: number }[]).filter((x) => x.product.name.includes(`DOS`) && x.product.name.endsWith(run));
+    expect(mine.map((x) => x.product.name.split(' ')[1])).toEqual(['D', 'B', 'A', 'C']); // out of stock, then 15 days, then 70 days, then no sales
+    const [d, b, a, c] = mine;
+    expect(d).toMatchObject({ level: 'OUT', onHand: 0, sold: 3 }); expect(b.daysLeft).toBe(15); expect(b.level).toBe('WATCH'); expect(b.avgPerDay).toBeCloseTo(0.13, 2);
+    expect(a.daysLeft).toBe(70); expect(a.level).toBe('OK'); expect(c).toMatchObject({ level: 'NO_SALES', daysLeft: null, sold: 0 });
+    expect(b.suggestedQty).toBe(2); // 4 sold in 30 days = 0.133/day × 30 = 4 to cover 30 days, 2 on hand
+    expect(r.counts.OUT).toBeGreaterThanOrEqual(1);
+    // company-wide: one line per item (no location split)
+    const all = ok(await as('head.auditor').get('/api/alerts/days-of-stock?days=30&combine=1')).body;
+    expect((all.rows as { location: { name: string }; product: { name: string } }[]).filter((x) => x.product.name === `DOS B ${run}`)).toHaveLength(1);
+    expect(all.rows.find((x: { product: { name: string } }) => x.product.name === `DOS B ${run}`).location.name).toBe('All locations');
+    // a branch sees only its own location
+    await as('sales.dasma').get(`/api/alerts/days-of-stock?locationId=${west}`).expect(403);
+    const own = ok(await as('sales.dasma').get('/api/alerts/days-of-stock')).body.rows as { location: { id: string } }[];
+    expect(own.every((x) => x.location.id === dasma)).toBe(true);
+  });
+});

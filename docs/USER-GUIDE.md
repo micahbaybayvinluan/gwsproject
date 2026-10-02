@@ -201,6 +201,8 @@ Each section below starts with a hidden line that says which roles it is for. Th
 <!-- for: report.inventory.own, report.inventory.all -->
 - **Expiry & Alerts** groups stock into expired, less than 1 month, 1–3 months and 3–6 months, lists critical stock (below the minimum) and slow-moving items.
 - Notifications about expiring and critical stock arrive in the bell every night.
+- **Days of stock left** (top of the page): for each item, how many days it will last at its **average daily sales** (choose the last 14, 30, 60 or 90 days). The **most critical items are first**: **Out** (no stock but still selling), then **Critical** (7 days or less), **Low** (8–14), **Watch** (15–30) and **Enough** (over 30); items with stock and no sales are last. Each line also shows the date it runs out and how many to restock to cover 14–60 days, and what the warehouse has. Tick **All locations together** for the company-wide days. Sales less returns are counted (the warehouse also counts its e-commerce pull-outs); per location only sales recorded at that location count.
+- **Search:** every list on this page has the search box above it and a small **filter** under each column title (SKU, Product, Brand, Location, Level…); type in one or more and the rows narrow down. Export xlsx / CSV exports what is shown.
 
 ## Weekly count sheet (sales associates)
 <!-- for: count.create -->

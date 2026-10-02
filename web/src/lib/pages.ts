@@ -31,7 +31,7 @@ export const PAGES: Record<string, PageInfo> = {
   '/transfers': { label: 'Transfers & Pull-outs', summary: 'Move stock between the warehouse, branches and franchises: prepare the pull-out, get it approved, and the receiver confirms what arrived.' },
   '/counts': { label: 'Stock Counts', summary: 'Count sheets listing every item (items in the system first). Type the actual count; differences open a discrepancy case.' },
   '/discrepancies': { label: 'Count Discrepancies', summary: 'Differences found in counts, the explanation deadline, explanations sent, and final reports with charge forms.' },
-  '/expiry': { label: 'Expiry & Low Stock', summary: 'Items near expiry or below minimum stock, with suggested restocking from the warehouse.' },
+  '/expiry': { label: 'Expiry & Low Stock', summary: 'How many days each item will last at its average sales (most critical first), items near expiry, and items below minimum stock with suggested restocking. Every list can be searched, also per column.' },
   '/writeoffs': { label: 'Write-offs', summary: 'Remove expired, damaged or spoiled items from stock with the Head Auditor’s approval, and charge staff when needed.' },
   '/consignment': { label: 'Consignment', summary: 'Send goods to a consignee, record what they sold (prices filled in from the agreement, editable) and take goods back. Print the draft, then submit: your manager checks it and the Owner approves last.' },
   '/consignees': { label: 'Consignees', summary: 'Consignee accounts: the Owner creates each consignee once (stock location, customer, receivable account and agreement).' },

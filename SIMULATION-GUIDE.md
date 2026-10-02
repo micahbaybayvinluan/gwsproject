@@ -263,6 +263,7 @@ Waybill Report → **Choose waybill PDF files** (TikTok or Shopee labels) → pi
 82. **Warehouse expenses** (`wh.assoc` or `wh.incharge`): Expenses → choose a warehouse account → amount and payee → pay from cash on hand, a bank account or an owner advance (Cash fund is refused).
 83. **Search notifications** (any user): Notifications → type a product name or DR number in the search bar.
 84. **Search lists** (any user): open a list with 6+ rows (for example Chart of Accounts or Cash Fund) and type in **Search this list**. On 6-Pack Card, choose from / to and search a customer name, mobile or DR number: both lists filter.
+85. **Days of stock** (`head.auditor` or `wh.incharge`): Expiry & Low Stock → the top card lists every item by days left, most critical first. Change the last 30 → 60 days; tick All locations together; type in a column's filter box (for example Level or Brand).
 
 ## Where the files come out
 

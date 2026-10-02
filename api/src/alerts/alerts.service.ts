@@ -7,6 +7,8 @@ import { addMonths, todayManila, dateStr, daysBetween } from '../common/manila';
 import { D, ZERO } from '../common/money';
 import type { SessionUser } from '../common/request-context';
 
+export interface DaysRow { location: { id: string; name: string }; product: { id: string; sku: string; name: string; brand: string | null }; onHand: number; sold: number; avgPerDay: number; daysLeft: number | null; level: string; runsOutOn: string | null; suggestedQty: number; warehouseAvailable: number }
+
 /** §7.5 minimum stock and §7.6 expiry alerts. Runs nightly and (min stock) after ledger posts. */
 @Injectable()
 export class AlertsService {
@@ -85,6 +87,50 @@ export class AlertsService {
     const products = await this.prisma.db.product.findMany({ where: { id: { in: slow.map((s) => s.productId) } }, select: { id: true, sku: true, name: true } });
     const locations = await this.prisma.db.location.findMany({ where: { id: { in: slow.map((s) => s.locationId) } }, select: { id: true, name: true } });
     return slow.map((s) => ({ product: products.find((p) => p.id === s.productId), location: locations.find((l) => l.id === s.locationId), qty: s._sum.qty ?? 0, days }));
+  }
+
+  /**
+   * Days of stock left per item (owner request 2026-10-02): on hand ÷ average daily sales over the last `days` days (sales net of returns,
+   * plus the warehouse's e-commerce pull-outs). Most critical first: out of stock but selling, then fewest days left; items with stock
+   * and no sales last. `combine` adds all the locations together (company-wide). Needs no cost.
+   */
+  async daysOfStock(user: SessionUser, q: { days?: number; cover?: number; locationId?: string; combine?: boolean }) {
+    const days = Math.min(365, Math.max(7, Math.round(q.days ?? 30))); const cover = Math.min(365, Math.max(1, Math.round(q.cover ?? 30)));
+    const today = todayManila(); const from = new Date(today.getTime() - (days - 1) * 86400000);
+    const locFilter: { type: { in: ('WAREHOUSE' | 'BRANCH' | 'FRANCHISE')[] }; id?: string | { in: string[] } } = { type: { in: ['WAREHOUSE', 'BRANCH', 'FRANCHISE'] } };
+    if (q.locationId) locFilter.id = q.locationId; else if (user.locationScoped) locFilter.id = { in: user.locationIds };
+    const locations = await this.prisma.db.location.findMany({ where: { ...locFilter, active: true }, select: { id: true, name: true, type: true } });
+    const ids = locations.map((l) => l.id);
+    const [bal, sold, ecomDocs] = await Promise.all([
+      this.prisma.db.stockBalance.groupBy({ by: ['locationId', 'productId'], where: { locationId: { in: ids } }, _sum: { qty: true } }),
+      this.prisma.db.stockLedger.groupBy({ by: ['locationId', 'productId'], where: { locationId: { in: ids }, movementType: { in: ['SALE', 'SALE_RETURN'] }, businessDate: { gte: from, lte: today } }, _sum: { qtyDelta: true } }),
+      this.prisma.db.transferDoc.findMany({ where: { transferType: 'ECOMMERCE', fromLocationId: { in: ids }, docDate: { gte: from, lte: today } }, select: { id: true } }),
+    ]);
+    const ecom = ecomDocs.length ? await this.prisma.db.stockLedger.groupBy({ by: ['locationId', 'productId'], where: { locationId: { in: ids }, movementType: 'TRANSFER_OUT', documentType: 'TransferDoc', documentId: { in: ecomDocs.map((d) => d.id) } }, _sum: { qtyDelta: true } }) : [];
+    type Acc = { locationId: string; productId: string; onHand: number; sold: number };
+    const map = new Map<string, Acc>();
+    const key = (l: string, p: string) => (q.combine ? p : `${l}:${p}`);
+    const at = (l: string, p: string) => { const k = key(l, p); let a = map.get(k); if (!a) { a = { locationId: q.combine ? '' : l, productId: p, onHand: 0, sold: 0 }; map.set(k, a); } return a; };
+    for (const b of bal) at(b.locationId, b.productId).onHand += b._sum.qty ?? 0;
+    for (const x of sold) at(x.locationId, x.productId).sold += -(x._sum.qtyDelta ?? 0);
+    for (const x of ecom) at(x.locationId, x.productId).sold += -(x._sum.qtyDelta ?? 0);
+    const rows = [...map.values()].filter((a) => a.onHand > 0 || a.sold > 0);
+    const products = await this.prisma.db.product.findMany({ where: { id: { in: [...new Set(rows.map((r) => r.productId))] }, active: true }, select: { id: true, sku: true, name: true, brand: true } });
+    const wh = locations.find((l) => l.type === 'WAREHOUSE') ?? (await this.prisma.db.location.findFirst({ where: { type: 'WAREHOUSE' }, select: { id: true, name: true, type: true } }));
+    const whAvail = wh ? await this.prisma.db.stockBalance.groupBy({ by: ['productId'], where: { locationId: wh.id, productId: { in: products.map((p) => p.id) } }, _sum: { qty: true } }) : [];
+    const out: DaysRow[] = [];
+    for (const r of rows) {
+      const p = products.find((x) => x.id === r.productId); if (!p) continue;
+      const net = Math.max(0, r.sold); const avg = net / days;
+      const daysLeft = avg > 0 ? Math.round((r.onHand / avg) * 10) / 10 : null;
+      const level = r.onHand <= 0 && net > 0 ? 'OUT' : daysLeft == null ? 'NO_SALES' : daysLeft <= 7 ? 'CRITICAL' : daysLeft <= 14 ? 'LOW' : daysLeft <= 30 ? 'WATCH' : 'OK';
+      const loc = q.combine ? null : locations.find((l) => l.id === r.locationId);
+      out.push({ location: loc ? { id: loc.id, name: loc.name } : { id: '', name: 'All locations' }, product: p, onHand: r.onHand, sold: net, avgPerDay: Math.round(avg * 100) / 100, daysLeft, level, runsOutOn: daysLeft != null && r.onHand > 0 ? dateStr(new Date(today.getTime() + Math.floor(daysLeft) * 86400000)) : null, suggestedQty: avg > 0 ? Math.max(0, Math.ceil(avg * cover - r.onHand)) : 0, warehouseAvailable: whAvail.find((w) => w.productId === r.productId)?._sum.qty ?? 0 });
+    }
+    // most critical first: out of stock but selling, then the fewest days left; no sales last
+    const rank = (x: DaysRow) => (x.level === 'OUT' ? -1 : x.daysLeft ?? Number.MAX_SAFE_INTEGER);
+    out.sort((a, b) => rank(a) - rank(b) || b.avgPerDay - a.avgPerDay || a.product.name.localeCompare(b.product.name));
+    return { days, cover, combine: !!q.combine, rows: out, counts: { OUT: out.filter((x) => x.level === 'OUT').length, CRITICAL: out.filter((x) => x.level === 'CRITICAL').length, LOW: out.filter((x) => x.level === 'LOW').length, WATCH: out.filter((x) => x.level === 'WATCH').length } };
   }
   /** Stock ageing by batch. */
   async stockAgeing(user: SessionUser, locationId?: string) {

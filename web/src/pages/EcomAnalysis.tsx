@@ -55,10 +55,10 @@ function PlatformCard({ p, only }: { p: Plat; only: boolean }) {
       <Stat label="Contribution after cost" value={peso(p.contribution)} sub={`cost of goods ${peso(p.costOfSales)}`} tone={p.contribution < 0 ? 'red' : undefined} /><Stat label="Margin" value={pct(p.marginPct)} sub={`target ${pct(p.targetPct)}`} tone={p.onTarget ? 'green' : 'red'} />
     </div>}
     {p.hasData && <div className="mt-3 grid gap-4 md:grid-cols-2">
-      <table className="w-full text-sm"><thead className="text-left text-xs uppercase tracking-wide text-slate-500"><tr><th className="py-1 pr-3">Where the money goes</th><th className="num pr-3">Amount</th><th className="num">% of net</th></tr></thead><tbody>
+      <div className="sticky-head"><table className="w-full text-sm"><thead className="text-left text-xs uppercase tracking-wide text-slate-500"><tr><th className="py-1 pr-3">Where the money goes</th><th className="num pr-3">Amount</th><th className="num">% of net</th></tr></thead><tbody>
         <tr className="border-t"><td className="py-1 pr-3">Gross sales</td><td className="num pr-3">{peso(p.grossSales)}</td><td /></tr>{fee('− Seller discounts & vouchers', p.sellerDiscounts)}{fee('− Refunds', p.refunds)}{fee('− Commission', p.fees.commission)}{fee('− Transaction / payment fee', p.fees.transactionFee)}{fee('− Shipping fee', p.fees.shippingFee)}{fee('− Affiliate commission', p.fees.affiliateFee)}{fee('− Other fees & adjustments', p.fees.otherFees)}{fee('− Ads', p.ads)}{fee('− Cost of goods', p.costOfSales)}
         <tr className="border-t font-semibold"><td className="py-1 pr-3">= Contribution</td><td className="num pr-3">{peso(p.contribution)}</td><td className="num">{pct(p.marginPct)}</td></tr>
-        <tr className="border-t text-slate-500"><td className="py-1 pr-3">Withholding tax (credit)</td><td className="num pr-3">{peso(p.withholdingTax)}</td><td /></tr><tr className="border-t text-slate-500"><td className="py-1 pr-3">Payout received</td><td className="num pr-3">{peso(p.payout)}</td><td /></tr></tbody></table>
+        <tr className="border-t text-slate-500"><td className="py-1 pr-3">Withholding tax (credit)</td><td className="num pr-3">{peso(p.withholdingTax)}</td><td /></tr><tr className="border-t text-slate-500"><td className="py-1 pr-3">Payout received</td><td className="num pr-3">{peso(p.payout)}</td><td /></tr></tbody></table></div>
       <div className="space-y-2 text-sm">
         <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Is the pricing right?</div>
         {p.onTarget ? <p className="rounded border border-emerald-200 bg-emerald-50 p-2">The margin {pct(p.marginPct)} keeps the {pct(p.targetPct)} target. No price change is needed overall.</p>
@@ -89,6 +89,6 @@ function AdSpend({ onSaved }: { onSaved: () => void }) {
     </div>
     <ErrorBox error={add.error} />
     <p className="mt-2 text-xs text-slate-500">It is booked as advertising expense for the platform and feeds the analysis above.</p>
-    {ads.data?.length ? <table className="mt-2 w-full text-sm"><thead className="text-left text-xs uppercase tracking-wide text-slate-500"><tr><th className="py-1 pr-3">Month</th><th className="num pr-3">Amount</th><th className="pr-3">Paid from</th><th>Reference</th></tr></thead><tbody>{ads.data.slice(0, 12).map((a) => <tr key={a.id} className="border-t"><td className="py-1 pr-3">{a.month}</td><td className="num pr-3">{peso(a.amount)}</td><td className="pr-3">{a.paidFrom}</td><td>{a.reference ?? a.notes ?? ''}</td></tr>)}</tbody></table> : null}
+    {ads.data?.length ? <div className="sticky-head"><table className="mt-2 w-full text-sm"><thead className="text-left text-xs uppercase tracking-wide text-slate-500"><tr><th className="py-1 pr-3">Month</th><th className="num pr-3">Amount</th><th className="pr-3">Paid from</th><th>Reference</th></tr></thead><tbody>{ads.data.slice(0, 12).map((a) => <tr key={a.id} className="border-t"><td className="py-1 pr-3">{a.month}</td><td className="num pr-3">{peso(a.amount)}</td><td className="pr-3">{a.paidFrom}</td><td>{a.reference ?? a.notes ?? ''}</td></tr>)}</tbody></table></div> : null}
   </Card>;
 }

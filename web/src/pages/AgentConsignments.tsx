@@ -17,7 +17,7 @@ const Meter = ({ pct }: { pct: number | null }) => pct == null ? <span className
 function ConsigneeCard({ c }: { c: Csg }) {
   return <div className="rounded-2xl bg-white p-4 shadow-soft"><div className="flex flex-wrap items-center gap-2"><b className="text-navy">{c.consignee}</b><Flag n={c.ageFlag} /><span className="ml-auto text-sm">{peso(c.value)} at retail</span></div>
     <div className="text-xs text-slate-500">Last sent {c.lastSent ? fmtDate(c.lastSent) : '—'} · last sales report {c.lastReport ? fmtDate(c.lastReport) : 'none yet'} · still owes {peso(c.unpaid)}</div>
-    {c.items.length ? <table className="mt-2 w-full text-sm"><tbody>{c.items.map((i) => <tr key={i.productId} className="border-t"><td className="py-1">{i.name}</td><td className="num">{i.qty}</td><td className="num">{peso(i.value)}</td></tr>)}</tbody></table> : <p className="mt-2 text-xs text-slate-500">No stock there now.</p>}</div>;
+    {c.items.length ? <div className="sticky-head"><table className="mt-2 w-full text-sm"><tbody>{c.items.map((i) => <tr key={i.productId} className="border-t"><td className="py-1">{i.name}</td><td className="num">{i.qty}</td><td className="num">{peso(i.value)}</td></tr>)}</tbody></table></div> : <p className="mt-2 text-xs text-slate-500">No stock there now.</p>}</div>;
 }
 
 function Summary({ t }: { t: Totals }) {

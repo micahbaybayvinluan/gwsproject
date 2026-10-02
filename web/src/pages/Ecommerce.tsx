@@ -117,7 +117,7 @@ function OrdersTab({ p, manage, warehouses }: { p: P; manage: boolean; warehouse
         {result.unknownSkus.length > 0 && <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
           <p className="mb-2 font-semibold text-amber-900">New {pf.name} SKUs: pick the matching GWS product once (it is remembered), then upload the same file again.</p>
           {result.unknownSkus.some((u) => u.suggestions?.length && !matched[u.platformSku]) && <Button size="sm" className="mb-2" disabled={saveMatch.isPending} onClick={() => result.unknownSkus.forEach((u) => { const s = u.suggestions?.[0]; if (s && !matched[u.platformSku]) saveMatch.mutate({ platformSku: u.platformSku, productId: s.productId, name: s.name }); })} data-testid="accept-all">Accept the best match for each</Button>}
-          <table className="w-full text-sm [&_td]:px-2 [&_th]:px-2"><tbody>{result.unknownSkus.map((u) => <tr key={u.platformSku} className="border-t border-amber-200"><td className="py-2 pr-2"><div className="font-mono text-xs">{u.platformSku.length > 24 ? `${u.platformSku.slice(0, 24)}…` : u.platformSku}</div><div className="text-xs text-slate-600">{u.name} · {u.orders} order(s)</div></td><td className="w-1/2 py-2">{matched[u.platformSku] ? <span className="text-emerald-700">✓ {matched[u.platformSku]}</span> : <div className="space-y-1">{u.suggestions?.map((sg) => <button key={sg.productId} type="button" className="flex w-full items-center justify-between rounded-lg border border-emerald-200 bg-white px-2 py-1 text-left text-xs hover:bg-emerald-50" onClick={() => saveMatch.mutate({ platformSku: u.platformSku, productId: sg.productId, name: sg.name })}><span>Looks like: <b>{sg.name}</b></span><span className="font-semibold text-emerald-700">Use this</span></button>)}<ProductSearch placeholder="Not it? find the GWS product…" onPick={(x) => saveMatch.mutate({ platformSku: u.platformSku, productId: x.id, name: x.name })} /></div>}</td></tr>)}</tbody></table>
+          <div className="sticky-head"><table className="w-full text-sm [&_td]:px-2 [&_th]:px-2"><tbody>{result.unknownSkus.map((u) => <tr key={u.platformSku} className="border-t border-amber-200"><td className="py-2 pr-2"><div className="font-mono text-xs">{u.platformSku.length > 24 ? `${u.platformSku.slice(0, 24)}…` : u.platformSku}</div><div className="text-xs text-slate-600">{u.name} · {u.orders} order(s)</div></td><td className="w-1/2 py-2">{matched[u.platformSku] ? <span className="text-emerald-700">✓ {matched[u.platformSku]}</span> : <div className="space-y-1">{u.suggestions?.map((sg) => <button key={sg.productId} type="button" className="flex w-full items-center justify-between rounded-lg border border-emerald-200 bg-white px-2 py-1 text-left text-xs hover:bg-emerald-50" onClick={() => saveMatch.mutate({ platformSku: u.platformSku, productId: sg.productId, name: sg.name })}><span>Looks like: <b>{sg.name}</b></span><span className="font-semibold text-emerald-700">Use this</span></button>)}<ProductSearch placeholder="Not it? find the GWS product…" onPick={(x) => saveMatch.mutate({ platformSku: u.platformSku, productId: x.id, name: x.name })} /></div>}</td></tr>)}</tbody></table></div>
           {file && <Button className="mt-2" disabled={!allMatched || upload.isPending} onClick={() => upload.mutate(file)}>Upload the same file again</Button>}
         </div>}
       </div>}
@@ -137,8 +137,8 @@ function printPicking(d: PulloutDetail, platform: string) {
   const orders = d.orders.filter((o) => o.status !== 'CANCELLED').map((o) => `<tr><td>${o.orderId}</td><td>${o.trackingNo ?? ''}</td><td>${o.lines.map((l) => `${l.qty}× ${l.productName ?? l.platformSku}`).join(', ')}</td></tr>`).join('');
   w.document.write(`<html><head><title>${d.controlNo}</title><style>body{font-family:Arial,sans-serif;font-size:12px;margin:24px}table{border-collapse:collapse;width:100%;margin-bottom:16px}td,th{border:1px solid #999;padding:4px 6px;text-align:left}h1{font-size:18px;margin:0}</style></head><body>
     <h1>E-commerce Pull-out ${d.controlNo}${d.status === 'DRAFT' ? ' (DRAFT)' : ''}</h1><p>${platform} · ${d.fromLocation.name} → ${d.toLocation.name} · ${fmtDate(d.docDate)}</p>
-    <h3>Picking list</h3><table><tr><th>SKU</th><th>Item</th><th>Batch</th><th>Expiry</th><th>Qty</th><th>Picked ✓</th></tr>${rows}</table>
-    <h3>Orders / waybills (${d.orders.filter((o) => o.status !== 'CANCELLED').length})</h3><table><tr><th>Order ID</th><th>Tracking no.</th><th>Items</th></tr>${orders}</table>
+    <h3>Picking list</h3><div className="sticky-head"><table><tr><th>SKU</th><th>Item</th><th>Batch</th><th>Expiry</th><th>Qty</th><th>Picked ✓</th></tr>${rows}</table></div>
+    <h3>Orders / waybills (${d.orders.filter((o) => o.status !== 'CANCELLED').length})</h3><div className="sticky-head"><table><tr><th>Order ID</th><th>Tracking no.</th><th>Items</th></tr>${orders}</table></div>
     <p>Prepared by: ____________________ &nbsp;&nbsp; Checked & approved (Warehouse In-Charge): ____________________</p></body></html>`);
   w.document.close(); w.focus(); w.print();
 }
@@ -161,8 +161,8 @@ function PulloutView({ id, manage, onChange }: { id: string; manage: boolean; on
     </div>
     <ErrorBox error={submit.error ?? remove.error ?? voidIt.error} />
     <div className="grid gap-3 lg:grid-cols-2">
-      <div><h4 className="mb-1 text-sm font-semibold text-navy">Picking list (oldest expiry first)</h4><table className="w-full text-sm [&_td]:px-2 [&_th]:px-2"><thead className="text-left text-xs text-slate-500"><tr><th>Item</th><th>Batch / expiry</th><th className="text-right">Qty</th></tr></thead><tbody>{d.picking.map((l, i) => <tr key={i} className="border-t"><td className="py-1">{l.product}<div className="text-xs text-slate-500">{l.sku}</div></td><td className="text-xs">{l.batchNo ?? '—'} · {fmtDate(l.expiryDate) || 'no expiry'}</td><td className="text-right font-semibold">{l.qty}</td></tr>)}</tbody></table></div>
-      <div><h4 className="mb-1 text-sm font-semibold text-navy">Orders on this pull-out</h4><table className="w-full text-sm [&_td]:px-2 [&_th]:px-2"><tbody>{d.orders.map((o) => <tr key={o.id} className="border-t"><td className="py-1 font-mono text-xs">{o.orderId}<div className="text-slate-500">{o.trackingNo}</div></td><td className="text-xs">{o.lines.map((l) => `${l.qty}× ${l.productName ?? l.platformSku}`).join(', ')}</td><td><Badge tone={ORDER_STATUS[o.status]?.tone ?? 'slate'}>{ORDER_STATUS[o.status]?.label ?? o.status}</Badge></td><td className="text-right">{manage && draft && <button className="text-xs text-red-600" onClick={() => remove.mutate(o.id)}>Remove</button>}</td></tr>)}</tbody></table></div>
+      <div><h4 className="mb-1 text-sm font-semibold text-navy">Picking list (oldest expiry first)</h4><div className="sticky-head"><table className="w-full text-sm [&_td]:px-2 [&_th]:px-2"><thead className="text-left text-xs text-slate-500"><tr><th>Item</th><th>Batch / expiry</th><th className="text-right">Qty</th></tr></thead><tbody>{d.picking.map((l, i) => <tr key={i} className="border-t"><td className="py-1">{l.product}<div className="text-xs text-slate-500">{l.sku}</div></td><td className="text-xs">{l.batchNo ?? '—'} · {fmtDate(l.expiryDate) || 'no expiry'}</td><td className="text-right font-semibold">{l.qty}</td></tr>)}</tbody></table></div></div>
+      <div><h4 className="mb-1 text-sm font-semibold text-navy">Orders on this pull-out</h4><div className="sticky-head"><table className="w-full text-sm [&_td]:px-2 [&_th]:px-2"><tbody>{d.orders.map((o) => <tr key={o.id} className="border-t"><td className="py-1 font-mono text-xs">{o.orderId}<div className="text-slate-500">{o.trackingNo}</div></td><td className="text-xs">{o.lines.map((l) => `${l.qty}× ${l.productName ?? l.platformSku}`).join(', ')}</td><td><Badge tone={ORDER_STATUS[o.status]?.tone ?? 'slate'}>{ORDER_STATUS[o.status]?.label ?? o.status}</Badge></td><td className="text-right">{manage && draft && <button className="text-xs text-red-600" onClick={() => remove.mutate(o.id)}>Remove</button>}</td></tr>)}</tbody></table></div></div>
     </div>
   </div>;
 }
@@ -210,7 +210,7 @@ function SettlementView({ id, manage, p }: { id: string; manage: boolean; p: P }
   const ties = Math.abs(Number(s.check.computed) - Number(s.payout)) < 0.01;
   return <div className="space-y-3">
     <div className="grid gap-4 lg:grid-cols-2">
-      <table className="w-full max-w-md text-sm [&_td]:px-2 [&_th]:px-2"><tbody>
+      <div className="sticky-head"><table className="w-full max-w-md text-sm [&_td]:px-2 [&_th]:px-2"><tbody>
         {line('Gross sales (item price)', s.grossSales)}
         {line('Seller discounts & vouchers', s.sellerDiscounts, false, true)}
         {line('Net sales', s.netSales, true)}
@@ -223,7 +223,7 @@ function SettlementView({ id, manage, p }: { id: string; manage: boolean; p: P }
         {line('Withholding tax (creditable)', s.withholdingTax, false, true)}
         {line('Payout received', s.payout, true)}
         {s.costOfSales !== undefined && s.status === 'POSTED' && line('Cost of goods sold', s.costOfSales)}
-      </tbody></table>
+      </tbody></table></div>
       <div className="space-y-2 text-sm">
         <p className={ties ? 'text-emerald-700' : 'text-red-700'}>{ties ? '✓ Net sales − fees − refunds − tax = payout' : `Check: computed ${peso(s.check.computed)} vs payout ${peso(s.payout)}`}</p>
         {Number(s.check.notInBatch) !== 0 && <p className="rounded-lg bg-amber-50 p-2 text-amber-800">{peso(s.check.notInBatch)} of the file's payout is for orders not in this batch (see the list: not in GWS-ERP, not shipped yet or already paid).</p>}
@@ -276,11 +276,11 @@ function ReturnsTable({ rows, receiving }: { rows: ReturnRow[]; receiving?: bool
     {rows.map((r) => <div key={r.id} className="rounded-xl border p-3 text-sm">
       <div className="flex flex-wrap items-center gap-2"><b>{r.controlNo}</b>{receiving && <Badge tone="blue">{r.platformName}</Badge>}<span className="font-mono text-xs">{r.order?.orderId}</span><span className="text-xs text-slate-500">{r.order?.trackingNo}</span><span className="text-xs text-slate-500">{REASON[r.reason ?? ''] ?? r.reason}</span><Badge tone={r.status === 'RECEIVED' ? 'green' : 'amber'}>{r.status === 'RECEIVED' ? `Received ${fmtDate(r.receivedAt)}` : 'Waiting for the Warehouse'}</Badge>{r.writeoffId && <Badge tone="red">damaged → write-off</Badge>}</div>
       {r.notes && <p className="mt-1 text-xs text-slate-500">{r.notes}</p>}
-      <table className="mt-2 w-full [&_td]:px-2 [&_th]:px-2"><thead className="text-left text-xs text-slate-500"><tr><th>Item</th><th className="text-right">Qty</th><th className="text-right">Good</th><th className="text-right">Damaged</th></tr></thead><tbody>{r.lines.map((l) => {
+      <div className="sticky-head"><table className="mt-2 w-full [&_td]:px-2 [&_th]:px-2"><thead className="text-left text-xs text-slate-500"><tr><th>Item</th><th className="text-right">Qty</th><th className="text-right">Good</th><th className="text-right">Damaged</th></tr></thead><tbody>{r.lines.map((l) => {
         const k = `${r.id}|${l.productId}`; const v = qty[k] ?? { good: l.qty, damaged: 0 };
         return <tr key={l.productId} className="border-t"><td className="py-1">{l.name}</td><td className="text-right">{l.qty}</td>
           {r.status === 'PENDING' && receiving ? <><td className="text-right"><Input type="number" min={0} max={l.qty} className="ml-auto w-20 text-right" value={v.good} onChange={(e) => setQty({ ...qty, [k]: { ...v, good: Math.max(0, Math.floor(Number(e.target.value) || 0)) } })} /></td><td className="text-right"><Input type="number" min={0} max={l.qty} className="ml-auto w-20 text-right" value={v.damaged} onChange={(e) => setQty({ ...qty, [k]: { ...v, damaged: Math.max(0, Math.floor(Number(e.target.value) || 0)) } })} /></td></> : <><td className="text-right">{l.goodQty ?? '—'}</td><td className="text-right">{l.damagedQty ?? '—'}</td></>}</tr>;
-      })}</tbody></table>
+      })}</tbody></table></div>
       {r.status === 'PENDING' && receiving && <Button size="sm" className="mt-2" disabled={receive.isPending} onClick={() => receive.mutate(r)}>Receive: good back to stock, damaged to write-off</Button>}
     </div>)}
   </div>;
@@ -384,9 +384,9 @@ function ReportTab() {
         <p className="text-xs text-slate-500">Solid bar: net sales. Light bar: what is left after platform fees, refunds and ads.</p></div>
     </Card>
     <Card title="E-commerce profit report">
-      <div className="overflow-x-auto"><table className="w-full text-sm [&_td]:px-2 [&_th]:px-2"><thead><tr className="text-left text-xs uppercase tracking-wide text-slate-500"><th className="py-1" />{cols.map((c) => <th key={c.platform} className="text-right">{c.name}</th>)}</tr></thead><tbody>
+      <div className="overflow-x-auto"><div className="sticky-head"><table className="w-full text-sm [&_td]:px-2 [&_th]:px-2"><thead><tr className="text-left text-xs uppercase tracking-wide text-slate-500"><th className="py-1" />{cols.map((c) => <th key={c.platform} className="text-right">{c.name}</th>)}</tr></thead><tbody>
         {rows.map(([label, f, strong]) => <tr key={label} className={`border-t ${strong ? 'font-semibold text-navy' : ''}`}><td className="py-1.5">{label}</td>{cols.map((c) => <td key={c.platform} className={`text-right tabular-nums ${c.platform === 'ALL' ? 'bg-slate-50' : ''}`}>{f(c)}</td>)}</tr>)}
-      </tbody></table></div>
+      </tbody></table></div></div>
       {!q.data?.canCost && <p className="mt-2 text-xs text-slate-500">Cost of goods and profit after cost are shown only to people allowed to see cost.</p>}
     </Card>
   </div>;

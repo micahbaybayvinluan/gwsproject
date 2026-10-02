@@ -92,7 +92,7 @@ function StaffTab() {
     </Card>}
     <div className="grid gap-5 xl:grid-cols-2">
       <Card title="Salaries paid">{!salaries.data?.length ? <Empty>No salaries recorded yet.</Empty> : <Searchable><table className="w-full text-sm"><thead className="text-left text-[11px] uppercase tracking-wide text-slate-500"><tr><th>Associate</th><th>Period</th><th className="num">Gross</th><th className="num">Charges</th><th className="num">Net</th></tr></thead><tbody>{salaries.data.map((x) => <tr key={x.id} className="border-t border-slate-100"><td className="py-1.5">{x.staff}</td><td className="text-xs">{x.periodFrom} – {x.periodTo}</td><td className="num">{peso(Number(x.basic) + Number(x.allowances))}</td><td className="num text-brand-dark">{Number(x.chargesDeducted) ? peso(x.chargesDeducted) : '—'}</td><td className="num font-semibold">{peso(x.netPay)}</td></tr>)}</tbody></table></Searchable>}</Card>
-      <Card title="Charges">{!charges.data?.length ? <Empty>No charges.</Empty> : <table className="w-full text-sm"><tbody>{charges.data.map((x) => <tr key={x.id} className="border-t border-slate-100"><td className="py-1.5">{x.staff}</td><td className="text-xs">{KIND[x.kind] ?? x.kind}: {x.reason}</td><td className="num font-semibold">{peso(x.amount)}</td><td className="text-right">{x.deducted ? <Badge tone="green">deducted</Badge> : <Badge tone="amber">open</Badge>}{x.acknowledgedAt && <Badge tone="blue">seen</Badge>}</td></tr>)}</tbody></table>}</Card>
+      <Card title="Charges">{!charges.data?.length ? <Empty>No charges.</Empty> : <div className="sticky-head"><table className="w-full text-sm"><tbody>{charges.data.map((x) => <tr key={x.id} className="border-t border-slate-100"><td className="py-1.5">{x.staff}</td><td className="text-xs">{KIND[x.kind] ?? x.kind}: {x.reason}</td><td className="num font-semibold">{peso(x.amount)}</td><td className="text-right">{x.deducted ? <Badge tone="green">deducted</Badge> : <Badge tone="amber">open</Badge>}{x.acknowledgedAt && <Badge tone="blue">seen</Badge>}</td></tr>)}</tbody></table></div>}</Card>
     </div>
   </div>;
 }
@@ -108,21 +108,21 @@ function BooksTab() {
     <p className="text-sm text-slate-500">These statements are built from your franchise's own records only, separate from the other branches of GWS.</p>
     <div className="grid gap-5 xl:grid-cols-2">
       <Card title="Income statement" actions={<><Input type="date" value={r.from} onChange={(x) => setR({ ...r, from: x.target.value })} /><Input type="date" value={r.to} onChange={(x) => setR({ ...r, to: x.target.value })} /></>}>
-        {is.data ? <table className="w-full text-sm"><tbody>
+        {is.data ? <div className="sticky-head"><table className="w-full text-sm"><tbody>
           {row('Product sales', is.data.revenue.productSales, false, true)}{row('Delivery / shipping fees', is.data.revenue.fees, false, true)}{row('Total revenue', is.data.revenue.total, true)}
           {row('Cost of goods (franchise cost)', is.data.costOfGoodsAtFranchiseCost, false, true)}{row('Gross profit', is.data.grossProfit, true)}
           {is.data.expenses.map((x) => row(x.category, x.amount, false, true))}{row('Total expenses', is.data.totalExpenses, true)}
           {row('Staff charges recovered', is.data.otherIncome.staffChargesRecovered, false, true)}
           <tr className="border-t-2 border-navy font-bold text-navy"><td className="py-2">Net income</td><td className={`num ${Number(is.data.netIncome) < 0 ? 'text-brand-dark' : ''}`}>{peso(is.data.netIncome)}</td></tr>
-        </tbody></table> : <Empty>Loading…</Empty>}<ErrorBox error={is.error} />
+        </tbody></table></div> : <Empty>Loading…</Empty>}<ErrorBox error={is.error} />
       </Card>
       <Card title="Balance sheet" actions={<Input type="date" value={asOf} onChange={(x) => setAsOf(x.target.value)} />}>
-        {bs.data ? <table className="w-full text-sm"><tbody>
+        {bs.data ? <div className="sticky-head"><table className="w-full text-sm"><tbody>
           <tr><td colSpan={2} className="pb-1 text-xs font-semibold uppercase tracking-wider text-brand">Assets</td></tr>{bs.data.assets.map((a) => row(a.account, a.amount, false, true))}{row('Total assets', bs.data.totalAssets, true)}
           <tr><td colSpan={2} className="pt-3 pb-1 text-xs font-semibold uppercase tracking-wider text-brand">Liabilities</td></tr>{bs.data.liabilities.map((a) => row(a.account, a.amount, false, true))}{row('Total liabilities', bs.data.totalLiabilities, true)}
           <tr><td colSpan={2} className="pt-3 pb-1 text-xs font-semibold uppercase tracking-wider text-brand">Equity</td></tr>{bs.data.equity.map((a) => row(a.account, a.amount, false, true))}
           <tr className="border-t-2 border-navy font-bold text-navy"><td className="py-2">Liabilities + equity</td><td className="num">{peso(Number(bs.data.totalLiabilities) + Number(bs.data.totalEquity))}</td></tr>
-        </tbody></table> : <Empty>Loading…</Empty>}
+        </tbody></table></div> : <Empty>Loading…</Empty>}
         {bs.data && <p className="mt-2 text-xs text-slate-500">{bs.data.note}</p>}<ErrorBox error={bs.error} />
       </Card>
     </div>

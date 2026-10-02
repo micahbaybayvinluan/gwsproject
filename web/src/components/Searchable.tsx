@@ -25,6 +25,6 @@ export function Searchable({ children, placeholder = 'Search this list…' }: { 
   });
   return <div ref={box}>
     {count >= SEARCH_MIN_ROWS && <div className="mb-2 flex flex-wrap items-center gap-2"><label className="relative block w-full max-w-sm"><Search aria-hidden className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" /><input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder={placeholder} aria-label="Search this list" className="w-full rounded-xl border-0 bg-white py-2 pl-9 pr-3 text-sm shadow-soft outline-none ring-1 ring-slate-200 focus:ring-2 focus:ring-brand/50" /></label>{shown != null && <span className="text-xs text-slate-500">{shown} of {count} rows</span>}</div>}
-    {children}
+    <div className="sticky-head">{children}</div>
   </div>;
 }

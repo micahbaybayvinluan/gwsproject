@@ -511,7 +511,7 @@ In **New Sale**, under **Agent's outlet / gym (optional)**, pick the **agent** f
 
 ## Searching any list
 <!-- for: all -->
-Every list with six or more rows has a **Search this list** box above it. Type part of a name, a number, a product, a branch or a date: every word you type must appear in the row (in any order), and the other rows are hidden. Clear the box to see everything again. A search on the list only looks at what is loaded; on **6-Pack Card** the search looks through the whole period you chose (change **from / to** to look further back), and on **Notifications** it looks through all your notifications.
+Every list with six or more rows has a **Search this list** box above it. Type part of a name, a number, a product, a branch or a date: every word you type must appear in the row (in any order), and the other rows are hidden. Clear the box to see everything again. In long lists the **column titles stay frozen** at the top while you scroll the rows (and the totals row stays at the bottom), so you always see which column is which. A search on the list only looks at what is loaded; on **6-Pack Card** the search looks through the whole period you chose (change **from / to** to look further back), and on **Notifications** it looks through all your notifications.
 
 ## Searching your notifications
 <!-- for: notification.view -->

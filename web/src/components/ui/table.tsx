@@ -30,16 +30,16 @@ export function DataTable<T>({ columns, data, exportName, onRowClick, selectable
   return <div>
     {search && data.length >= 6 && <div className="mb-2 flex flex-wrap items-center gap-2"><label className="relative block w-full max-w-sm"><Search aria-hidden className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" /><input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search this list…" aria-label="Search this list" className="w-full rounded-xl border-0 bg-white py-2 pl-9 pr-3 text-sm shadow-soft outline-none ring-1 ring-slate-200 focus:ring-2 focus:ring-brand/50" /></label>{words.length > 0 && <span className="text-xs text-slate-500">{shown.length} of {data.length} rows</span>}</div>}
     {exportName && <div className="mb-2 flex justify-end gap-2"><Button size="sm" variant="outline" onClick={() => api.downloadPost('/api/reports/export.xlsx', { name: exportName, rows: flat() }, `${exportName}.xlsx`)}>Export xlsx</Button><Button size="sm" variant="outline" onClick={() => api.downloadPost('/api/reports/export.csv', { name: exportName, rows: flat() }, `${exportName}.csv`)}>CSV</Button></div>}
-    <div className="overflow-x-auto rounded-2xl border border-slate-200/80 bg-white shadow-[0_1px_2px_rgba(11,31,58,.04)]">
+    <div className="max-h-[calc(100vh-8rem)] overflow-auto rounded-2xl border border-slate-200/80 bg-white shadow-[0_1px_2px_rgba(11,31,58,.04)]">
       <table className="w-full text-sm">
         <thead className="border-b border-slate-200 bg-slate-50/70 text-left text-[11px] uppercase tracking-[.06em] text-slate-500">
-          {table.getHeaderGroups().map((hg) => <tr key={hg.id}>{selectable && <th className="w-8 px-3 py-2"><input type="checkbox" checked={!!allSelected} onChange={toggleAll} aria-label="Select all" /></th>}{hg.headers.map((h) => <th key={h.id} className="cursor-pointer select-none px-3 py-2 font-medium" onClick={h.column.getToggleSortingHandler()}>{flexRender(h.column.columnDef.header, h.getContext())}{{ asc: ' ▲', desc: ' ▼' }[h.column.getIsSorted() as string] ?? ''}</th>)}</tr>)}
+          {table.getHeaderGroups().map((hg) => <tr key={hg.id}>{selectable && <th className="sticky top-0 z-10 w-8 bg-slate-50 px-3 py-2"><input type="checkbox" checked={!!allSelected} onChange={toggleAll} aria-label="Select all" /></th>}{hg.headers.map((h) => <th key={h.id} className="sticky top-0 z-10 cursor-pointer select-none bg-slate-50 px-3 py-2 font-medium shadow-[inset_0_-1px_0_#e2e8f0]" onClick={h.column.getToggleSortingHandler()}>{flexRender(h.column.columnDef.header, h.getContext())}{{ asc: ' ▲', desc: ' ▼' }[h.column.getIsSorted() as string] ?? ''}</th>)}</tr>)}
         </thead>
         <tbody>
           {rows.length === 0 && <tr><td colSpan={cols.length + 1}><Empty /></td></tr>}
           {rows.map((r) => <tr key={r.id} className={`border-t border-slate-100 transition-colors ${onRowClick ? 'cursor-pointer hover:bg-brand-soft/40' : 'hover:bg-slate-50/60'}`} onClick={() => onRowClick?.(r.original)}>{selectable && <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={!!selected?.has(r.id)} onChange={() => { const n = new Set(selected); n.has(r.id) ? n.delete(r.id) : n.add(r.id); onSelectedChange?.(n); }} /></td>}{r.getVisibleCells().map((c) => <td key={c.id} className="px-3 py-2 align-top">{flexRender(c.column.columnDef.cell, c.getContext())}</td>)}</tr>)}
         </tbody>
-        {footer && <tfoot className="bg-slate-50 font-medium">{footer}</tfoot>}
+        {footer && <tfoot className="font-medium [&_td]:sticky [&_td]:bottom-0 [&_td]:bg-slate-50 [&_th]:sticky [&_th]:bottom-0 [&_th]:bg-slate-50">{footer}</tfoot>}
       </table>
     </div>
   </div>;

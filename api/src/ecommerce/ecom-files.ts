@@ -97,6 +97,7 @@ const QTY = ['quantity', 'qty', 'skuquantity'];
 const TRACKING = ['trackingid', 'trackingnumber', 'trackingcode', 'trackingno', 'waybillno', 'waybillnumber', 'awb', 'awbno'];
 const STATUS = ['orderstatus', 'status', 'orderitemstatus'];
 const NAME = ['productname', 'itemname', 'name'];
+const VARIATION = ['variation', 'variationname', 'skuname', 'option'];
 
 export interface ParsedOrder { orderId: string; trackingNo: string | null; lines: { sku: string; name: string | null; qty: number }[] }
 export interface ParsedOrders { orders: ParsedOrder[]; cancelled: string[]; errors: string[] }
@@ -109,10 +110,13 @@ export function parseOrders(sheets: string[][][]): ParsedOrders {
   const t = findTable(sheets, ORDER_ID);
   if (!t) return { orders: [], cancelled: [], errors: ['No "Order ID" (or Order Number) column found. Upload the platform\'s order export or the GWS orders template.'] };
   const iOrder = col(t.keys, ORDER_ID); const iSku = col(t.keys, SKU); const iQty = col(t.keys, QTY); const iTrack = col(t.keys, TRACKING, true); const iStatus = col(t.keys, STATUS); const iName = col(t.keys, NAME);
-  if (iSku < 0) return { orders: [], cancelled: [], errors: ['No SKU column found (Seller SKU / SKU Reference No. / GWS SKU).'] };
+  const iVar = col(t.keys, VARIATION); const iSkuId = col(t.keys, ['skuid']);
+  // an export without a seller SKU (TikTok "To ship" lists the product title and the variation): the title and the variation identify the item
+  if (iSku < 0 && iName < 0) return { orders: [], cancelled: [], errors: ['No SKU or product name column found (Seller SKU / SKU Reference No. / Product Name).'] };
   const byId = new Map<string, ParsedOrder>(); const cancelled = new Set<string>(); const errors: string[] = [];
   t.rows.forEach((r, n) => {
-    const orderId = (r[iOrder] ?? '').trim(); const sku = (r[iSku] ?? '').trim();
+    const orderId = (r[iOrder] ?? '').trim(); const title = iName >= 0 ? (r[iName] ?? '').trim() : ''; const variation = iVar >= 0 ? (r[iVar] ?? '').trim() : '';
+    const sku = (iSku >= 0 ? (r[iSku] ?? '').trim() : '') || (iSkuId >= 0 ? (r[iSkuId] ?? '').trim() : '') || (title ? `${title}${variation ? ` :: ${variation}` : ''}` : '');
     if (!orderId || !sku) return;
     // TikTok puts a description row under the header ("Platform unique order ID.")
     if (/\s/.test(orderId) && !/\d/.test(orderId)) return;
@@ -125,7 +129,7 @@ export function parseOrders(sheets: string[][][]): ParsedOrders {
     const track = iTrack >= 0 ? (r[iTrack] ?? '').trim() : '';
     if (track) o.trackingNo = track;
     const same = o.lines.find((l) => l.sku === sku);
-    if (same) same.qty += qty; else o.lines.push({ sku, name: iName >= 0 ? (r[iName] || null) : null, qty });
+    if (same) same.qty += qty; else o.lines.push({ sku, name: iName >= 0 && r[iName] ? `${r[iName].trim()}${variation ? ` — ${variation}` : ''}` : null, qty });
     byId.set(orderId, o);
   });
   for (const id of cancelled) byId.delete(id);

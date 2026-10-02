@@ -22,6 +22,7 @@ import { requestContext } from '../common/request-context';
 import {
   AMOUNT_KEYS, type Amounts, isPlatform, parseAds, parseOrders, parseSettlement, type Platform, PLATFORMS, PLATFORM_INFO, readSheets, TEMPLATES, zeroAmounts,
 } from './ecom-files';
+import { suggestProducts } from './ecom-match';
 
 type Kind = 'SALE' | 'MONEY_ONLY' | 'NOT_SHIPPED' | 'ALREADY_SETTLED' | 'UNKNOWN';
 interface DetailRow { orderId: string; ecomOrderId: string | null; kind: Kind; included: boolean; amounts: Amounts; trackingNo?: string | null }
@@ -142,7 +143,7 @@ export class EcommerceService implements OnModuleInit {
    * (items totalled by SKU, oldest expiry first). Orders already uploaded, cancelled orders, unknown SKUs and items short in the
    * Warehouse are listed back so the associate can fix them and upload the same file again (orders are never pulled out twice).
    */
-  async uploadOrders(p: Platform, file: { buffer: Buffer; originalname: string }, user: SessionUser, warehouseId?: string) {
+  async uploadOrders(p: Platform, file: { buffer: Buffer; originalname: string }, user: SessionUser, warehouseId?: string, sendNow = false) {
     const parsed = parseOrders(await readSheets(file.buffer, file.originalname));
     if (!parsed.orders.length && parsed.errors.length) throw new BadRequestException(parsed.errors.join(' '));
     const wh = await this.defaultWarehouse(warehouseId);
@@ -150,7 +151,7 @@ export class EcommerceService implements OnModuleInit {
     const existing = await this.prisma.db.ecomOrder.findMany({ where: { platform: p, orderId: { in: parsed.orders.map((o) => o.orderId) } } });
     const active = new Map(existing.filter((o) => !['CANCELLED', 'REJECTED'].includes(o.status)).map((o) => [o.orderId, o]));
     const skuMap = await this.resolveSkus(p, parsed.orders.flatMap((o) => o.lines.map((l) => l.sku)));
-    const unknown = new Map<string, { platformSku: string; name: string | null; orders: number }>();
+    const unknown = new Map<string, { platformSku: string; name: string | null; orders: number; suggestions?: { productId: string; name: string; sku: string; score: number }[] }>();
     const duplicates: string[] = []; const short: { orderId: string; item: string }[] = [];
     // what the Warehouse can still give (unexpired), less what earlier draft / waiting pull-outs already hold
     const need = new Map<string, number>();
@@ -160,6 +161,11 @@ export class EcommerceService implements OnModuleInit {
       for (const m of missing) { const u = unknown.get(m.sku) ?? { platformSku: m.sku, name: m.name, orders: 0 }; u.orders++; unknown.set(m.sku, u); }
       return missing.length === 0;
     });
+    // new platform SKUs: GWS products that look like the listing (title + variation) are suggested; the person confirms once and it is remembered
+    if (unknown.size) {
+      const all = await this.prisma.db.product.findMany({ where: { active: true, isBundle: false }, select: { id: true, sku: true, name: true } });
+      for (const u of unknown.values()) u.suggestions = suggestProducts(u.name ?? u.platformSku, all).map((x) => ({ productId: x.id, name: x.name, sku: x.sku, score: x.score }));
+    }
     const productIds = [...new Set(candidates.flatMap((o) => o.lines.map((l) => skuMap.get(l.sku)!)))];
     const available = await this.availableAt(wh.id, productIds);
     const products = new Map((await this.prisma.db.product.findMany({ where: { id: { in: productIds } }, select: { id: true, name: true, sku: true } })).map((x) => [x.id, x]));
@@ -185,7 +191,10 @@ export class EcommerceService implements OnModuleInit {
       });
       await this.audit.log({ action: 'ECOM_ORDERS_UPLOAD', entityType: 'TransferDoc', entityId: doc.id, after: { platform: p, file: file.originalname, orders: accepted.map((o) => o.orderId) } });
     }
-    return { pullOut, ordersAdded: accepted.length, duplicates, cancelled: parsed.cancelled, unknownSkus: [...unknown.values()], notEnoughStock: short, errors: parsed.errors, warehouse: wh.name };
+    // the picking list goes to the Warehouse In-Charge at once when asked (otherwise the draft is checked and submitted by hand)
+    let sent = false;
+    if (pullOut && sendNow) { await this.submitPullout(pullOut.id, user); sent = true; }
+    return { pullOut, sent, ordersAdded: accepted.length, duplicates, cancelled: parsed.cancelled, unknownSkus: [...unknown.values()], notEnoughStock: short, errors: parsed.errors, warehouse: wh.name };
   }
   private async availableAt(locationId: string, productIds: string[]) {
     const today = todayManila();

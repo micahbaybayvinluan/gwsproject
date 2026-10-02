@@ -52,7 +52,7 @@ export class MasterController {
   @Get('min-stock') @RequireAnyPermission('settings.thresholds', 'report.inventory.all', 'report.inventory.own') minStock(@Query('locationId') locationId?: string) { return this.m.listMinStock(locationId); }
   @Put('min-stock') @RequirePermission('settings.thresholds') @Audited('MinStockLevel') setMinStock(@Body(Z(MinStockDto)) dto: z.infer<typeof MinStockDto>, @CurrentUser() u: SessionUser) { return this.m.setMinStock(dto.rows, u.id); }
 
-  @Get('customers') @RequireAnyPermission('sale.create', 'sale.create.franchise', 'ar.view') customers(@Query('type') type?: string) { return this.m.listCustomers(type); }
+  @Get('customers') @RequireAnyPermission('sale.create', 'sale.create.warehouse', 'ar.view') customers(@Query('type') type?: string) { return this.m.listCustomers(type); }
   @Post('customers') @RequireAnyPermission('sale.create', 'ar.view') @Audited('Customer', 'CREATE') createCustomer(@Body(Z(CustomerDto)) dto: z.infer<typeof CustomerDto>, @CurrentUser() u: SessionUser) { return this.md.submit('Customer', dto, u, { name: dto.name, customerType: dto.type, contact: dto.contact }, () => this.m.createCustomer(dto, u.id)); }
   @Get('agents') @RequireAnyPermission('sale.create', 'report.sales.all', 'ar.opening') agents(@CurrentUser() u: SessionUser) { return this.m.listAgents(u); }
   @Post('agents') @RequireAnyPermission('product.edit', 'user.manage') @Audited('Agent', 'CREATE') createAgent(@Body(Z(AgentDto)) dto: z.infer<typeof AgentDto>, @CurrentUser() u: SessionUser) { return this.md.submit('Agent', dto, u, { name: dto.name }, () => this.m.createAgent(dto)); }

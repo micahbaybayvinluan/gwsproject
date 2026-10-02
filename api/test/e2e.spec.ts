@@ -2099,11 +2099,15 @@ describe('Franchise sales: sales associates and the Franchise Coordinator may se
     expect((await prisma.franchiseShippingCharge.findUniqueOrThrow({ where: { id: ch.id } })).fillBy.toISOString().slice(0, 10)).toBe(day(3));
   });
 
-  it('the Franchise Coordinator may record sales to franchises only (credit or online); the franchise owner sees only their own franchise\'s transactions and creates them', async () => {
+  it('the Franchise Coordinator records sales from the warehouse: franchises and every other channel and payment; not from branches; the franchise owner sees only their own franchise\'s transactions and creates them', async () => {
+    const menu = ok(await as('franchise.coord').get('/api/auth/me')).body.permissions as string[]; expect(menu).toContain('sale.create.warehouse');
     ok(await sale('franchise.coord', { locationId: wh, channel: 'FRANCHISE', customerId: fr, paymentMode: 'AR_PDC', dueDate: day(30), franchiseShipping: { mode: 'TO_FOLLOW' }, lines: [{ productId: item, qty: 1 }] }).expect(201));
-    expect((await sale('franchise.coord', { locationId: wh, channel: 'WALK_IN', paymentMode: 'AR_PDC', dueDate: day(30), customerId: fr, lines: [{ productId: item, qty: 1 }] })).status).toBe(403);
-    expect((await sale('franchise.coord', { locationId: wh, channel: 'FRANCHISE', customerId: fr, paymentMode: 'CASH', lines: [{ productId: item, qty: 1 }] })).status).toBe(400);
-    expect((await sale('franchise.coord', { locationId: wh, channel: 'FRANCHISE', paymentMode: 'AR_PDC', dueDate: day(30), lines: [{ productId: item, qty: 1 }] })).status).toBe(403); // no franchisee chosen
+    // any other sale from the warehouse: walk-in cash, dealer on credit, online
+    const walk = ok(await sale('franchise.coord', { locationId: wh, channel: 'WALK_IN', paymentMode: 'CASH', lines: [{ productId: item, qty: 1 }] }).expect(201)).body; expect(Number(walk.productTotal)).toBe(1000);
+    ok(await sale('franchise.coord', { locationId: wh, channel: 'AGENT', paymentMode: 'CASH', lines: [{ productId: item, qty: 1 }], agentId: ok(await as('admin').get('/api/agents')).body[0]?.id }).expect((r) => { if (![201, 400].includes(r.status)) throw new Error(String(r.status)); }));
+    // never from a branch, and a franchise sale needs the franchisee
+    expect((await sale('franchise.coord', { locationId: west, channel: 'WALK_IN', paymentMode: 'CASH', lines: [{ productId: item, qty: 1 }] })).status).toBe(403);
+    expect((await sale('franchise.coord', { locationId: wh, channel: 'FRANCHISE', paymentMode: 'AR_PDC', dueDate: day(30), lines: [{ productId: item, qty: 1 }] })).status).toBe(400);
     await as('franchise.coord').get('/api/closing/summary').expect(403); // Daily Close stays with the branches
     const mine = ok(await as('fr.mayon.owner').get(`/api/sales?from=${day(-1)}&to=${day(1)}`)).body as { locationId: string }[];
     expect(mine.length).toBeGreaterThan(0); expect(mine.every((x) => x.locationId === mayon)).toBe(true);
@@ -2354,5 +2358,31 @@ describe('Replacement tickets: customer returns and returns to suppliers (owner 
     const t3 = ok(await as('wh.incharge').post('/api/replacements/supplier').send({ productId: b, qty: 1, supplierId: sup, reason: 'EXPIRED' }).expect(201)).body;
     ok(await as('wh.incharge').post(`/api/replacements/${t3.id}/cancel`).send({ reason: 'keyed twice' }));
     await as('wh.incharge').post(`/api/replacements/${t.id}/cancel`).send({ reason: 'x y z' }).expect(400);
+  });
+});
+
+describe('E-commerce: TikTok "To ship" export without seller SKUs (owner request 2026-10-02)', () => {
+  it('reads product title + variation, suggests the GWS product, remembers the match, makes the pick list and can send it to the In-Charge at once', async () => {
+    const wh = (await prisma.location.findUniqueOrThrow({ where: { code: 'WH' } })).id;
+    const cats = ok(await as('admin').get('/api/categories')).body as { id: string; accountingClass: string }[];
+    const nm = `E2E Zesty Whey ${run}`;
+    const pid = ok(await as('admin').post('/api/products').send({ name: `${nm} 10s (Vanilla)`, categoryId: cats.find((c) => c.accountingClass === 'SUPPLEMENT')!.id, prices: { RETAIL: 700 }, cost: 300 })).body.id;
+    const b = await prisma.batch.create({ data: { productId: pid, batchNo: `ZW-${run}`, receivedRef: 'T', unitCost: '300.00', expiryDate: new Date('2028-12-31T00:00:00Z') } });
+    await prisma.stockLedger.create({ data: { locationId: wh, productId: pid, batchId: b.id, qtyDelta: 20, movementType: 'RECEIVE', documentType: 'OpeningStock', documentId: b.id, unitCost: '300.00', businessDate: new Date() } });
+    await prisma.stockBalance.create({ data: { locationId: wh, productId: pid, batchId: b.id, qty: 20 } });
+    const head = 'Order ID,Order Status,Order Substatus,Cancelation/Return Type,Normal or Pre-order,SKU ID,Seller SKU,Product Name,Variation,Quantity,Tracking ID';
+    const row = (id: string) => `${id}\t,To ship,Awaiting shipment,,Normal,99${run.replace(/\D/g, '')}1\t,,${nm.toUpperCase()} | WHEY PROTEIN | Getwheysted Official Store,"10 Servings, Creamy Vanilla",2,`;
+    const file = `\uFEFF${head}\n${row(`77${run.replace(/\D/g, '')}001`)}\n${row(`77${run.replace(/\D/g, '')}002`)}\n`;
+    const r1 = ok(await as('ecomm.assoc').post('/api/ecommerce/tiktok/orders/upload').attach('file', Buffer.from(file), 'To-Ship-order.csv')).body;
+    expect(r1.ordersAdded).toBe(0); expect(r1.unknownSkus).toHaveLength(1); expect(r1.unknownSkus[0].orders).toBe(2);
+    expect(r1.unknownSkus[0].suggestions.map((x: { productId: string }) => x.productId)).toContain(pid);
+    expect(r1.unknownSkus[0].suggestions[0].productId).toBe(pid); // "Looks like: … 10s (Vanilla)"
+    ok(await as('ecomm.assoc').post('/api/ecommerce/tiktok/sku-maps').send({ platformSku: r1.unknownSkus[0].platformSku, productId: pid }));
+    const r2 = ok(await as('ecomm.assoc').post('/api/ecommerce/tiktok/orders/upload?send=1').attach('file', Buffer.from(file), 'To-Ship-order.csv')).body;
+    expect(r2.ordersAdded).toBe(2); expect(r2.sent).toBe(true);
+    const doc = ok(await as('wh.incharge').get(`/api/ecommerce/pullouts/${r2.pullOut.id}`)).body;
+    expect(doc.status).toBe('SUBMITTED'); expect(doc.picking.reduce((t: number, x: { qty: number }) => t + x.qty, 0)).toBe(4); // 2 orders × 2 units on one pick list
+    const req = await prisma.approvalRequest.findFirstOrThrow({ where: { documentId: r2.pullOut.id, status: 'PENDING' } });
+    expect(req.requiredApproverRoles).toContain('WAREHOUSE_IN_CHARGE');
   });
 });

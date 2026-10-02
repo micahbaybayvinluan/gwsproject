@@ -61,16 +61,12 @@ export class SalesService implements OnModuleInit {
     if (user.locationScoped && !user.locationIds.includes(locationId)) throw new ForbiddenException('Outside your branch');
     const loc = await this.prisma.db.location.findUniqueOrThrow({ where: { id: locationId } });
     if (!loc.isSelling) throw new BadRequestException('This location does not sell');
-    // Franchise Coordinators (owner request 2026-10-01) may record sales to franchises only: on credit or paid online, never cash taken at a branch
-    const franchiseOnly = !user.permissions.has('sale.create');
+    // Franchise Coordinators (owner requests 2026-10-01 and 2026-10-02) record sales from the warehouse: franchises and every other channel, any payment mode
+    const warehouseOnly = !user.permissions.has('sale.create');
     const franchiseCustomer = input.channel === 'FRANCHISE' && input.customerId ? await this.prisma.db.customer.findUnique({ where: { id: input.customerId }, select: { id: true, type: true, locationId: true, name: true } }) : null;
     if (franchiseCustomer && franchiseCustomer.type !== 'FRANCHISE') throw new BadRequestException('Choose a franchisee for a franchise sale');
-    if (franchiseOnly) {
-      if (input.channel !== 'FRANCHISE' || !franchiseCustomer) throw new ForbiddenException('You can record sales to franchises only: choose the Franchise channel and the franchisee');
-      if (input.paymentMode !== 'AR_PDC' && input.paymentMode !== 'ONLINE') throw new BadRequestException('A franchise sale entered by the Franchise Coordinator is on credit (AR / PDC) or paid online');
-      if (loc.type === 'FRANCHISE') throw new BadRequestException('Choose the GWS branch or warehouse the goods come from');
-      if (input.incentive || input.sixPackSticker || (input.riderIncentive ?? 0) > 0) throw new ForbiddenException('Incentives and 6-Pack stickers are not part of a franchise sale');
-    }
+    if (warehouseOnly && loc.type !== 'WAREHOUSE') throw new ForbiddenException('You can record sales from the warehouse only');
+    if (warehouseOnly && input.channel === 'FRANCHISE' && !franchiseCustomer) throw new BadRequestException('Choose the franchisee');
     const ship = input.franchiseShipping && input.franchiseShipping.mode !== 'NONE' ? input.franchiseShipping : null;
     if (ship) {
       if (input.channel !== 'FRANCHISE') throw new BadRequestException('A shipping charge to a franchise belongs on a franchise sale');

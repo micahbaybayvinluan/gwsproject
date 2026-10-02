@@ -79,41 +79,44 @@ function ProductSearch({ onPick, placeholder = 'Type the GWS product name or SKU
   </div>;
 }
 
-interface UploadResult { pullOut: { id: string; controlNo: string } | null; ordersAdded: number; duplicates: string[]; cancelled: string[]; unknownSkus: { platformSku: string; name: string | null; orders: number }[]; notEnoughStock: { orderId: string; item: string }[]; errors: string[]; warehouse: string }
+interface Suggestion { productId: string; name: string; sku: string; score: number }
+interface UploadResult { sent?: boolean; pullOut: { id: string; controlNo: string } | null; ordersAdded: number; duplicates: string[]; cancelled: string[]; unknownSkus: { platformSku: string; name: string | null; orders: number; suggestions?: Suggestion[] }[]; notEnoughStock: { orderId: string; item: string }[]; errors: string[]; warehouse: string }
 interface PulloutRow { id: string; controlNo: string; docDate: string; status: string; from: string; notes: string | null; units: number; orders: number }
 interface PulloutDetail { id: string; controlNo: string; status: string; docDate: string; fromLocation: { name: string }; toLocation: { name: string }; picking: { sku: string; product: string; batchNo: string | null; expiryDate: string | null; qty: number }[]; orders: { id: string; orderId: string; trackingNo: string | null; status: string; lines: { platformSku: string; productName: string | null; qty: number }[] }[] }
 
 function OrdersTab({ p, manage, warehouses }: { p: P; manage: boolean; warehouses: Overview['warehouses'] }) {
   const pf = PLATFORMS.find((x) => x.key === p)!; const qc = useQueryClient();
   const [file, setFile] = useState<File | null>(null); const [wh, setWh] = useState(''); const [result, setResult] = useState<UploadResult | null>(null); const [open, setOpen] = useState<string | null>(null);
-  const [matched, setMatched] = useState<Record<string, string>>({});
+  const [matched, setMatched] = useState<Record<string, string>>({}); const [sendNow, setSendNow] = useState(false);
   const list = useQuery({ queryKey: ['ecom-pullouts', p], queryFn: () => api.get<PulloutRow[]>(`/api/ecommerce/${slug(p)}/pullouts`) });
   const refresh = () => { void qc.invalidateQueries({ queryKey: ['ecom-pullouts', p] }); void qc.invalidateQueries({ queryKey: ['ecom-overview'] }); };
-  const upload = useMutation({ mutationFn: (f: File) => api.upload<UploadResult>(`/api/ecommerce/${slug(p)}/orders/upload${wh ? `?warehouseId=${wh}` : ''}`, f), onSuccess: (r) => { setResult(r); setMatched({}); if (r.pullOut) setOpen(r.pullOut.id); refresh(); } });
+  const upload = useMutation({ mutationFn: (f: File) => api.upload<UploadResult>(`/api/ecommerce/${slug(p)}/orders/upload?${wh ? `warehouseId=${wh}&` : ''}${sendNow ? 'send=1' : ''}`, f), onSuccess: (r) => { setResult(r); setMatched({}); if (r.pullOut) setOpen(r.pullOut.id); refresh(); } });
   const saveMatch = useMutation({ mutationFn: (x: { platformSku: string; productId: string; name: string }) => api.post(`/api/ecommerce/${slug(p)}/sku-maps`, { platformSku: x.platformSku, productId: x.productId }), onSuccess: (_r, x) => setMatched((m) => ({ ...m, [x.platformSku]: x.name })) });
   const allMatched = !!result?.unknownSkus.length && result.unknownSkus.every((u) => matched[u.platformSku]);
   return <div className="space-y-3">
     {manage && <Card title={`Upload the ${pf.name} order / waybill file`}>
       <ol className="mb-3 list-decimal space-y-1 pl-5 text-sm text-slate-600">
-        <li>In {pf.seller}, open the orders <b>to ship</b> and <b>Export</b> them (Excel or CSV).</li>
-        <li>Upload the file here. Every new order goes on one <b>draft pull-out</b> from the Warehouse (items totalled, oldest expiry first).</li>
-        <li>Check the draft, print the picking list and <b>Submit</b>: the Warehouse In-Charge approves and packs.</li>
+        <li>In {pf.seller}, open the orders <b>to ship</b> and <b>Export</b> them (Excel or CSV). The file does not need a seller SKU: the product title and variation are read too.</li>
+        <li>Upload the file here. Every new order goes on one <b>pick list</b> (a draft pull-out from the Warehouse: items totalled, oldest expiry first). A new product is matched once, with suggestions, and remembered.</li>
+        <li>Check the draft, print the picking list and <b>Submit</b>, or tick <b>Send to the Warehouse In-Charge right away</b>: the In-Charge approves and packs. Then upload the waybill PDFs on <b>Waybill Report</b>.</li>
       </ol>
       <div className="flex flex-wrap items-end gap-3">
         {warehouses.length > 1 && <Field label="Items come from"><Select value={wh} onChange={(e) => setWh(e.target.value)}><option value="">Main warehouse</option>{warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</Select></Field>}
+        <label className="flex items-center gap-2 pb-2 text-sm"><input type="checkbox" checked={sendNow} onChange={(e) => setSendNow(e.target.checked)} data-testid="send-now" /> Send to the Warehouse In-Charge right away</label>
         <label className="inline-flex min-h-9 cursor-pointer items-center rounded-lg bg-brand px-4 text-sm font-semibold text-white shadow-sm">{upload.isPending ? 'Reading…' : 'Choose file and upload'}<input type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) { setFile(f); upload.mutate(f); } e.target.value = ''; }} /></label>
         <Button variant="ghost" size="sm" onClick={() => api.download('/api/ecommerce/templates/orders.xlsx', 'gws-ecommerce-orders-template.xlsx')}>GWS orders template</Button>
       </div>
       <ErrorBox error={upload.error} />
       {result && <div className="mt-3 space-y-2 text-sm">
-        <p className={result.ordersAdded ? 'rounded-lg bg-emerald-50 p-2 text-emerald-800' : 'rounded-lg bg-slate-50 p-2 text-slate-700'}>{result.ordersAdded ? <>✓ {result.ordersAdded} order(s) put on draft pull-out <b>{result.pullOut?.controlNo}</b> from {result.warehouse}.</> : 'No new order was added.'}</p>
+        <p className={result.ordersAdded ? 'rounded-lg bg-emerald-50 p-2 text-emerald-800' : 'rounded-lg bg-slate-50 p-2 text-slate-700'}>{result.ordersAdded ? <>✓ {result.ordersAdded} order(s) put on pick list <b>{result.pullOut?.controlNo}</b> from {result.warehouse}{result.sent ? <>: <b>sent to the Warehouse In-Charge</b>.</> : <>: a draft, check it and submit.</>}</> : 'No new order was added.'}</p>
         {result.duplicates.length > 0 && <p className="text-slate-600">Already uploaded before (skipped): {result.duplicates.length} order(s).</p>}
         {result.cancelled.length > 0 && <p className="text-slate-600">Cancelled in the file (skipped): {result.cancelled.join(', ')}</p>}
         {result.notEnoughStock.length > 0 && <div className="rounded-lg bg-amber-50 p-2 text-amber-800">Not enough stock in the Warehouse — these orders were not added: {result.notEnoughStock.map((x) => `${x.orderId} (${x.item})`).join(', ')}</div>}
         {result.errors.map((e) => <p key={e} className="text-red-700">{e}</p>)}
         {result.unknownSkus.length > 0 && <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
           <p className="mb-2 font-semibold text-amber-900">New {pf.name} SKUs: pick the matching GWS product once (it is remembered), then upload the same file again.</p>
-          <table className="w-full text-sm [&_td]:px-2 [&_th]:px-2"><tbody>{result.unknownSkus.map((u) => <tr key={u.platformSku} className="border-t border-amber-200"><td className="py-2 pr-2"><div className="font-mono text-xs">{u.platformSku}</div><div className="text-xs text-slate-600">{u.name} · {u.orders} order(s)</div></td><td className="w-1/2 py-2">{matched[u.platformSku] ? <span className="text-emerald-700">✓ {matched[u.platformSku]}</span> : <ProductSearch onPick={(x) => saveMatch.mutate({ platformSku: u.platformSku, productId: x.id, name: x.name })} />}</td></tr>)}</tbody></table>
+          {result.unknownSkus.some((u) => u.suggestions?.length && !matched[u.platformSku]) && <Button size="sm" className="mb-2" disabled={saveMatch.isPending} onClick={() => result.unknownSkus.forEach((u) => { const s = u.suggestions?.[0]; if (s && !matched[u.platformSku]) saveMatch.mutate({ platformSku: u.platformSku, productId: s.productId, name: s.name }); })} data-testid="accept-all">Accept the best match for each</Button>}
+          <table className="w-full text-sm [&_td]:px-2 [&_th]:px-2"><tbody>{result.unknownSkus.map((u) => <tr key={u.platformSku} className="border-t border-amber-200"><td className="py-2 pr-2"><div className="font-mono text-xs">{u.platformSku.length > 24 ? `${u.platformSku.slice(0, 24)}…` : u.platformSku}</div><div className="text-xs text-slate-600">{u.name} · {u.orders} order(s)</div></td><td className="w-1/2 py-2">{matched[u.platformSku] ? <span className="text-emerald-700">✓ {matched[u.platformSku]}</span> : <div className="space-y-1">{u.suggestions?.map((sg) => <button key={sg.productId} type="button" className="flex w-full items-center justify-between rounded-lg border border-emerald-200 bg-white px-2 py-1 text-left text-xs hover:bg-emerald-50" onClick={() => saveMatch.mutate({ platformSku: u.platformSku, productId: sg.productId, name: sg.name })}><span>Looks like: <b>{sg.name}</b></span><span className="font-semibold text-emerald-700">Use this</span></button>)}<ProductSearch placeholder="Not it? find the GWS product…" onPick={(x) => saveMatch.mutate({ platformSku: u.platformSku, productId: x.id, name: x.name })} /></div>}</td></tr>)}</tbody></table>
           {file && <Button className="mt-2" disabled={!allMatched || upload.isPending} onClick={() => upload.mutate(file)}>Upload the same file again</Button>}
         </div>}
       </div>}

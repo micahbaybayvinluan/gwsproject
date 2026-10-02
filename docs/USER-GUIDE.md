@@ -564,12 +564,20 @@ On **Daily Close & Deposit** the coloured days on the calendar (and the boxes be
 **Waybill Report** (E-comm Associate, Head Auditor, Owner): upload the TikTok, Shopee or Lazada shipping labels (PDF). Each label gives the order, tracking number, quantity and weight; choose the product once (the same platform and weight are filled in next time, to confirm). The report shows the SRP from the platform price list, the platform fees at the rates you set (or copy from posted payouts) and the total order income. **E-com Margin Analysis** (Owner): each platform's fees, ads and cost of goods, the margin against the target and the price that keeps it; add ad expenses at the bottom.
 
 ## Selling to a franchise: price, plastic and shipping
-<!-- for: sale.create, sale.create.franchise, franchise.ar.view, franchise.ar.own, franchise.shipping.fill -->
-1. On **New Sale** choose the channel **FRANCHISE** and pick the franchisee. The **franchise price** fills in by itself for every item; you may change a price (a price below the list needs the Owner's approval as any special price). Sales Associates of any branch, including the Warehouse store, and the Franchise Coordinators can do this. A Franchise Coordinator records franchise sales only, on credit (AR / PDC) or paid online, and chooses the GWS branch or warehouse the goods come from.
+<!-- for: sale.create, sale.create.warehouse, franchise.ar.view, franchise.ar.own, franchise.shipping.fill -->
+1. On **New Sale** choose the channel **FRANCHISE** and pick the franchisee. The **franchise price** fills in by itself for every item; you may change a price (a price below the list needs the Owner's approval as any special price). Sales Associates of any branch, including the Warehouse store, and the Franchise Coordinators can do this. The **Franchise Coordinators** have **New Sale** too: they record sales **from the warehouse only** (the warehouse is chosen for them), to franchises and for every other channel (walk-in, dealer, agent, delivery, online…) and payment mode.
 2. **Plastic bags** are charged to franchises: Large ₱4, Medium ₱3, Small ₱3, XL ₱5 each (the Owner can change these under Products & Prices). For stores and other customers a plastic stays free (₱0); if the bag was sold, type its price on the line.
 3. **Shipping charged to the franchise:** when you pick a franchisee, choose **To follow** (the usual), **Type the amount now**, or **No shipping charge**. With *To follow* the Franchise Coordinator is told, and must fill in the amount within **2 days** on **Franchise AR → Shipping charges billed to franchises → Fill in the amount**. It becomes its **own franchise invoice** (FAR-SHIP-…), separate from the order, due after the usual terms, with the same penalty and interest. The franchise owner, the Owner, the auditors, Accounting and the Coordinators are told when it is tagged, when it is billed, and every day it is late.
 4. A change after it is billed, or more time for the 2 days, is asked for by the Franchise Coordinator (**Ask to change / Ask for more time**) and decided by the **Owner** in My Approvals.
 5. A **franchise owner** sees every transaction of their own franchise only (sales, transfers, expenses, AR) and creates their own sales and expenses.
+
+## E-commerce: the "To ship" export becomes the pick list
+<!-- for: ecom.manage -->
+1. In TikTok Seller Center open the orders **To ship** and **Export** them (CSV or Excel). The file does **not** need a seller SKU: the product title, the variation (flavor, size) and the SKU ID in it are read.
+2. **E-commerce → Orders → Choose file and upload.** All new orders go on **one pick list**: a draft pull-out from the Warehouse with the items totalled and the oldest expiry first. Orders already uploaded, cancelled orders, and orders the Warehouse cannot cover are skipped and listed.
+3. **A product seen for the first time:** the page shows what the listing looks like in GWS (for example *Prothin Whey Ripped 10s (Vanilla)*). Press **Use this** (or **Accept the best match for each**, or search another product). It is remembered; upload the same file again.
+4. Check the draft, **print the picking list**, and press **Submit**, or tick **Send to the Warehouse In-Charge right away** before uploading. The In-Charge approves and packs.
+5. When the shipping labels (waybills) are ready, upload the PDFs on **Waybill Report**: it gives the SRP, the platform fees and the total order income.
 
 ## Deleting an unfinished draft
 <!-- for: transfer.create, receiving.create, count.create, inspection.create -->

@@ -111,8 +111,8 @@ const BASE_KEYS = [
   'ecom.analysis',
   // upload waybills and read the SRP / fees / order income report (E-comm Associate, Head Auditor, Owner)
   'ecom.waybill',
-  // franchise sales only (Franchise Coordinators) and the shipping charge billed to a franchise
-  'sale.create.franchise', 'franchise.shipping.fill',
+  // sales from the warehouse, any channel (Franchise Coordinators), and the shipping charge billed to a franchise
+  'sale.create.warehouse', 'franchise.shipping.fill',
   // summary of the stock given out to Prothin Marketing / GWS Marketing / BO
   'marketing.summary',
   // replacement tickets: open and tick them (every branch except a franchise); read all of them (auditors, Accounting)
@@ -307,14 +307,14 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
   {
     key: 'FRANCHISE_COORDINATOR',
     name: 'Franchise Coordinator',
-    description: 'Looks after the franchise partners: sees every franchise\'s receivables (invoices, penalties, interest, extension requests) and their stock transfers, issues memorandums to franchise partners and staff. Never sees cost. May record sales to franchises (only), and fills in the shipping charge billed to a franchise.',
-    permissions: ['franchise.ar.view', 'sale.create.franchise', 'franchise.shipping.fill', 'memo.create', 'ar.view', 'product.view', 'location.view.all', 'report.sales.all', 'report.inventory.all', 'price.view.RETAIL', 'price.view.FRANCHISE', 'price.view.DEALER', 'price.view.CC', 'dashboard.view', 'notification.view', 'discrepancy.view'],
+    description: 'Looks after the franchise partners: sees every franchise\'s receivables (invoices, penalties, interest, extension requests) and their stock transfers, issues memorandums to franchise partners and staff. Never sees cost. May record sales from the warehouse (franchises and every other channel), and fills in the shipping charge billed to a franchise.',
+    permissions: ['franchise.ar.view', 'sale.create.warehouse', 'franchise.shipping.fill', 'price.view.AGENT', 'price.view.TIKTOK', 'price.view.SHOPEE', 'price.view.LAZADA', 'memo.create', 'ar.view', 'product.view', 'location.view.all', 'report.sales.all', 'report.inventory.all', 'price.view.RETAIL', 'price.view.FRANCHISE', 'price.view.DEALER', 'price.view.CC', 'dashboard.view', 'notification.view', 'discrepancy.view'],
   },
   {
     key: 'ASST_FRANCHISE_COORDINATOR',
     name: 'Asst. Franchise Coordinator',
-    description: 'Helps the Franchise Coordinator: same views of franchise receivables and transfers, and may issue memorandums. Never sees cost. May record sales to franchises (only), and fills in the shipping charge billed to a franchise.',
-    permissions: ['franchise.ar.view', 'sale.create.franchise', 'franchise.shipping.fill', 'memo.create', 'ar.view', 'product.view', 'location.view.all', 'report.sales.all', 'report.inventory.all', 'price.view.RETAIL', 'price.view.FRANCHISE', 'price.view.DEALER', 'price.view.CC', 'dashboard.view', 'notification.view', 'discrepancy.view'],
+    description: 'Helps the Franchise Coordinator: same views of franchise receivables and transfers, and may issue memorandums. Never sees cost. May record sales from the warehouse (franchises and every other channel), and fills in the shipping charge billed to a franchise.',
+    permissions: ['franchise.ar.view', 'sale.create.warehouse', 'franchise.shipping.fill', 'price.view.AGENT', 'price.view.TIKTOK', 'price.view.SHOPEE', 'price.view.LAZADA', 'memo.create', 'ar.view', 'product.view', 'location.view.all', 'report.sales.all', 'report.inventory.all', 'price.view.RETAIL', 'price.view.FRANCHISE', 'price.view.DEALER', 'price.view.CC', 'dashboard.view', 'notification.view', 'discrepancy.view'],
   },
   {
     key: 'AGENT',

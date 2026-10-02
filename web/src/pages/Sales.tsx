@@ -22,9 +22,9 @@ export function NewSalePage() {
   const [inc, setInc] = useState<{ open: boolean; amount: string; payee: string; kind: 'SALES' | 'RIDER' }>({ open: false, amount: '', payee: '', kind: 'SALES' });
   const loc = me!.locations[0];
   const [locationId, setLocationId] = useState(loc?.id ?? '');
-  // a Franchise Coordinator records sales to franchises only, on credit or paid online (owner request 2026-10-01)
-  const franchiseOnly = !can('sale.create');
-  const [channel, setChannel] = useState(franchiseOnly ? 'FRANCHISE' : 'WALK_IN'); const [channelSub, setChannelSub] = useState(''); const [paymentMode, setPaymentMode] = useState(franchiseOnly ? 'AR_PDC' : 'CASH');
+  // a Franchise Coordinator records sales from the warehouse: franchises and every other channel (owner requests 2026-10-01, 2026-10-02)
+  const warehouseOnly = !can('sale.create');
+  const [channel, setChannel] = useState('WALK_IN'); const [channelSub, setChannelSub] = useState(''); const [paymentMode, setPaymentMode] = useState('CASH');
   // shipping charged to a franchise: none / to follow (the Franchise Coordinator fills it in within 2 days) / typed now; it becomes its own franchise invoice
   const [ship, setShip] = useState<{ mode: 'NONE' | 'TO_FOLLOW' | 'AMOUNT'; amount: string; courier: string; reference: string }>({ mode: 'TO_FOLLOW', amount: '', courier: '', reference: '' });
   const [drSiNo, setDrSiNo] = useState(''); const [search, setSearch] = useState(''); const [lines, setLines] = useState<Line[]>([]);
@@ -33,8 +33,8 @@ export function NewSalePage() {
   const [hdr, setHdr] = useState<Record<string, string>>({ deliveryFee: '', riderIncentive: '', shippingFee: '', shippingExpense: '', marketplaceCharges: '', dueDate: '', notes: '' });
   const [draftId] = useState(() => crypto.randomUUID()); const [proofId, setProofId] = useState<string | null>(null);
   const locations = useQuery({ queryKey: ['locations'], queryFn: () => api.get<{ id: string; name: string; isSelling: boolean; type?: string }[]>('/api/locations'), enabled: !me!.locationScoped });
-  // the Franchise Coordinator picks the GWS branch the goods come from: the warehouse is suggested
-  useEffect(() => { if (franchiseOnly && !locationId && locations.data) { const ok = locations.data.filter((l) => l.isSelling && l.type !== 'FRANCHISE'); const w = ok.find((l) => l.type === 'WAREHOUSE') ?? ok[0]; if (w) setLocationId(w.id); } }, [franchiseOnly, locationId, locations.data]);
+  // the Franchise Coordinator sells from the warehouse
+  useEffect(() => { if (warehouseOnly && !locationId && locations.data) { const w = locations.data.find((l) => l.isSelling && l.type === 'WAREHOUSE'); if (w) setLocationId(w.id); } }, [warehouseOnly, locationId, locations.data]);
   // only what this branch has on hand (owner request 2026-09-30): 0 stock is not offered
   const products = useQuery({ queryKey: ['products', search, 'in-stock', locationId], queryFn: () => api.get<Product[]>(`/api/products?search=${encodeURIComponent(search)}&take=30&inStockAt=${locationId}`), enabled: search.length >= 2 && !!locationId });
   const customers = useQuery({ queryKey: ['customers'], queryFn: () => api.get<{ id: string; name: string; type: string }[]>('/api/customers') });
@@ -74,10 +74,10 @@ export function NewSalePage() {
     <h1 className="text-2xl font-bold tracking-tight text-navy">New Sale</h1>
     <Card>
       <div className="grid gap-3 md:grid-cols-3">
-        {!me!.locationScoped && <Field label="Branch"><Select value={locationId} onChange={(e) => setLocationId(e.target.value)}><option value="">—</option>{locations.data?.filter((l) => l.isSelling && !(franchiseOnly && l.type === 'FRANCHISE')).map((l) => <option key={l.id} value={l.id}>{locLabel(l)}</option>)}</Select></Field>}
+        {!me!.locationScoped && <Field label="Branch"><Select value={locationId} onChange={(e) => setLocationId(e.target.value)}><option value="">—</option>{locations.data?.filter((l) => l.isSelling && (!warehouseOnly || l.type === 'WAREHOUSE')).map((l) => <option key={l.id} value={l.id}>{locLabel(l)}</option>)}</Select></Field>}
         <Field label="DR / SI number (paper)"><Input value={drSiNo} onChange={(e) => setDrSiNo(e.target.value)} placeholder="e.g. 10234" required data-testid="dr" /></Field>
-        <Field label="Channel"><Select value={channel} onChange={(e) => setChannel(e.target.value)}>{(franchiseOnly ? ['FRANCHISE'] : CHANNELS).map((c) => <option key={c} value={c}>{c.replace(/_/g, ' ')}</option>)}</Select></Field>
-        <Field label="Payment mode"><Select value={paymentMode} onChange={(e) => setPaymentMode(e.target.value)}>{!franchiseOnly && <option value="CASH">Cash</option>}<option value="ONLINE">Online (bank / GCash)</option>{!franchiseOnly && <option value="CREDIT_CARD">Credit card</option>}<option value="AR_PDC">AR / PDC (credit)</option></Select></Field>
+        <Field label="Channel"><Select value={channel} onChange={(e) => setChannel(e.target.value)}>{CHANNELS.map((c) => <option key={c} value={c}>{c.replace(/_/g, ' ')}</option>)}</Select></Field>
+        <Field label="Payment mode"><Select value={paymentMode} onChange={(e) => setPaymentMode(e.target.value)}><option value="CASH">Cash</option><option value="ONLINE">Online (bank / GCash)</option><option value="CREDIT_CARD">Credit card</option><option value="AR_PDC">AR / PDC (credit)</option></Select></Field>
         {(channel === 'SHIPPING_COURIER' || channel === 'SHIPPING_MARKETPLACE') && <Field label="Sub-channel"><Select value={channelSub} onChange={(e) => setChannelSub(e.target.value)}><option value="">—</option>{channel === 'SHIPPING_MARKETPLACE' ? ['SHOPEE', 'LAZADA', 'TIKTOK'].map((s) => <option key={s}>{s}</option>) : ['FRANCHISE', 'DEALER', 'AGENT'].map((s) => <option key={s}>{s}</option>)}</Select></Field>}
         {(channel === 'DEALER' || channel === 'FRANCHISE' || paymentMode === 'AR_PDC') && (() => {
           const kind = channel === 'DEALER' ? 'DEALER' : channel === 'FRANCHISE' ? 'FRANCHISE' : custType;

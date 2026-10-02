@@ -29,10 +29,10 @@ const Agreement = z.object({ direction: z.enum(['OUT', 'IN']), counterpartyLocat
 @Controller('api/sales')
 export class SalesController {
   constructor(private svc: SalesService) {}
-  @Get() @RequireAnyPermission('sale.create', 'sale.create.franchise', 'report.sales.own', 'report.sales.all') list(@CurrentUser() u: SessionUser, @Query('locationId') locationId?: string, @Query('from') from?: string, @Query('to') to?: string, @Query('channel') channel?: string, @Query('paymentMode') paymentMode?: string) { return this.svc.list(u, { locationId, from, to, channel, paymentMode }); }
+  @Get() @RequireAnyPermission('sale.create', 'sale.create.warehouse', 'report.sales.own', 'report.sales.all') list(@CurrentUser() u: SessionUser, @Query('locationId') locationId?: string, @Query('from') from?: string, @Query('to') to?: string, @Query('channel') channel?: string, @Query('paymentMode') paymentMode?: string) { return this.svc.list(u, { locationId, from, to, channel, paymentMode }); }
   @Get('agent-report') @RequireAnyPermission('report.sales.own', 'report.sales.all') agents(@CurrentUser() u: SessionUser, @Query('from') from: string, @Query('to') to: string, @Query('agentId') agentId?: string) { return this.svc.agentReport(u, { from, to, agentId }); }
-  @Get(':id') @RequireAnyPermission('sale.create', 'sale.create.franchise', 'report.sales.own', 'report.sales.all') get(@Param('id') id: string, @CurrentUser() u: SessionUser) { return this.svc.get(id, u); }
-  @Post() @RequireAnyPermission('sale.create', 'sale.create.franchise') @Audited('SalesDoc', 'CREATE') create(@Body(Z(Create)) dto: z.infer<typeof Create>, @CurrentUser() u: SessionUser) { return this.svc.create(dto, u); }
+  @Get(':id') @RequireAnyPermission('sale.create', 'sale.create.warehouse', 'report.sales.own', 'report.sales.all') get(@Param('id') id: string, @CurrentUser() u: SessionUser) { return this.svc.get(id, u); }
+  @Post() @RequireAnyPermission('sale.create', 'sale.create.warehouse') @Audited('SalesDoc', 'CREATE') create(@Body(Z(Create)) dto: z.infer<typeof Create>, @CurrentUser() u: SessionUser) { return this.svc.create(dto, u); }
   @Post(':id/void') @RequireAnyPermission('sale.void', 'sale.edit.sameday') @Audited('SalesDoc', 'VOID') void(@Param('id') id: string, @Body(Z(Void)) dto: z.infer<typeof Void>, @CurrentUser() u: SessionUser) { return this.svc.void(id, dto.reason, u); }
 }
 

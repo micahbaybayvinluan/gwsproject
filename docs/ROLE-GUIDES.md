@@ -506,7 +506,7 @@ You see and can do everything. You are the final approver.
 
 ## E-comm Associate
 <!-- role: ECOMM_ASSOCIATE -->
-When you search for a product on the E-commerce pages, the products that have a **TikTok, Shopee or Lazada price come first**; those with no platform price are listed at the bottom.
+Upload the platform's **To ship** export (no seller SKU needed): you get one pick list, product suggestions for new items, and can send it to the In-Charge right away; then upload the waybill PDFs. When you search for a product on the E-commerce pages, the products that have a **TikTok, Shopee or Lazada price come first**; those with no platform price are listed at the bottom.
 
 You run the online shops: **TikTok Shop, Shopee and Lazada**, each on its own tab. E-commerce has no stock of its own: every item comes from the Warehouse, and the Warehouse In-Charge approves each pull-out. You see selling prices and platform fees, never cost.
 
@@ -604,13 +604,13 @@ You look after the franchise partners. You never see cost.
 2. **Recommended process** (shown on the page): day 1 automatic notices; from day 7 call the owner and issue a notice memo; from day 30 the Owner reviews and may put the franchise on cash-before-delivery; at two months a demand memo and the actions the memo allows.
 3. **Memorandums:** write memos to franchise partners and their associates. Choose the addressees, type the memo (a table is optional), add the signers. The memo is numbered by itself and everyone addressed is notified; print it on the letterhead. **Write the demand memo** on the Franchise AR page fills in the notice for you.
 4. **Transfers and stock:** you can see what was sent to and received by each franchise, and the discrepancies.
-5. **New Sale (franchises only):** record a sale to a franchise on credit or paid online, choosing the GWS branch or warehouse the goods come from. The franchise price and the plastic prices (L ₱4, M ₱3, S ₱3, XL ₱5) fill in by themselves and can be changed.
+5. **New Sale (from the warehouse):** record a sale from the warehouse, to a franchise or any other customer, any channel and payment mode. The warehouse is chosen for you; you cannot sell from a branch. The franchise price and the plastic prices (L ₱4, M ₱3, S ₱3, XL ₱5) fill in by themselves and can be changed.
 6. **Shipping charges to franchises:** on Franchise AR, **Fill in the amount** within **2 days** of the sale (a late one is flagged to you, the Owner, the auditors and Accounting every day). Filling it creates a separate franchise invoice. To change the amount afterwards, or to ask for more time, press **Ask to change / Ask for more time**: the Owner decides.
 7. **Your password:** press the key icon at the top right. It is personal; never tell it to anyone.
 
 ## Asst. Franchise Coordinator
 <!-- role: ASST_FRANCHISE_COORDINATOR -->
-You help the Franchise Coordinator with the same screens: **New Sale** (franchise sales only), **Shipping charges to franchises** (fill in the amount within 2 days; ask the Owner to change it), **Franchise AR** (invoices, penalty, interest, extension requests, notifications), **Memorandums** (write, sign, track who has read them) and the franchise stock transfers. You never see cost. Change your password with the key icon at the top right.
+You help the Franchise Coordinator with the same screens: **New Sale** (from the warehouse), **Shipping charges to franchises** (fill in the amount within 2 days; ask the Owner to change it), **Franchise AR** (invoices, penalty, interest, extension requests, notifications), **Memorandums** (write, sign, track who has read them) and the franchise stock transfers. You never see cost. Change your password with the key icon at the top right.
 
 ## Other users (custom permissions)
 <!-- role: CUSTOM -->

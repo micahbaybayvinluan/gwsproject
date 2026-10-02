@@ -236,6 +236,8 @@ export function documentLink(type: string, id: string) {
   if (type === 'CashDeposit') return `/closing?deposit=${id}`;
   if (type === 'FranchiseShippingCharge') return `/franchise-ar?shipping=${id}`;
   if (type === 'FranchiseArExtension') return `/franchise-ar?extension=${id}`;
+  if (type === 'AgentConsignmentLimit') return '/field/consignments';
+  if (type === 'Outlet') return `/outlets?id=${id}`;
   const map: Record<string, string> = { ReceivingDoc: '/receiving', TransferDoc: '/transfers', SalesDoc: '/sales', ExpiryWriteoffDoc: '/writeoffs', PriceChangeDoc: '/price-changes', PostCloseEdit: '/post-close-edits', CountDoc: '/counts', DiscrepancyCase: '/discrepancies', AccountingPeriod: '/accounting/periods', BeginningBalance: '/accounting/beginning-balances', SalesTarget: '/targets', EcomSettlement: '/ecommerce' };
   return `${map[type] ?? '/'}/${id}`;
 }

@@ -695,6 +695,8 @@ model SalesDoc {
   channelSub                 String?      @map("channel_sub") // e.g. CONSIGNMENT, SHOPEE, LAZADA, TIKTOK
   customerId                 String?      @map("customer_id")
   agentId                    String?      @map("agent_id")
+  /// the agent's outlet / gym this sale is tagged to (owner request 2026-10-02): the agent sees the orders of their outlets
+  outletId                   String?      @map("outlet_id")
   riderId                    String?      @map("rider_id")
   customerName               String?      @map("customer_name")
   /// walk-in / online customer contact details captured at the sale (for the customer contact list)
@@ -742,6 +744,7 @@ model SalesDoc {
   location       Location            @relation(fields: [locationId], references: [id])
   customer       Customer?           @relation(fields: [customerId], references: [id])
   agent          Agent?              @relation(fields: [agentId], references: [id])
+  outlet         Outlet?             @relation(fields: [outletId], references: [id])
   rider          Rider?              @relation(fields: [riderId], references: [id])
   paymentAccount Account?            @relation(fields: [paymentAccountId], references: [id])
   lines          SalesLine[]
@@ -1145,6 +1148,10 @@ model ConsignmentAgreement {
   supplierId             String?              @map("supplier_id")
   valuationBasis         ValuationBasis       @default(COST) @map("valuation_basis")
   settlementTerms        String?              @map("settlement_terms")
+  /// the agent responsible for this consignee (set by the Sales Manager); key as in sales targets (account id, else name)
+  agentKey               String?              @map("agent_key")
+  agentName              String?              @map("agent_name")
+  outletId               String?              @map("outlet_id")
   active                 Boolean              @default(true)
   createdAt              DateTime             @default(now()) @map("created_at")
   createdBy              String?              @map("created_by")
@@ -2535,4 +2542,180 @@ model EcomWaybillHint {
 
   @@unique([platform, weightG])
   @@map("ecom_waybill_hints")
+}
+
+// ── Agent field work (owner request 2026-10-02): areas, outlets / gyms, daily itineraries with visit photos, consignment limit ──
+enum OutletStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+/// A territory the Sales Manager assigns to an agent.
+model SalesArea {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  notes     String?
+  agentKey  String?  @map("agent_key")
+  agentName String?  @map("agent_name")
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+  createdBy String?  @map("created_by")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  outlets Outlet[]
+
+  @@map("sales_areas")
+}
+
+/// A gym / store an agent visits. Uploaded by the agent, approved by the Sales Manager before it can be tagged on a sale or itinerary. Pictures are attachments (documentType Outlet).
+model Outlet {
+  id           String       @id @default(uuid())
+  name         String
+  outletType   String       @default("GYM") @map("outlet_type")
+  address      String?
+  city         String?
+  areaId       String?      @map("area_id")
+  agentKey     String       @map("agent_key")
+  agentName    String       @map("agent_name")
+  contactName  String?      @map("contact_name")
+  phone        String?
+  email        String?
+  notes        String?
+  status       OutletStatus @default(PENDING)
+  active       Boolean      @default(true)
+  /// pipeline: PROSPECT → VISITED → SAMPLE_GIVEN → FIRST_ORDER → REGULAR (moves on its own with visits and tagged sales)
+  stage        String       @default("PROSPECT")
+  lat          Float?
+  lng          Float?
+  deletedAt    DateTime?    @map("deleted_at")
+  rejectReason String?      @map("reject_reason")
+  approvedBy   String?      @map("approved_by")
+  approvedAt   DateTime?    @map("approved_at")
+  createdAt    DateTime     @default(now()) @map("created_at")
+  createdBy    String?      @map("created_by")
+  updatedAt    DateTime     @updatedAt @map("updated_at")
+
+  area      SalesArea?      @relation(fields: [areaId], references: [id])
+  stops     ItineraryStop[]
+  salesDocs SalesDoc[]
+  shares    OutletShare[]
+  changes   OutletChange[]
+
+  @@index([agentKey])
+  @@index([areaId])
+  @@map("outlets")
+}
+
+/// One agent's plan (and report) for one day.
+model Itinerary {
+  id                String    @id @default(uuid())
+  agentKey          String    @map("agent_key")
+  agentName         String    @map("agent_name")
+  planDate          DateTime  @map("plan_date") @db.Date
+  notes             String?
+  reportSubmittedAt DateTime? @map("report_submitted_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  createdBy         String?   @map("created_by")
+
+  stops  ItineraryStop[]
+  claims ItineraryClaim[]
+
+  @@unique([agentKey, planDate])
+  @@map("itineraries")
+}
+
+model ItineraryStop {
+  id          String    @id @default(uuid())
+  itineraryId String    @map("itinerary_id")
+  outletId    String    @map("outlet_id")
+  seq         Int       @default(0)
+  status      String    @default("PLANNED") // PLANNED | VISITED | MISSED
+  note        String?
+  visitedAt   DateTime? @map("visited_at")
+  lat         Float?
+  lng         Float?
+  /// shelf check at the outlet: ON_SHELF | LOW_STOCK | OUT_OF_STOCK | NOT_CARRIED
+  shelfStatus String?   @map("shelf_status")
+  competitors String?
+
+  itinerary Itinerary @relation(fields: [itineraryId], references: [id], onDelete: Cascade)
+  outlet    Outlet    @relation(fields: [outletId], references: [id])
+
+  @@unique([itineraryId, outletId])
+  @@index([outletId])
+  @@map("itinerary_stops")
+}
+
+/// Maximum total consignment (valued at retail price) an agent may hold: set by the Sales Manager, approved by the Owner.
+model AgentConsignmentLimit {
+  id                String    @id @default(uuid())
+  agentKey          String    @map("agent_key")
+  agentName         String    @map("agent_name")
+  /// set: the maximum for this one outlet's consignee; empty: the agent's total across all outlets
+  outletId          String?   @map("outlet_id")
+  outletName        String?   @map("outlet_name")
+  amount            Decimal   @db.Decimal(14, 2)
+  status            String    @default("PENDING") // PENDING | APPROVED | REJECTED | SUPERSEDED
+  notes             String?
+  approvalRequestId String?   @map("approval_request_id")
+  decidedAt         DateTime? @map("decided_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  createdBy         String?   @map("created_by")
+
+  @@index([agentKey, status])
+  @@map("agent_consignment_limits")
+}
+
+/// An outlet shared with another agent (the Sales Manager decides); the first agent stays its owner.
+model OutletShare {
+  id        String   @id @default(uuid())
+  outletId  String   @map("outlet_id")
+  agentKey  String   @map("agent_key")
+  agentName String   @map("agent_name")
+  createdAt DateTime @default(now()) @map("created_at")
+  createdBy String?  @map("created_by")
+
+  outlet Outlet @relation(fields: [outletId], references: [id], onDelete: Cascade)
+
+  @@unique([outletId, agentKey])
+  @@index([agentKey])
+  @@map("outlet_shares")
+}
+
+/// A change an agent asks for on an approved outlet: the Sales Manager approves it and the Owner is told what changed.
+model OutletChange {
+  id              String    @id @default(uuid())
+  outletId        String    @map("outlet_id")
+  changes         Json
+  status          String    @default("PENDING") // PENDING | APPROVED | REJECTED
+  requestedBy     String    @map("requested_by")
+  requestedByName String    @map("requested_by_name")
+  decidedBy       String?   @map("decided_by")
+  decidedAt       DateTime? @map("decided_at")
+  reason          String?
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  outlet Outlet @relation(fields: [outletId], references: [id], onDelete: Cascade)
+
+  @@index([outletId, status])
+  @@map("outlet_changes")
+}
+
+/// Fuel / transport / meal claim for the day's itinerary; the Sales Manager approves, Accounting is told to pay. Receipt photo = attachment (ItineraryClaim).
+model ItineraryClaim {
+  id          String    @id @default(uuid())
+  itineraryId String    @map("itinerary_id")
+  kind        String // FUEL | TRANSPORT | MEAL | OTHER
+  amount      Decimal   @db.Decimal(14, 2)
+  note        String?
+  status      String    @default("PENDING") // PENDING | APPROVED | REJECTED
+  decidedBy   String?   @map("decided_by")
+  decidedAt   DateTime? @map("decided_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  createdBy   String?   @map("created_by")
+
+  itinerary Itinerary @relation(fields: [itineraryId], references: [id], onDelete: Cascade)
+
+  @@map("itinerary_claims")
 }

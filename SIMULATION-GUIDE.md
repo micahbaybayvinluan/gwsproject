@@ -253,6 +253,16 @@ Waybill Report → **Choose waybill PDF files** (TikTok or Shopee labels) → pi
 73. **Supplier replacement** (`wh.incharge`): Return items to a supplier → `head.auditor` approves → on Supplier Deliveries choose the ticket ("This delivery replaces a ticket") and receive part of the quantity (ticket stays open), then the rest (ticket closes).
 74. **Users search**: as `admin` open Users & Roles and type part of a name in the search box.
 
+75. **Outlets** (`agent.jerick`): Outlets → **+ Add an outlet** (contact person, number, email, a picture) and **Upload Excel / CSV** (press Template). They show "Waiting for approval". `sales.manager`: Outlets → Waiting for approval → Approve.
+76. **Tag a sale** (`sales.westave`): New Sale → **Agent's outlet / gym**: pick Jerick Quinto, then the outlet → Review → Save. `agent.jerick` sees the order under My Sales and on the outlet; the sale shows the outlet in the Sales list.
+77. **Change and remove** (`agent.jerick`): open an approved outlet → Ask for a change. `sales.manager` approves under Change requests; `admin` gets a notification showing what changed. `sales.manager` can Share an outlet with another agent, move it, or Remove it (refused with an order in the last 3 months; otherwise `admin` approves in My Approvals).
+78. **Areas** (`sales.manager`): Outlets → Areas → add an area and assign an agent.
+79. **Itinerary** (`agent.jerick`, best on a phone): My Itinerary → plan today's stores (or upload a Date / Outlet file) → at a store take a photo, choose the shelf check, press Visited (allow location); mark another Missed with the reason; Submit the report. `sales.manager`, `head.auditor` and `admin`: Field Monitoring shows the day with photos, times and location links.
+80. **Claim** (`agent.jerick`): under the stores claim fuel ₱350 with a receipt photo. `sales.manager` approves in Field Monitoring → Fuel / transport claims; `acct.head` is told to pay.
+81. **Consignment maximum** (`sales.manager`): Agent Consignments → link a consignee to Jerick's outlet → set a maximum (all outlets, and one outlet) → `admin` approves in My Approvals. A consignment out over the maximum is refused when submitted (`sales.westave` → Consignment). `agent.jerick`: Agent Consignments shows what is at the consignee and how much of the maximum is used.
+82. **Warehouse expenses** (`wh.assoc` or `wh.incharge`): Expenses → choose a warehouse account → amount and payee → pay from cash on hand, a bank account or an owner advance (Cash fund is refused).
+83. **Search notifications** (any user): Notifications → type a product name or DR number in the search bar.
+
 ## Where the files come out
 
 All exports download through the browser: Daily Sales Report (xlsx/PDF), Daily Inventory Report (xlsx, one sheet per day plus Summary and Per-day sheets), every paper form (Pull-Out, Transfer-In, DR-Sales, Supplier's Form, Count sheet, Discrepancy Report, Charge Form, Credit Note, Journal Voucher), every list (Export xlsx / CSV buttons), Trial Balance and the financial statements.

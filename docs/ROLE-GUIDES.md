@@ -174,6 +174,8 @@ You enter what comes into and goes out of the warehouse. You never see supplier 
 
 **Your pay:** My Pay & Charges.
 
+**Warehouse expenses** (menu: Expenses): record an expense of the warehouse (choose the account, amount and payee). The warehouse has no cash fund: choose cash on hand, a bank account or an owner advance.
+
 ## Warehouse In-Charge
 <!-- role: WAREHOUSE_IN_CHARGE -->
 You are responsible for the warehouse stock. You check your associates' entries, and you enter receiving and transfers yourself.
@@ -220,6 +222,8 @@ You are responsible for the warehouse stock. You check your associates' entries,
 **Finding transfers:** Transfers & Pull-outs → **View** (pull-outs or transfer-ins) and **Branches**: tick the branches to see, for example only the franchises you send to. Franchises show "(franchise)" beside the name.
 
 **Reports:** Stock on Hand, Inventory Reports (quantities only).
+
+**Warehouse expenses** (menu: Expenses): you and the Warehouse Associate record the warehouse's expenses (cash on hand, bank account or owner advance; no cash fund).
 
 ## Head Auditor
 <!-- role: HEAD_AUDITOR -->
@@ -573,6 +577,13 @@ You follow the sales of every branch, agent and e-commerce platform, and you set
 2. Type the incentive as a % of sales or as an amount and press **Confirm**.
 3. It goes to the Accounting Associate, the Accounting Head and the Owner. After the Owner approves, the release form goes to HR, and Accounting tags the payment. You are told at each step.
 
+**Outlets, itineraries and consignments of your agents** (menus: Outlets, Field Monitoring, Agent Consignments)
+1. **Outlets → Waiting for approval:** the outlets the agents uploaded (with contact person, number, email, picture). Tick and **Approve**, or **Reject** with the reason. Only approved outlets can be tagged on sales and itineraries.
+2. **Outlets → Change requests:** an agent cannot change an approved outlet alone; approve or reject their request. The Owner is told of every change.
+3. **Outlets → Areas:** create areas and assign each to an agent. Open an outlet to move it to another area or agent, **share** it with another agent, or **Remove outlet** (the Owner approves; the outlet must have no order in the last 3 months).
+4. **Field Monitoring:** every agent's itinerary with the photos, times and locations; scorecards; sales per area; outlets not ordering; approve or reject fuel / transport claims (Accounting is then told to pay).
+5. **Agent Consignments:** link each consignee account to an agent's outlet, then set the **maximum** for the agent (all outlets) and, if wanted, for one outlet: **Send for the Owner's approval**. A consignment that would go over a maximum is stopped.
+
 **Agent accounts** (menu: Sales Targets → Agent accounts)
 - Link each agent to their **Agent** user account (the Owner creates it in Users & Roles). The agent then sees their own sales and target.
 
@@ -595,6 +606,9 @@ You see only your own sales, wherever the items came from, and your own target. 
 3. **Agent Incentives:** your incentive per month, its status (waiting for approval, with HR to sign, released) and how it was paid.
 4. If My Sales says your account is not linked, ask the Sales Manager to link it.
 5. **Products & Prices:** retail and agent prices.
+6. **Outlets:** add the gyms / stores in your area (**+ Add an outlet** or **Upload Excel / CSV**) with the contact person, number, email and a picture. The Sales Manager approves them; you see only yours and the ones shared with you. To change an approved outlet, press **Ask for a change** (the Sales Manager approves). Open an outlet to see its **orders** (the sales associates tag the outlet on the sale) and visits.
+7. **My Itinerary** (best on your phone): plan the stores of the day (or upload a Date / Outlet file), then at each store **take a photo** (required), choose the shelf check and press **Visited**; allow location when asked. Not visited: **Missed** with the reason. Press **Submit the report for this day** at the end. Claim fuel / transport under the stores.
+8. **Agent Consignments (My Consignments):** the consignments you are responsible for, what the consignees owe, how long since they reported sales, and how much of your **maximum** is used. A new consignment over your maximum is stopped until the Owner approves a higher one.
 
 ## Franchise Coordinator
 <!-- role: FRANCHISE_COORDINATOR -->

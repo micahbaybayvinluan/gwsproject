@@ -53,6 +53,8 @@ export const APPROVAL_TYPES = [
   'PULLOUT_EXPENSE',
   'REPLACEMENT_TICKET',
   'SUPPLIER_RETURN',
+  'AGENT_CONSIGNMENT_LIMIT',
+  'OUTLET_DELETE',
 ] as const;
 export type ApprovalType = (typeof APPROVAL_TYPES)[number];
 
@@ -117,6 +119,8 @@ const BASE_KEYS = [
   'marketing.summary',
   // replacement tickets: open and tick them (every branch except a franchise); read all of them (auditors, Accounting)
   'replacement.create', 'replacement.view',
+  // agent field work: see every agent outlets, itineraries and visit photos (Sales Manager, Head Auditor, Owner); manage areas, approve outlets, set consignment limits (Sales Manager)
+  'outlet.view.all', 'outlet.manage',
 ] as const;
 
 export const PERMISSION_KEYS: readonly string[] = [
@@ -183,7 +187,7 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
     key: 'HEAD_AUDITOR',
     name: 'Head Auditor',
     description: 'Edits/inputs anything; master data with Admin approval; enters/approves costs; approves internal transfers, post-close edits, write-offs.',
-    permissions: ['approval.act.REPLACEMENT_TICKET', 'approval.act.SUPPLIER_RETURN', 'replacement.create', 'replacement.view', 'approval.act.MARKETING_PULLOUT', 'marketing.summary', 'sixpack.override', 'ecom.waybill', 'approval.act.CASH_DEPOSIT_AUDIT', 'franchise.ar.view', 'memo.create', 'sixpack.view.all', 'stock.flavor.set', 
+    permissions: ['outlet.view.all', 'approval.act.REPLACEMENT_TICKET', 'approval.act.SUPPLIER_RETURN', 'replacement.create', 'replacement.view', 'approval.act.MARKETING_PULLOUT', 'marketing.summary', 'sixpack.override', 'ecom.waybill', 'approval.act.CASH_DEPOSIT_AUDIT', 'franchise.ar.view', 'memo.create', 'sixpack.view.all', 'stock.flavor.set', 
       ...READ_ALL, ...COST_BUNDLE, 'product.edit', 'product.create', 'price.edit', 'cost.edit', 'supplier.edit',
       'receiving.create', 'receiving.approve_cost', 'transfer.create', 'transfer.confirm', 'transfer.approve.internal', 'transfer.resolve_discrepancy',
       'sale.create', 'sale.edit.sameday', 'sale.edit.postclose', 'sale.void', 'ar.collect', 'expense.create.branch',
@@ -213,8 +217,8 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
   {
     key: 'WAREHOUSE_IN_CHARGE',
     name: 'Warehouse In-Charge',
-    description: 'Inputs warehouse receiving, transfers (to any branch or franchise), counts and write-offs; costs are entered and approved by the Head Auditor. Approves every warehouse associate\'s goods in and out before stock moves (own entries need no second approval). Can edit an associate\'s entry, which takes effect only after that associate accepts it. No cost.',
-    permissions: ['replacement.create', 'stock.flavor.set', 
+    description: 'Inputs warehouse receiving, transfers (to any branch or franchise), counts, write-offs and the warehouse\'s expenses; costs are entered and approved by the Head Auditor. Approves every warehouse associate\'s goods in and out before stock moves (own entries need no second approval). Can edit an associate\'s entry, which takes effect only after that associate accepts it. No cost.',
+    permissions: ['replacement.create', 'expense.create.branch', 'expense.view', 'stock.flavor.set', 
       'product.view', 'supplier.view.code', 'location.view.own', 'receiving.create', 'transfer.create', 'transfer.confirm', 'warehouse.edit_others', 'approval.act.CONSIGNMENT_CHECK_WH', 'consignment.request', 'approval.act.WAREHOUSE_EDIT', 'approval.act.WAREHOUSE_IN', 'approval.act.WAREHOUSE_OUT', 'approval.act.ECOM_PULLOUT', 'ecom.receive', 'approval.act.TRANSFER_DIFF_SENDER',
       'count.create', 'writeoff.create', 'report.inventory.own', 'dashboard.view', 'notification.view', 'price.view.RETAIL', 'discrepancy.explain',
     ],
@@ -222,8 +226,8 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
   {
     key: 'WAREHOUSE_ASSOCIATE',
     name: 'Warehouse Associate',
-    description: 'Creates receiving docs (qty, expiry, batch) and transfers from the warehouse to any branch or franchise. Accepts or rejects the In-Charge\'s edits to own entries. Cost hidden.',
-    permissions: ['replacement.create', 'consignment.request', 'product.view', 'supplier.view.code', 'location.view.own', 'receiving.create', 'transfer.create', 'transfer.confirm', 'report.inventory.own', 'dashboard.view', 'notification.view', 'approval.act.WAREHOUSE_EDIT', 'discrepancy.explain'],
+    description: 'Creates receiving docs (qty, expiry, batch) and transfers from the warehouse to any branch or franchise, and records the warehouse\'s expenses. Accepts or rejects the In-Charge\'s edits to own entries. Cost hidden.',
+    permissions: ['replacement.create', 'expense.create.branch', 'expense.view', 'consignment.request', 'product.view', 'supplier.view.code', 'location.view.own', 'receiving.create', 'transfer.create', 'transfer.confirm', 'report.inventory.own', 'dashboard.view', 'notification.view', 'approval.act.WAREHOUSE_EDIT', 'discrepancy.explain'],
   },
   {
     key: 'SALES_ASSOCIATE',
@@ -301,8 +305,8 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
   {
     key: 'SALES_MANAGER',
     name: 'Sales Manager',
-    description: 'Monitors sales targets and their achievement. Sees the sales of every branch, agent and e-commerce platform (amounts, channels, payment types, top products), the Daily Sales Reports, customer contacts and the receivables of dealers, franchises and agents. Sets monthly targets per branch and per agent (the Owner approves) and links agents to their accounts. Never sees cost, margin, supplier data, cash counts, payroll or the books; records no sales or money.',
-    permissions: ['replacement.view', 'sixpack.view.all', 'incentive.prepare', 'incentive.view', 'target.manage', 'target.view', 'report.sales.all', 'ar.view', 'product.view', 'location.view.all', 'price.view.RETAIL', 'price.view.CC', 'price.view.DEALER', 'price.view.AGENT', 'price.view.FRANCHISE', 'dashboard.view', 'notification.view'],
+    description: 'Monitors sales targets and their achievement. Sees the sales of every branch, agent and e-commerce platform (amounts, channels, payment types, top products), the Daily Sales Reports, customer contacts and the receivables of dealers, franchises and agents. Sets monthly targets per branch and per agent (the Owner approves) and links agents to their accounts. Assigns areas to agents, approves the outlets / gyms agents upload, follows their daily itineraries, visit photos and consignments, and sets each agent\'s maximum consignment (the Owner approves). Never sees cost, margin, supplier data, cash counts, payroll or the books; records no sales or money.',
+    permissions: ['outlet.view.all', 'outlet.manage', 'replacement.view', 'sixpack.view.all', 'incentive.prepare', 'incentive.view', 'target.manage', 'target.view', 'report.sales.all', 'ar.view', 'product.view', 'location.view.all', 'price.view.RETAIL', 'price.view.CC', 'price.view.DEALER', 'price.view.AGENT', 'price.view.FRANCHISE', 'dashboard.view', 'notification.view'],
   },
   {
     key: 'FRANCHISE_COORDINATOR',
@@ -319,7 +323,7 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
   {
     key: 'AGENT',
     name: 'Agent',
-    description: 'A sales agent: sees only their own sales, at whichever branch the items came from, their monthly target and how much of it is achieved, and their own receivables (customers who have not paid yet) with due dates. Retail and agent prices only; no cost, no other agent\'s or branch\'s data.',
+    description: 'A sales agent: sees only their own sales, at whichever branch the items came from, their monthly target and how much of it is achieved, and their own receivables (customers who have not paid yet) with due dates. Uploads the outlets / gyms in their area (the Sales Manager approves them), plans and reports their daily itinerary with photos, and sees the orders of their outlets and the consignments they are responsible for. Retail and agent prices only; no cost, no other agent\'s or branch\'s data.',
     permissions: ['agent.self', 'product.view', 'price.view.RETAIL', 'price.view.AGENT', 'dashboard.view', 'notification.view'],
   },
 ];
@@ -403,6 +407,10 @@ export const APPROVAL_ROUTING: Record<ApprovalType, { roles: RoleKey[]; anyOf?: 
   // replacement tickets: the Head Auditor approves a replacement handed to a customer, and the return of items to a supplier
   REPLACEMENT_TICKET: { roles: ['HEAD_AUDITOR', 'ADMIN'], anyOf: true },
   SUPPLIER_RETURN: { roles: ['HEAD_AUDITOR', 'ADMIN'], anyOf: true },
+  // maximum consignment per agent: the Sales Manager proposes, the Owner approves
+  AGENT_CONSIGNMENT_LIMIT: { roles: ['ADMIN'] },
+  // removing an outlet from the database: the Sales Manager asks, the Owner approves (only with no order in the last 3 months)
+  OUTLET_DELETE: { roles: ['ADMIN'] },
   /** A branch's cash deposit slip: the Audit Associate checks it first (the auditors and the Owner may too) ... */
   CASH_DEPOSIT_AUDIT: { roles: ['AUDIT_ASSOCIATE', 'HEAD_AUDITOR', 'ASST_AUDITOR', 'ADMIN'], anyOf: true },
   /** ... then the Accounting Associate (the Accounting Head and the Owner may too). */

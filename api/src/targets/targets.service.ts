@@ -125,7 +125,7 @@ export class TargetsService implements OnModuleInit {
     const ids = agents.map((a) => a.id);
     const { from, to, days } = monthRange(month);
     const today = todayManila();
-    const docs = await requestContext.runSystem(async () => await this.prisma.db.salesDoc.findMany({ where: { agentId: { in: ids }, voidedAt: null, docDate: { gte: from, lte: to } }, select: { id: true, docDate: true, drSiNo: true, customerName: true, grandTotal: true, paymentMode: true, channel: true, customer: { select: { name: true } }, location: { select: { name: true } } }, orderBy: { docDate: 'desc' } }));
+    const docs = await requestContext.runSystem(async () => await this.prisma.db.salesDoc.findMany({ where: { OR: [{ agentId: { in: ids } }, { outlet: { OR: [{ agentKey: user.id }, { shares: { some: { agentKey: user.id } } }] } }], voidedAt: null, docDate: { gte: from, lte: to } }, select: { id: true, docDate: true, drSiNo: true, customerName: true, grandTotal: true, paymentMode: true, channel: true, outlet: { select: { name: true } }, customer: { select: { name: true } }, location: { select: { name: true } } }, orderBy: { docDate: 'desc' } }));
     const ar = await requestContext.runSystem(async () => await this.prisma.db.salesDoc.findMany({ where: { agentId: { in: ids }, voidedAt: null, paymentMode: 'AR_PDC' }, select: { id: true, drSiNo: true, docDate: true, dueDate: true, grandTotal: true, amountPaid: true, pdcChequeNo: true, customerName: true, customer: { select: { name: true } }, location: { select: { name: true } } }, orderBy: { dueDate: 'asc' } }));
     const yearFrom = new Date(Date.UTC(from.getUTCFullYear(), 0, 1));
     const year = await requestContext.runSystem(async () => await this.prisma.db.salesDoc.findMany({ where: { agentId: { in: ids }, voidedAt: null, docDate: { gte: yearFrom, lte: to } }, select: { docDate: true, grandTotal: true } }));
@@ -136,7 +136,7 @@ export class TargetsService implements OnModuleInit {
     const elapsed = today < from ? 0 : today > to ? days : today.getUTCDate();
     return {
       linked: true, month, branches: [...new Set(agents.map((a) => a.locationId))].length, total, count: docs.length, target: target ? Number(target.amount) : null, achievedPct: target ? round2((total / Number(target.amount)) * 100) : null, pacePct: round2((elapsed / days) * 100), byMonth,
-      sales: docs.map((d) => ({ id: d.id, date: dateStr(d.docDate), branch: d.location.name, drSiNo: d.drSiNo, customer: d.customer?.name ?? d.customerName, channel: d.channel, paymentMode: d.paymentMode, amount: Number(d.grandTotal) })),
+      sales: docs.map((d) => ({ id: d.id, date: dateStr(d.docDate), branch: d.location.name, drSiNo: d.drSiNo, outlet: d.outlet?.name ?? null, customer: d.customer?.name ?? d.customerName, channel: d.channel, paymentMode: d.paymentMode, amount: Number(d.grandTotal) })),
       ar: ar.filter((d) => d.grandTotal.gt(d.amountPaid)).map((d) => ({ id: d.id, drSiNo: d.drSiNo, branch: d.location.name, customer: d.customer?.name ?? d.customerName, date: dateStr(d.docDate), dueDate: d.dueDate ? dateStr(d.dueDate) : null, daysToDue: d.dueDate ? Math.round((d.dueDate.getTime() - today.getTime()) / 86400000) : null, balance: round2(Number(d.grandTotal) - Number(d.amountPaid)), pdc: !!d.pdcChequeNo })),
     };
   }

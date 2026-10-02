@@ -25,7 +25,12 @@ export class NotificationsService {
     const users = await this.prisma.db.user.findMany({ where: { active: true, OR: [{ assignments: { some: { locationId } } }, { ownedFranchises: { some: { id: locationId } } }, ...(extraRoles.length ? [{ role: { key: { in: extraRoles } } }] : [])] }, select: { id: true } });
     await this.toUsers(users.map((u) => u.id), n);
   }
-  list(userId: string, unreadOnly = false) { return this.prisma.db.notification.findMany({ where: { userId, readAt: unreadOnly ? null : undefined }, orderBy: { createdAt: 'desc' }, take: 100 }); }
+  /** Newest first. A search matches every word typed (any order) in the title or the text, over all of the user's notifications, not just the latest. */
+  list(userId: string, unreadOnly = false, search?: string) {
+    const words = (search ?? '').trim().split(/\s+/).filter(Boolean).slice(0, 8);
+    const and = words.map((w) => ({ OR: [{ title: { contains: w, mode: 'insensitive' as const } }, { body: { contains: w, mode: 'insensitive' as const } }] }));
+    return this.prisma.db.notification.findMany({ where: { userId, readAt: unreadOnly ? null : undefined, AND: and }, orderBy: { createdAt: 'desc' }, take: words.length ? 300 : 100 });
+  }
   unreadCount(userId: string) { return this.prisma.db.notification.count({ where: { userId, readAt: null } }); }
   markRead(userId: string, ids?: string[]) { return this.prisma.db.notification.updateMany({ where: { userId, readAt: null, id: ids ? { in: ids } : undefined }, data: { readAt: new Date() } }); }
 

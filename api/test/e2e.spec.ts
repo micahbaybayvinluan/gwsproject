@@ -17,6 +17,7 @@ import { SalesService } from '../src/sales/sales.service';
 import { FranchiseArService } from '../src/franchise/franchise-ar.service';
 import { FranchiseShippingService } from '../src/franchise/franchise-shipping.service';
 import { ensurePlasticFranchisePrices } from '../src/pricing/plastic-prices';
+import { MonitorService } from '../src/agents/monitor.service';
 import { makePdf } from './pdf';
 
 const PW = process.env.SEED_PASSWORD || 'ChangeMe!2026';
@@ -65,6 +66,8 @@ async function resetTransactionalData() {
   await prisma.$executeRawUnsafe(`TRUNCATE cash_deposits, cash_deposit_extensions, hr_notices, sales_report_submissions`);
   await prisma.$executeRawUnsafe(`TRUNCATE ecom_orders, ecom_order_lines, ecom_settlements, ecom_returns, ecom_ad_spend, ecom_sku_maps, transfer_discrepancies, sales_targets, opening_ar_entries, agent_incentives`);
   await prisma.$executeRawUnsafe(`TRUNCATE replacement_receipts, replacement_tickets, franchise_shipping_charges, form_numbers_released, ecom_waybills, ecom_waybill_hints, franchise_payments, franchise_ar_adjustments, franchise_ar_extensions, franchise_invoices, memo_recipients, memos, six_pack_stickers, six_pack_redemptions CASCADE`);
+  await prisma.$executeRawUnsafe(`TRUNCATE outlet_changes, outlet_shares, itinerary_claims, itinerary_stops, itineraries, agent_consignment_limits, outlets, sales_areas CASCADE`);
+  await prisma.$executeRawUnsafe(`UPDATE consignment_agreements SET agent_key = NULL, agent_name = NULL, outlet_id = NULL`);
   await prisma.$executeRawUnsafe(`UPDATE locations SET credit_hold = false, credit_hold_note = NULL`);
   await prisma.$executeRawUnsafe(`UPDATE locations SET franchise_associate_receives = false, cash_deposit_max_days = 1`);
   await prisma.$executeRawUnsafe(`UPDATE cash_funds SET balance = imprest_amount`);
@@ -2384,5 +2387,191 @@ describe('E-commerce: TikTok "To ship" export without seller SKUs (owner request
     expect(doc.status).toBe('SUBMITTED'); expect(doc.picking.reduce((t: number, x: { qty: number }) => t + x.qty, 0)).toBe(4); // 2 orders × 2 units on one pick list
     const req = await prisma.approvalRequest.findFirstOrThrow({ where: { documentId: r2.pullOut.id, status: 'PENDING' } });
     expect(req.requiredApproverRoles).toContain('WAREHOUSE_IN_CHARGE');
+  });
+});
+
+
+describe('Agent field work: outlets, areas, itineraries with photos, consignments and their maximums (owner request 2026-10-02)', () => {
+  const today = () => new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);
+  const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
+  const note = async (username: string) => { const u = await prisma.user.findUniqueOrThrow({ where: { username } }); return (await prisma.notification.findMany({ where: { userId: u.id } })).map((n) => `${n.type}|${n.title}`); };
+  let jerickKey = ''; let twoKey = ''; let west = ''; let pid = ''; const outlet: Record<string, string> = {};
+  const photo = (u: string, type: string, id: string) => as(u).post(`/api/attachments/${type}/${id}`).attach('file', PNG, { filename: 'p.png', contentType: 'image/png' });
+
+  it('an agent uploads outlets (Excel / CSV), the Sales Manager approves them; only approved outlets can be tagged on a sale; the agent sees the orders of their outlets', async () => {
+    await prisma.salesReportSubmission.deleteMany({});
+    west = (await prisma.location.findUniqueOrThrow({ where: { code: 'WESTAVE' } })).id;
+    const jerick = await prisma.user.findUniqueOrThrow({ where: { username: 'agent.jerick' } }); jerickKey = jerick.id;
+    // a second agent (own account and listing) to test sharing and privacy
+    const { id: _id, ...rest } = jerick; void _id;
+    const two = await prisma.user.create({ data: { ...rest, username: `agent.two${run}`, email: `two${run}@x.test`, fullName: `Agent Two ${run}`, idNumber: null, totpSecret: null } });
+    await prisma.agent.create({ data: { name: `Agent Two ${run}`, locationId: west, userId: two.id } }); twoKey = two.id;
+    // upload: Excel / CSV, duplicates skipped, everything waits for the Sales Manager
+    const csv = `Name,Type,Address,City,Contact person,Phone,Email,Notes\nIron Temple ${run},GYM,1 Main St,Quezon City,Juan,0917111,juan@x.test,\nFit Hub ${run},GYM,2 Side St,Makati,Ana,0917222,ana@x.test,\nIron Temple ${run},GYM,1 Main St,Quezon City,,,,\n`;
+    const up = ok(await http.post('/api/field/outlets/import').set('Authorization', `Bearer ${tokens['agent.jerick']}`).attach('file', Buffer.from(csv), { filename: 'o.csv', contentType: 'text/csv' })).body;
+    expect(up.created).toBe(2); expect(up.skipped.length).toBe(1);
+    const mine = ok(await as('agent.jerick').get('/api/field/outlets')).body as { id: string; name: string; status: string; contactName: string; email: string }[];
+    for (const o of mine) { expect(o.status).toBe('PENDING'); outlet[o.name.split(' ')[0]] = o.id; }
+    expect(mine.find((o) => o.name.startsWith('Iron'))).toMatchObject({ contactName: 'Juan', email: 'juan@x.test' });
+    expect(await note('sales.manager')).toEqual(expect.arrayContaining([expect.stringMatching(/OUTLET_PENDING/)]));
+    ok(await photo('agent.jerick', 'Outlet', outlet.Iron));
+    expect((ok(await as('agent.jerick').get('/api/field/outlets')).body as { photoId: string | null; name: string }[]).find((o) => o.name.startsWith('Iron'))!.photoId).not.toBeNull();
+    // privacy: the other agent sees nothing of Jerick's; the Sales Manager, Head Auditor and Owner see all; a sales associate sees none
+    await login(`agent.two${run}`).catch(() => undefined);
+    for (const u of ['sales.manager', 'head.auditor', 'admin']) expect((ok(await as(u).get('/api/field/outlets')).body as unknown[]).length).toBeGreaterThanOrEqual(2);
+    await as('sales.westave').get('/api/field/outlets').expect(403);
+    await as('agent.jerick').post('/api/field/outlets/decide').send({ ids: [outlet.Iron], action: 'APPROVE' }).expect(403);
+    // a pending outlet cannot be tagged on a sale
+    const cats = ok(await as('admin').get('/api/categories')).body as { id: string; accountingClass: string }[];
+    pid = ok(await as('admin').post('/api/products').send({ name: `FLD Whey ${run}`, categoryId: cats.find((c) => c.accountingClass === 'SUPPLEMENT')!.id, prices: { RETAIL: 1000, AGENT: 900, FRANCHISE: 700 }, cost: 500 })).body.id;
+    const b = await prisma.batch.create({ data: { productId: pid, batchNo: `F-${run}`, receivedRef: 'TEST', unitCost: '500' } });
+    await prisma.stockLedger.create({ data: { locationId: west, productId: pid, batchId: b.id, qtyDelta: 40, movementType: 'RECEIVE', documentType: 'Opening', documentId: `F-${run}`, unitCost: '500', businessDate: new Date(`${today()}T00:00:00Z`) } });
+    await prisma.stockBalance.create({ data: { locationId: west, productId: pid, batchId: b.id, qty: 40 } });
+    const bad = await as('sales.westave').post('/api/sales').send({ channel: 'WALK_IN', paymentMode: 'CASH', drSiNo: `FLD-${run}-0`, outletId: outlet.Iron, lines: [{ productId: pid, qty: 1 }] }).expect(400);
+    expect(JSON.stringify(bad.body)).toMatch(/not approved/i);
+    ok(await as('sales.manager').post('/api/field/outlets/decide').send({ ids: [outlet.Iron, outlet.Fit], action: 'APPROVE' }));
+    expect(await note('agent.jerick')).toEqual(expect.arrayContaining([expect.stringMatching(/OUTLET_UPDATE/)]));
+    // the sales associate picks the agent, then the outlet; the sale carries the outlet
+    expect((ok(await as('sales.westave').get('/api/field/lookup/agents')).body as { key: string }[]).some((a) => a.key === jerickKey)).toBe(true);
+    expect((ok(await as('sales.westave').get(`/api/field/lookup?agentKey=${jerickKey}`)).body as { id: string }[]).map((o) => o.id)).toEqual(expect.arrayContaining([outlet.Iron, outlet.Fit]));
+    expect((ok(await as('sales.westave').get(`/api/field/lookup?agentKey=${twoKey}`)).body as unknown[]).length).toBe(0);
+    const sale = ok(await as('sales.westave').post('/api/sales').send({ channel: 'WALK_IN', paymentMode: 'CASH', drSiNo: `FLD-${run}-1`, outletId: outlet.Iron, lines: [{ productId: pid, qty: 2 }] })).body;
+    expect(sale.outlet.name).toContain('Iron Temple');
+    expect((await prisma.outlet.findUniqueOrThrow({ where: { id: outlet.Iron } })).stage).toBe('FIRST_ORDER');
+    const month = today().slice(0, 7);
+    const my = ok(await as('agent.jerick').get(`/api/targets/mine?month=${month}`)).body;
+    expect(my.sales.find((x: { drSiNo: string }) => x.drSiNo === `FLD-${run}-1`)).toMatchObject({ outlet: expect.stringContaining('Iron Temple') });
+    const detail = ok(await as('agent.jerick').get(`/api/field/outlets/${outlet.Iron}`)).body;
+    expect(detail.orders.length).toBe(1); expect(detail.orders[0].amount).toBe(2000);
+    expect((ok(await as('sales.manager').get('/api/sales')).body as { drSiNo: string; outlet?: { name: string } }[]).find((x) => x.drSiNo === `FLD-${run}-1`)!.outlet!.name).toContain('Iron');
+  });
+
+  it('areas assigned by the Sales Manager; an agent cannot change an approved outlet alone (the Sales Manager approves, the Owner is told); shared outlets; removal needs the Owner and no order in 3 months', async () => {
+    const area = ok(await as('sales.manager').post('/api/field/areas').send({ name: `Area ${run}`, agentKey: jerickKey })).body;
+    await as('agent.jerick').post('/api/field/areas').send({ name: 'X' }).expect(403);
+    ok(await as('sales.manager').post('/api/field/outlets/reassign').send({ ids: [outlet.Iron], areaId: area.id }));
+    expect(await note('admin')).toEqual(expect.arrayContaining([expect.stringMatching(/OUTLET_CHANGED/)]));
+    // agent change → waits; nothing changes until the Sales Manager approves; then the Owner is told what changed
+    const r = ok(await as('agent.jerick').post(`/api/field/outlets/${outlet.Iron}/change`).send({ phone: '0999000', contactName: 'Juan D.' })).body;
+    expect(r.applied).toBe(false);
+    expect((await prisma.outlet.findUniqueOrThrow({ where: { id: outlet.Iron } })).phone).toBe('0917111');
+    const ch = (ok(await as('sales.manager').get('/api/field/outlets/changes')).body as { id: string }[])[0];
+    await as('agent.jerick').post(`/api/field/outlets/changes/${ch.id}`).send({ action: 'APPROVE' }).expect(403);
+    const before = (await note('admin')).length;
+    ok(await as('sales.manager').post(`/api/field/outlets/changes/${ch.id}`).send({ action: 'APPROVE' }));
+    expect((await prisma.outlet.findUniqueOrThrow({ where: { id: outlet.Iron } })).phone).toBe('0999000');
+    const told = (await note('admin')).slice(before).join(' ');
+    expect(told).toMatch(/Iron Temple/); expect(told).toMatch(/OUTLET_CHANGED/);
+    // the Sales Manager edits directly; the Owner is told as well
+    expect(ok(await as('sales.manager').post(`/api/field/outlets/${outlet.Fit}/change`).send({ notes: 'opens late' })).body.applied).toBe(true);
+    // sharing: the other agent now sees it, tags and plans with it; unshare takes it away
+    await as(`agent.two${run}`).get(`/api/field/outlets/${outlet.Iron}`).expect(403).catch(() => undefined);
+    ok(await as('sales.manager').post(`/api/field/outlets/${outlet.Fit}/share`).send({ agentKey: twoKey, on: true }));
+    expect((ok(await as('sales.westave').get(`/api/field/lookup?agentKey=${twoKey}`)).body as { id: string }[]).map((o) => o.id)).toEqual([outlet.Fit]);
+    ok(await as('sales.manager').post(`/api/field/outlets/${outlet.Fit}/share`).send({ agentKey: twoKey, on: false }));
+    expect((ok(await as('sales.westave').get(`/api/field/lookup?agentKey=${twoKey}`)).body as unknown[]).length).toBe(0);
+    // removal: blocked with an order in the last 3 months; otherwise the Owner decides
+    const blocked = await as('sales.manager').post(`/api/field/outlets/${outlet.Iron}/delete`).send({}).expect(400);
+    expect(JSON.stringify(blocked.body)).toMatch(/last 3 months/);
+    await as('agent.jerick').post(`/api/field/outlets/${outlet.Fit}/delete`).send({}).expect(403);
+    ok(await as('sales.manager').post(`/api/field/outlets/${outlet.Fit}/delete`).send({}));
+    const req = await prisma.approvalRequest.findFirstOrThrow({ where: { type: 'OUTLET_DELETE', documentId: outlet.Fit, status: 'PENDING' } }); expect(req.requiredApproverRoles).toEqual(['ADMIN']);
+    expect((await prisma.outlet.findUniqueOrThrow({ where: { id: outlet.Fit } })).deletedAt).toBeNull();
+    ok(await as('admin').post(`/api/approvals/${req.id}/decide`).send({ decision: 'APPROVE' }));
+    expect((await prisma.outlet.findUniqueOrThrow({ where: { id: outlet.Fit } })).deletedAt).not.toBeNull();
+  });
+
+  it('itinerary: plan approved outlets, report a visit only with a photo and the location, a missed store needs the reason, submit the day; the Sales Manager, Head Auditor and Owner see the photos; claims go to the Sales Manager then Accounting', async () => {
+    const day = today();
+    const extra = ok(await as('agent.jerick').post('/api/field/outlets').send({ name: `Pending Gym ${run}`, city: 'Pasig' })).body;
+    const bad = await as('agent.jerick').post('/api/field/itinerary/plan').send({ date: day, outletIds: [extra.id] }).expect(400);
+    expect(JSON.stringify(bad.body)).toMatch(/approved/i);
+    ok(await as('sales.manager').post('/api/field/outlets/decide').send({ ids: [extra.id], action: 'APPROVE' }));
+    const plan = ok(await as('agent.jerick').post('/api/field/itinerary/plan').send({ date: day, outletIds: [outlet.Iron, extra.id] })).body;
+    expect(plan.stops.length).toBe(2);
+    // file upload of an itinerary for tomorrow
+    const tomorrow = new Date(Date.parse(`${day}T00:00:00Z`) + 86400e3).toISOString().slice(0, 10);
+    const imp = ok(await http.post('/api/field/itinerary/import').set('Authorization', `Bearer ${tokens['agent.jerick']}`).attach('file', Buffer.from(`Date,Outlet\n${tomorrow},Iron Temple ${run}\n${tomorrow},Unknown Gym\n`), { filename: 'i.csv', contentType: 'text/csv' })).body;
+    expect(imp.stops).toBe(1); expect(imp.unmatched).toEqual(['Unknown Gym']);
+    const [s1, s2] = plan.stops as { id: string; outletId: string }[];
+    // visited needs a photo first, then the location
+    expect(JSON.stringify((await as('agent.jerick').post(`/api/field/itinerary/stops/${s1.id}/report`).send({ status: 'VISITED', lat: 14.6, lng: 121 }).expect(400)).body)).toMatch(/photo/i);
+    ok(await photo('agent.jerick', 'ItineraryStop', s1.id));
+    expect(JSON.stringify((await as('agent.jerick').post(`/api/field/itinerary/stops/${s1.id}/report`).send({ status: 'VISITED' }).expect(400)).body)).toMatch(/location/i);
+    ok(await as('agent.jerick').post(`/api/field/itinerary/stops/${s1.id}/report`).send({ status: 'VISITED', lat: 14.6, lng: 121, shelfStatus: 'LOW_STOCK', competitors: 'Brand X' }));
+    await as('agent.jerick').post(`/api/field/itinerary/stops/${s2.id}/report`).send({ status: 'MISSED' }).expect(400);
+    expect(JSON.stringify((await as('agent.jerick').post('/api/field/itinerary/submit').send({ date: day }).expect(400)).body)).toMatch(/not reported/i);
+    ok(await as('agent.jerick').post(`/api/field/itinerary/stops/${s2.id}/report`).send({ status: 'MISSED', note: 'closed for renovation' }));
+    ok(await as('agent.jerick').post('/api/field/itinerary/submit').send({ date: day }));
+    await as('agent.jerick').post(`/api/field/itinerary/stops/${s2.id}/report`).send({ status: 'MISSED', note: 'again' }).expect(400); // submitted days are locked
+    // the first visit gave the outlet its pipeline step and, with no location typed, its GPS
+    // (Iron Temple was already at FIRST_ORDER: it never moves back)
+    expect((await prisma.outlet.findUniqueOrThrow({ where: { id: outlet.Iron } })).stage).toBe('FIRST_ORDER');
+    expect((await prisma.outlet.findUniqueOrThrow({ where: { id: outlet.Iron } })).lat).toBeCloseTo(14.6);
+    for (const u of ['sales.manager', 'head.auditor', 'admin']) {
+      const board = ok(await as(u).get(`/api/field/board?from=${day}&to=${day}`)).body;
+      const row = board.agents.find((a: { agentKey: string }) => a.agentKey === jerickKey); expect(row).toMatchObject({ planned: 2, visited: 1, missed: 1, visitRate: 50 });
+      const stop = board.days.flatMap((d: { stops: { id: string; photos: unknown[]; shelfStatus: string }[] }) => d.stops).find((x: { id: string }) => x.id === s1.id); expect(stop.photos.length).toBe(1); expect(stop.shelfStatus).toBe('LOW_STOCK');
+    }
+    await as('sales.westave').get('/api/field/board').expect(403);
+    await as('agent.jerick').post('/api/field/itinerary/plan').send({ date: '2020-01-01', outletIds: [] }).expect(400);
+    // scorecard and areas
+    const card = ok(await as('sales.manager').get(`/api/field/scorecard?month=${day.slice(0, 7)}&agentKey=${jerickKey}`)).body[0];
+    expect(card.visits.visited).toBe(1); expect(card.sales.total).toBeGreaterThanOrEqual(2000); expect(card.outlets.total).toBeGreaterThanOrEqual(2);
+    expect(ok(await as('agent.jerick').get(`/api/field/scorecard?month=${day.slice(0, 7)}`)).body.length).toBe(1);
+    const areas = ok(await as('sales.manager').get(`/api/field/areas/performance?month=${day.slice(0, 7)}`)).body; expect(areas.areas.find((a: { area: string }) => a.area === `Area ${run}`).sales).toBe(2000);
+    expect(ok(await as('sales.manager').get('/api/field/outlets/dormant')).body).toBeDefined();
+    expect((ok(await as('agent.jerick').get('/api/field/outlets/map')).body as { id: string }[]).some((p) => p.id === outlet.Iron)).toBe(true);
+    // claims: the agent claims, the Sales Manager approves, Accounting is told to pay
+    const c = ok(await as('agent.jerick').post('/api/field/claims').send({ date: day, kind: 'FUEL', amount: 350, note: 'Quezon City trip' })).body;
+    await as('agent.jerick').post(`/api/field/claims/${c.id}/decide`).send({ action: 'APPROVE' }).expect(403);
+    ok(await as('sales.manager').post(`/api/field/claims/${c.id}/decide`).send({ action: 'APPROVE' }));
+    expect(await note('acct.head')).toEqual(expect.arrayContaining([expect.stringMatching(/AGENT_CLAIM\|Pay .*350/)]));
+    // the daily alerts job runs
+    const daily = await app.get(MonitorService).runDaily(); expect(daily).toHaveProperty('unreported');
+  });
+
+  it('consignments: linked to an agent\'s outlet, a maximum per agent (and per outlet) set by the Sales Manager and approved by the Owner stops a consignment that would go over; the agent sees what they are responsible for', async () => {
+    const pending = async (type: string, where: Record<string, unknown> = {}) => (await prisma.approvalRequest.findFirst({ where: { type, status: 'PENDING', ...where }, orderBy: { createdAt: 'desc' } }))!;
+    const cn = ok(await as('admin').post('/api/consignment/consignees').send({ name: `Agent Gym ${run}`, priceBasis: 'SRP', settlementDays: 30 })).body;
+    await as('agent.jerick').post('/api/field/consignments/assign').send({ consigneeId: cn.id, outletId: outlet.Iron }).expect(403);
+    ok(await as('sales.manager').post('/api/field/consignments/assign').send({ consigneeId: cn.id, outletId: outlet.Iron }));
+    const send = async (qty: number) => { const t = ok(await as('sales.westave').post('/api/transfers').send({ fromLocationId: west, toLocationId: cn.id, transferType: 'CONSIGNMENT_OUT', lines: [{ productId: pid, qty }] })).body; return as('sales.westave').post(`/api/transfers/${t.id}/submit`); };
+    // no approved maximum yet: stopped
+    expect(JSON.stringify((await send(3)).body)).toMatch(/No maximum consignment/);
+    // the Sales Manager proposes 5,000; it waits for the Owner (only the Owner decides)
+    await as('agent.jerick').post('/api/field/consignments/limits').send({ agentKey: jerickKey, amount: 5000 }).expect(403);
+    const lim = ok(await as('sales.manager').post('/api/field/consignments/limits').send({ agentKey: jerickKey, amount: 5000 })).body; expect(lim.status).toBe('PENDING');
+    expect(JSON.stringify((await send(3)).body)).toMatch(/No maximum consignment/);
+    const req = await pending('AGENT_CONSIGNMENT_LIMIT', { documentId: lim.id }); expect(req.requiredApproverRoles).toEqual(['ADMIN']);
+    ok(await as('admin').post(`/api/approvals/${req.id}/decide`).send({ decision: 'APPROVE' }));
+    expect((await prisma.agentConsignmentLimit.findUniqueOrThrow({ where: { id: lim.id } })).status).toBe('APPROVED');
+    expect(await note('agent.jerick')).toEqual(expect.arrayContaining([expect.stringMatching(/CONSIGNMENT_LIMIT/)]));
+    // 3 × ₱1,000 is within 5,000; the transfer is submitted for the usual approvals
+    const ok1 = await send(3); expect(ok1.status).toBeLessThan(300);
+    const t1 = await prisma.transferDoc.findFirstOrThrow({ where: { toLocationId: cn.id, status: 'SUBMITTED' }, orderBy: { createdAt: 'desc' } });
+    ok(await as('asst.auditor').post(`/api/approvals/${(await pending('CONSIGNMENT_CHECK_BRANCH', { documentId: t1.id })).id}/decide`).send({ decision: 'APPROVE' }));
+    ok(await as('admin').post(`/api/approvals/${(await pending('CONSIGNMENT_OUT', { documentId: t1.id })).id}/decide`).send({ decision: 'APPROVE' }));
+    const mine = ok(await as('agent.jerick').get('/api/field/consignments/mine')).body;
+    expect(mine.outstanding).toBe(3000); expect(mine.limit).toBe(5000); expect(mine.headroom).toBe(2000); expect(mine.consignees[0].consignee).toContain('Agent Gym');
+    // going over the agent's maximum is stopped, with the numbers
+    expect(JSON.stringify((await send(3)).body)).toMatch(/over the approved maximum of ₱5,000\.00/);
+    // a separate maximum for the outlet applies too
+    const ol = ok(await as('sales.manager').post('/api/field/consignments/limits').send({ agentKey: jerickKey, outletId: outlet.Iron, amount: 3500 })).body;
+    ok(await as('admin').post(`/api/approvals/${(await pending('AGENT_CONSIGNMENT_LIMIT', { documentId: ol.id })).id}/decide`).send({ decision: 'APPROVE' }));
+    expect(JSON.stringify((await send(1)).body)).toMatch(/would take the outlet to ₱4,000\.00, over its approved maximum of ₱3,500\.00/); // within the agent's 5,000 but over the outlet's 3,500
+  });
+
+  it('the Warehouse Associate (and In-Charge) can record the warehouse\'s expenses; no cash fund at the warehouse', async () => {
+    const wh = (await prisma.location.findUniqueOrThrow({ where: { code: 'WH' } })).id;
+    for (const u of ['wh.assoc', 'wh.incharge']) {
+      const accts = ok(await as(u).get(`/api/expenses/accounts?locationId=${wh}`)).body as { id: string; class: string }[];
+      expect(accts.length).toBeGreaterThan(0);
+      ok(await as(u).get('/api/expenses'));
+      await as(u).post('/api/expenses').send({ locationId: wh, accountId: accts[0].id, amount: 10, paidFrom: 'PETTY_CASH' }).expect(403);
+    }
+    // main / office accounts stay with Accounting
+    const main = (ok(await as('acct.head').get('/api/expenses/accounts')).body as { id: string }[])[0];
+    await as('wh.assoc').post('/api/expenses').send({ accountId: main.id, amount: 1, paidFrom: 'BANK_ACCOUNT' }).expect(403);
   });
 });

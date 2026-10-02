@@ -99,6 +99,7 @@ Each section below starts with a hidden line that says which roles it is for. Th
 2. Choose the account. Only your branch's expense accounts are listed (for example "Meralco - West Ave").
 3. Type the amount and payee, and choose where the money came from: **Cash on hand** (sales cash not yet deposited; it cannot be more than the branch has, a notice pops up) or **Cash fund**.
 4. Save. Your expense gets a number like WA-EX-000001.
+- **Warehouse Associate and In-Charge** also record the warehouse's expenses here. The warehouse has no cash fund, so choose cash on hand, a bank account or an owner advance.
 - Direct cost accounts are not available to branch staff. Only the Accounting Associate and Accounting Head can use them; direct cost is generated from sales automatically.
 - Cash-drawer expenses reduce the cash for deposit in the Daily Close.
 
@@ -475,6 +476,42 @@ Each platform has its own tab, reports and accounts; nothing is mixed. E-commerc
 - An agent listed at several branches is one person: all their sales add up. The Sales Manager links each agent to their **Agent** account.
 - **My Sales (Agents):** own sales at every branch, own target and achievement, and customers who have not paid yet, nearest due first.
 - The Sales Manager and Agents never see cost, margin or supplier data.
+
+## Agent field work: outlets, itineraries, photos and consignments
+<!-- for: outlet.view.all, outlet.manage, agent.self -->
+**Outlets (menu: Outlets).** The gyms and stores an agent works with.
+1. **Agent:** press **+ Add an outlet** (name, type, address, city, **contact person, number, email**, a **picture**), or **Upload Excel / CSV** (press **Template** to get the columns: Name, Type, Address, City, Contact person, Phone, Email, Notes). A name already in the database is skipped.
+2. **Sales Manager:** **Waiting for approval** lists what the agents added; tick, then **Approve** or **Reject** (with the reason). Only approved outlets can be tagged on a sale or put in an itinerary.
+3. **Changes and removal:** after approval an agent cannot change an outlet alone: **Ask for a change** goes to the Sales Manager (**Change requests**), and the **Owner is notified of every change** that is approved or that the Sales Manager makes. Only the Sales Manager can ask to **Remove outlet**; the Owner approves, and only if the outlet has **no order in the last 3 months**.
+4. **Areas** (tab Areas): the Sales Manager creates areas and assigns each to an agent. An outlet can be moved to another area or agent, or **shared** with another agent (the first agent stays its owner).
+5. **Pipeline:** an outlet moves from Prospect to Visited (a reported visit), First order (a sale is tagged to it) and Regular (3 orders in 90 days); Sample given is set by the agent. The **Map** tab shows outlets that have a location.
+6. The Sales Manager, Head Auditor and Owner see every agent's outlets; an agent sees only their own and the ones shared with them.
+
+**My Itinerary (agents, best on the phone).**
+1. Choose the day, then **Plan the stores for this day** (tick your approved outlets) or **Upload itinerary file** (columns Date and Outlet).
+2. At each store press **Report this visit**: **take a photo** of the store (required; the time is kept with it), choose the shelf check (GWS on the shelf, low, out of stock, not carried), type competitor brands if any, then **Visited**. The phone sends your **location** with it, so allow location for the site. A store not visited is marked **Missed** with the reason.
+3. Press **Submit the report for this day** when every store is reported. A day that is submitted is locked.
+4. **Claims:** under the stores, claim fuel, transport or meals (receipt photo optional). The Sales Manager approves, then Accounting is told to pay.
+
+**Field Monitoring (Sales Manager, Head Auditor, Owner).**
+- **Daily itineraries & photos:** plan vs actual per agent, then each day's stores with the photo, time, location link, shelf check and notes.
+- **Agent scorecards:** visits, new outlets, sales against the target, unpaid invoices, consignment out against the maximum.
+- **Areas & top outlets**, **Outlets not ordering** (no order for 30 days or more) and **Fuel / transport claims** (the Sales Manager approves).
+- Every morning the Sales Manager is told of agents with no itinerary yesterday, visits not reported, consignments with no sales report for 15 / 30 / 60 days and maximums almost used; an agent with no plan for the day gets a reminder.
+
+**Agent Consignments.**
+1. **Sales Manager:** link each consignee account to the outlet (and so the agent) responsible for it.
+2. **Maximum:** the Sales Manager sets a **maximum for the agent (all outlets together)** and, if wanted, **for one outlet**; the **Owner approves** it in My Approvals. Consignment is valued at the retail price (SRP) of the stock still with the consignee.
+3. A consignment out that would take the agent (or the outlet) over the maximum is **stopped when it is submitted**, with the amounts shown. An agent with consignees but no approved maximum cannot be sent more until one is set.
+4. **Agent:** **My Consignments** shows what is at each consignee, what they still owe, the last sales report and how much of your maximum is used.
+
+## Tagging a sale to an agent's outlet
+<!-- for: sale.create, sale.create.warehouse -->
+In **New Sale**, under **Agent's outlet / gym (optional)**, pick the **agent** first and then one of that agent's **approved outlets**. The sale shows the outlet in the Sales list and the agent sees the order under My Sales and on the outlet. Tagging does not change the price or the agent's incentive. If the outlet is not listed, the agent uploads it under Outlets and the Sales Manager approves it first.
+
+## Searching your notifications
+<!-- for: notification.view -->
+On **Notifications**, type in the search bar to find the notifications about one item: a product, a DR / form number, a branch or a person. Every word you type must appear in the notification (in any order); the search looks through all your notifications, not only the latest ones.
 
 ## Opening AR: customer credit from before GWS-ERP
 <!-- for: ar.opening, approval.act.OPENING_AR, ar.view -->

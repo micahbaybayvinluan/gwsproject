@@ -44,6 +44,8 @@ export class ExpensesService {
     if (user.locationScoped && !user.locationIds.includes(locationId)) throw new ForbiddenException();
     if (!isMain && account.branchTagId && account.branchTagId !== locationId) throw new BadRequestException('Expense account belongs to another branch');
     if (input.amount <= 0) throw new BadRequestException('Amount must be positive');
+    // warehouse staff record the warehouse's expenses but have no cash fund (owner request 2026-10-02; fund access was removed earlier)
+    if (input.paidFrom === 'PETTY_CASH' && ['WAREHOUSE_ASSOCIATE', 'WAREHOUSE_IN_CHARGE'].includes(user.roleKey)) throw new ForbiddenException('The warehouse has no cash fund: choose cash on hand, a bank account or an owner advance');
     if ((input.paidFrom === 'BANK_ACCOUNT' || input.paidFrom === 'OWNER_ADVANCE') && !input.paidFromAccountId) throw new BadRequestException('paidFromAccountId required');
     const docDate = input.docDate ? toDateOnly(input.docDate) : todayManila();
     if (!isMain && (await this.closing.isClosed(locationId, docDate)) && !user.permissions.has('sale.edit.postclose')) throw new BadRequestException({ message: 'Day is closed; request a post-close edit', code: 'DAY_CLOSED' });

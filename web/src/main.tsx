@@ -22,6 +22,10 @@ import { WriteoffsPage } from './pages/Writeoffs';
 import { ConsignmentPage, ConsigneesPage } from './pages/Consignment';
 import { EcommercePage } from './pages/Ecommerce';
 import { MySalesPage, TargetsPage } from './pages/Targets';
+import { OutletsPage } from './pages/Outlets';
+import { ItineraryPage } from './pages/Itinerary';
+import { FieldMonitorPage } from './pages/FieldMonitor';
+import { AgentConsignmentsPage } from './pages/AgentConsignments';
 import { EcomPricesPage } from '@/pages/EcomPrices';
 import { FranchiseArPage } from '@/pages/FranchiseAr';
 import { MemosPage } from '@/pages/Memos';
@@ -92,6 +96,10 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
               <Route path="/ecommerce" element={<EcommercePage />} />
               <Route path="/targets" element={<TargetsPage />} />
               <Route path="/my-sales" element={<MySalesPage />} />
+              <Route path="/outlets" element={<OutletsPage />} />
+              <Route path="/itinerary" element={<ItineraryPage />} />
+              <Route path="/field" element={<FieldMonitorPage />} />
+              <Route path="/field/consignments" element={<AgentConsignmentsPage />} />
               <Route path="/incentives" element={<IncentivesPage />} />
               <Route path="/products" element={<ProductsPage />} />
               <Route path="/products/:id" element={<ProductDetailPage />} />

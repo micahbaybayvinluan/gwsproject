@@ -8,6 +8,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { AuditService } from '../common/audit.service';
 import { SettingsService } from '../common/settings.service';
 import { MasterService } from '../master/master.service';
+import { AgentConsignmentsService } from '../agents/agent-consignments.service';
 import { ChargesService } from '../charges/charges.service';
 import { FranchiseArService } from '../franchise/franchise-ar.service';
 import { PostingService } from '../gl/posting.service';
@@ -27,7 +28,7 @@ export interface TransferInput { endorseExpense?: boolean; fromLocationId?: stri
 /** §7.3 Transfers: one document, two views (Pull-Out for sender, Transfer-In for receiver). In-transit until receiver confirms. */
 @Injectable()
 export class TransfersService implements OnModuleInit {
-  constructor(private prisma: PrismaService, private seq: SequenceService, private stock: StockService, private approvals: ApprovalsService, private notify: NotificationsService, private audit: AuditService, private settings: SettingsService, private master: MasterService, private posting: PostingService, private charges: ChargesService, private franchiseAr: FranchiseArService) {}
+  constructor(private prisma: PrismaService, private seq: SequenceService, private stock: StockService, private approvals: ApprovalsService, private notify: NotificationsService, private audit: AuditService, private settings: SettingsService, private master: MasterService, private posting: PostingService, private charges: ChargesService, private franchiseAr: FranchiseArService, private agentConsign: AgentConsignmentsService) {}
 
   onModuleInit() {
     for (const t of ['TRANSFER_INTERNAL', 'TRANSFER_TO_FRANCHISE', 'CONSIGNMENT_OUT'] as ApprovalType[]) this.approvals.register(t, (req, outcome, actor) => this.onDecision(req.documentId, outcome, actor?.id ?? null));
@@ -192,6 +193,8 @@ export class TransfersService implements OnModuleInit {
     const doc = await this.prisma.db.transferDoc.findUniqueOrThrow({ where: { id }, include: TransfersService.INCLUDE });
     if (doc.status !== 'DRAFT') throw new BadRequestException('Only drafts can be submitted');
     if (!doc.lines.length) throw new BadRequestException('Add at least one item');
+    // a consignment to an agent's outlet may not go over the agent's (or the outlet's) approved maximum
+    if (doc.transferType === 'CONSIGNMENT_OUT') await this.agentConsign.assertWithinLimits(doc.toLocationId, doc.lines.map((l) => ({ productId: l.productId, qty: l.qtySent })));
     // goods leaving the warehouse on a Warehouse Associate's pull-out need the In-Charge first
     const preparer = await this.prisma.db.user.findUnique({ where: { id: doc.preparedBy ?? requestedBy }, select: { role: { select: { key: true } } } });
     if (!skipInCharge && doc.fromLocation.type === 'WAREHOUSE' && preparer?.role.key === 'WAREHOUSE_ASSOCIATE') {

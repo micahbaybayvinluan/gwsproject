@@ -1,5 +1,8 @@
 # Wheysted members: more ways to learn about customers and boost sales
 
+> **Status (2026-10-06): all 23 ideas below are built.** See the *Wheysted member program* section of the User Guide and decisions D122–D128. Messenger, Viber and WhatsApp are click-to-chat lists for the staff (no paid sending service); automatic SMS / email need SMTP / Semaphore set up; automatic messages are off until the Owner switches them on (back-in-stock is on).
+
+
 Recommended in this order (the first group needs almost no extra work from staff).
 
 ## 1. Use what we already collect (next to build)

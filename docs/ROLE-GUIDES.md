@@ -582,6 +582,12 @@ You follow the sales of every branch, agent and e-commerce platform, and you set
 1. **Wheysted Members:** every member with what they buy, how often, how much and when they last bought. Click a title to sort, use the filter under it, or choose a segment (VIP, Frequent, At risk, Lapsed, New, Never bought, Birthday). **Who bought this item** lists the customers of one item. **Make members from my sales** turns the customers already in your sales into members.
 2. **Email & SMS:** choose the audience (members, or everyone in the database; a segment; those who bought an item), **Count who will receive it**, write the message with {firstName}, send a test to yourself, then **Prepare campaign** and **Send**. Unsubscribed people are left out automatically.
 
+**Member program** (menu: Wheysted Members)
+1. **Top spenders:** call the best customers who have not been contacted for 30 days and press **Log a call**.
+2. **Insights:** when customers buy (heat-map), where members come from, and how many sales carry a member by branch and by associate. **Feedback:** ratings and comments; low ratings arrive as notifications.
+3. **Member prices** and **Program rules** (points, tiers, vouchers, automatic birthday / win-back / re-order / rating messages: switch on what you want). **Lost sales:** what customers asked for and we did not have.
+4. **Campaigns** also make WhatsApp / Viber / Messenger lists for the staff, can give each person a voucher, and show who bought afterwards.
+
 **Outlets, itineraries and consignments of your agents** (menus: Outlets, Field Monitoring, Agent Consignments)
 1. **Outlets → Waiting for approval:** the outlets the agents uploaded (with contact person, number, email, picture). Tick and **Approve**, or **Reject** with the reason. Only approved outlets can be tagged on sales and itineraries.
 2. **Outlets → Change requests:** an agent cannot change an approved outlet alone; approve or reject their request. The Owner is told of every change.

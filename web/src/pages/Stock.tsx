@@ -65,7 +65,7 @@ export function ExpiryPage() {
   </div>;
 }
 
-interface DaysRow { location: { id: string; name: string }; product: { sku: string; name: string; brand: string | null }; onHand: number; sold: number; avgPerDay: number; daysLeft: number | null; level: string; runsOutOn: string | null; suggestedQty: number; warehouseAvailable: number }
+interface DaysRow { location: { id: string; name: string }; product: { sku: string; name: string; brand: string | null }; onHand: number; sold: number; avgPerDay: number; daysLeft: number | null; level: string; runsOutOn: string | null; suggestedQty: number; warehouseAvailable: number; asked: number }
 const LEVEL: Record<string, { label: string; tone: 'red' | 'amber' | 'blue' | 'green' | 'slate' }> = { OUT: { label: 'Out', tone: 'red' }, CRITICAL: { label: 'Critical', tone: 'red' }, LOW: { label: 'Low', tone: 'amber' }, WATCH: { label: 'Watch', tone: 'blue' }, OK: { label: 'Enough', tone: 'green' }, NO_SALES: { label: 'No sales', tone: 'slate' } };
 
 /** How many days each item will last at its average daily sales (owner request 2026-10-02): the most critical first, searchable per column. */
@@ -86,7 +86,7 @@ function DaysOfStock({ locationId }: { locationId: string }) {
       { header: 'On hand', accessorKey: 'onHand' }, { header: `Sold (${d?.days ?? days} days)`, accessorKey: 'sold' }, { header: 'Avg / day', accessorKey: 'avgPerDay' },
       { header: 'Days left', accessorFn: (r) => (r.daysLeft == null ? '' : String(r.daysLeft)), cell: (c) => { const r = c.row.original; return r.level === 'OUT' ? <b className="text-red-700">0</b> : r.daysLeft == null ? <span className="text-slate-400">—</span> : <b className={r.daysLeft <= 7 ? 'text-red-700' : r.daysLeft <= 14 ? 'text-amber-700' : ''}>{r.daysLeft}</b>; } },
       { header: 'Level', accessorFn: (r) => LEVEL[r.level]?.label ?? r.level, cell: (c) => { const l = LEVEL[c.row.original.level]; return <Badge tone={l?.tone ?? 'slate'}>{l?.label ?? c.row.original.level}</Badge>; } },
-      { header: 'Runs out about', accessorFn: (r) => r.runsOutOn ?? '' }, { header: `Restock to cover ${d?.cover ?? cover} days`, accessorFn: (r) => (r.suggestedQty ? String(r.suggestedQty) : '') }, { header: 'Warehouse has', accessorKey: 'warehouseAvailable' },
+      { header: 'Runs out about', accessorFn: (r) => r.runsOutOn ?? '' }, { header: `Restock to cover ${d?.cover ?? cover} days`, accessorFn: (r) => (r.suggestedQty ? String(r.suggestedQty) : '') }, { header: 'Warehouse has', accessorKey: 'warehouseAvailable' }, { header: 'Customers asked (not available)', accessorFn: (r) => (r.asked ? String(r.asked) : ''), cell: (c) => (c.row.original.asked ? <b className="text-amber-700">{c.row.original.asked}</b> : '') },
     ]} />
     <p className="mt-2 text-xs text-slate-500">Days left = on hand ÷ average daily sales over the period (sales less returns; the warehouse also counts its e-commerce pull-outs). Levels: Out = no stock but still selling; Critical = 7 days or less; Low = 8–14; Watch = 15–30; Enough = over 30. Out comes first, then the fewest days left; items with stock and no sales are last. Per location, only sales recorded at that location count; tick “All locations together” for the company-wide days.</p>
   </Card>;

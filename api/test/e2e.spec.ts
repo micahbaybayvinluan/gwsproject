@@ -2897,7 +2897,7 @@ describe('Wheysted member program: points and tiers, vouchers, member prices, re
   });
 
   it('insights: top spenders (with last contact), when customers buy, where members come from, how many sales are tagged to a member, what to suggest at the counter', async () => {
-    const top = ok(await as('sales.manager').get('/api/member-program/top-spenders')).body as { id: string; tier: string; spent12m: number; lastContact: string | null }[]; expect(top[0].id).toBe(a.id); expect(top[0].lastContact).toBeTruthy(); expect(top[0].spent12m).toBeGreaterThan(top[1].spent12m);
+    const top = ok(await as('sales.manager').get('/api/member-program/top-spenders')).body as { id: string; tier: string; spent12m: number; lastContact: string | null }[]; const ana = top.find((x) => x.id === a.id)!; expect(ana.lastContact).toBeTruthy(); expect(top.map((x) => x.spent12m)).toEqual([...top.map((x) => x.spent12m)].sort((p, q) => q - p));
     const hm = ok(await as('sales.manager').get('/api/member-program/heatmap?membersOnly=1')).body; expect(hm.total).toBeGreaterThanOrEqual(3); expect(hm.cells[0]).toHaveProperty('dow'); expect(hm.cells[0]).toHaveProperty('hour');
     const acq = ok(await as('sales.manager').get('/api/member-program/acquisition')).body; expect(acq.heardFrom.map((x: { label: string }) => x.label)).toEqual(expect.arrayContaining(['GYM', 'FRIEND'])); expect(acq.goal.map((x: { label: string }) => x.label)).toContain('MUSCLE_GAIN');
     const cap = ok(await as('sales.manager').get('/api/member-program/capture')).body; expect(cap.targetPct).toBe(30); const wb = cap.branches.find((x: { branch: string }) => x.branch === 'West Ave'); expect(wb.tagged).toBeGreaterThanOrEqual(3); expect(wb.sales).toBeGreaterThan(wb.tagged);

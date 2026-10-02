@@ -268,6 +268,14 @@ Waybill Report → **Choose waybill PDF files** (TikTok or Shopee labels) → pi
 87. **Members list** (`sales.manager`): Wheysted Members: sort by Spent, filter a column, choose a segment, open a member (QR card, favorites, purchases); **Who bought this item**; **Make members from my sales**.
 88. **Member page** (a phone browser, `/member`): Become a member with a new mobile number; open **My card** (QR) and **My purchases** after the counter tags a sale; sign out and sign in again. A member made at the counter signs up with their member number to claim the account.
 89. **Campaigns** (`sales.manager`): Email & SMS: choose a segment, **Count who will receive it**, type a message with {firstName}, **Prepare campaign**, **Send**. Without SMTP / Semaphore settings the result is "not configured" (nothing is sent).
+90. **Profile and referral** (`sales.westave`, then a phone browser at `/member`): New Sale → + New member (add goal and gym in Wheysted Members → Edit later). On `/member` sign up a second person typing the first member's number under "Referred by". Tag a sale to the second member: both get a ₱100 voucher (Wheysted Members → open the member → Vouchers).
+91. **Points and vouchers** (`sales.manager`, `sales.westave`): Wheysted Members → Program rules (set ₱ per point, tiers) → open a member → **Give voucher** ₱100. At New Sale pick the member: tap the voucher, add a supplement, Review: the total drops by ₱100. Try to use it again (refused). Void the sale (`admin`): the voucher is back.
+92. **Member price** (`sales.manager`): Wheysted Members → Member prices → add an item at a lower price. At New Sale a tagged member gets that price by itself; a walk-in does not.
+93. **Lost sale and back in stock** (`sales.westave`, phone): New Sale → "Customer asked for an item we didn't have". On `/member` → Shop press "tell me when available" on an out-of-stock item. Receive stock, then Program rules → **Run the automatic messages now** (message is "not configured" without SMTP / Semaphore).
+94. **Reserve** (phone): `/member` → Shop → Reserve 1 for pick-up. `sales.westave` opens Member Reservations → Ready → Picked up.
+95. **Rating** (phone): `/member` → Purchases → Rate this purchase → 2 stars with a comment. `sales.manager` sees a notification and a complaint note; Wheysted Members → Feedback.
+96. **Insights** (`sales.manager`): Top spenders (Log a call), Insights (heat-map, capture rate), Lost sales; Expiry & Low Stock shows the "Customers asked" column.
+97. **Chat campaign** (`sales.manager`): Campaigns → Win-back voucher quick start → WhatsApp → Prepare → open it → Send → "Open WhatsApp + copy message" on one row. Open the campaign later: Results show who bought and vouchers used.
 
 ## Where the files come out
 

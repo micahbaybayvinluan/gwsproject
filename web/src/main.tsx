@@ -29,6 +29,8 @@ import { AgentConsignmentsPage } from './pages/AgentConsignments';
 import { MembersPage } from './pages/Members';
 import { CampaignsPage } from './pages/Campaigns';
 import { PortalPage } from './pages/Portal';
+import { SurveyPage } from './pages/Survey';
+import { ReservationsPage } from './pages/MemberProgram';
 import { EcomPricesPage } from '@/pages/EcomPrices';
 import { FranchiseArPage } from '@/pages/FranchiseAr';
 import { MemosPage } from '@/pages/Memos';
@@ -74,6 +76,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           <Routes>
             <Route path="/login" element={<LoginPage />} />
             <Route path="/member" element={<PortalPage />} />
+            <Route path="/survey" element={<SurveyPage />} />
             <Route element={<Guard><Layout /></Guard>}>
               <Route path="/" element={<DashboardPage />} />
               <Route path="/approvals" element={<ApprovalsPage />} />
@@ -102,6 +105,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
               <Route path="/my-sales" element={<MySalesPage />} />
               <Route path="/members" element={<MembersPage />} />
               <Route path="/campaigns" element={<CampaignsPage />} />
+              <Route path="/reservations" element={<ReservationsPage />} />
               <Route path="/outlets" element={<OutletsPage />} />
               <Route path="/itinerary" element={<ItineraryPage />} />
               <Route path="/field" element={<FieldMonitorPage />} />

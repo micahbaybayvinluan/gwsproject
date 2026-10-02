@@ -7,6 +7,8 @@ import { ApprovalsService } from '../approvals/approvals.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AuditService } from '../common/audit.service';
 import { MasterService } from '../master/master.service';
+import { PostingService } from '../gl/posting.service';
+import { r11ReplacementCost, r11bReplacementDifference, r12SupplierReturn, r12bSupplierOffset } from '../gl/posting-rules';
 import { ReceivingService } from '../receiving/receiving.service';
 import { dateStr, daysBetween, todayManila } from '../common/manila';
 import { D, round2 } from '../common/money';
@@ -33,7 +35,7 @@ const peso = (x: Prisma.Decimal.Value) => `₱${D(x).toNumber().toLocaleString('
  */
 @Injectable()
 export class ReplacementsService implements OnModuleInit {
-  constructor(private prisma: PrismaService, private seq: SequenceService, private stock: StockService, private approvals: ApprovalsService, private notify: NotificationsService, private audit: AuditService, private master: MasterService, private receiving: ReceivingService) {}
+  constructor(private prisma: PrismaService, private seq: SequenceService, private stock: StockService, private approvals: ApprovalsService, private notify: NotificationsService, private audit: AuditService, private master: MasterService, private receiving: ReceivingService, private posting: PostingService) {}
 
   onModuleInit() {
     this.approvals.register('REPLACEMENT_TICKET', (r, outcome, actor) => this.onReplacementDecision(r.documentId, outcome, actor?.id ?? null, actor?.note), 'ReplacementTicket');
@@ -68,7 +70,7 @@ export class ReplacementsService implements OnModuleInit {
   async findDr(q: string) {
     const text = q.trim(); if (text.length < 2) return [];
     return requestContext.runSystem(async () => {
-      const docs = await this.prisma.db.salesDoc.findMany({ where: { voidedAt: null, location: { type: { not: 'FRANCHISE' } }, OR: [{ drSiNo: { contains: text, mode: 'insensitive' } }, { controlNo: { contains: text, mode: 'insensitive' } }, { customerName: { contains: text, mode: 'insensitive' } }, { customerPhone: { contains: text } }] }, include: { location: { select: { id: true, name: true } }, customer: { select: { name: true } }, lines: { include: { product: { select: { id: true, sku: true, name: true } } } } }, orderBy: { docDate: 'desc' }, take: 8 });
+      const docs = await this.prisma.db.salesDoc.findMany({ where: { voidedAt: null, location: { type: { not: 'FRANCHISE' } }, OR: [{ drSiNo: { contains: text, mode: 'insensitive' } }, { controlNo: { contains: text, mode: 'insensitive' } }, { customerName: { contains: text, mode: 'insensitive' } }, { customerPhone: { contains: text } }, { customer: { name: { contains: text, mode: 'insensitive' } } }] }, include: { location: { select: { id: true, name: true } }, customer: { select: { name: true } }, lines: { include: { product: { select: { id: true, sku: true, name: true } } } } }, orderBy: { docDate: 'desc' }, take: 8 });
       const used = await this.prisma.db.replacementTicket.groupBy({ by: ['salesLineId'], where: { kind: 'CUSTOMER', status: { not: 'CANCELLED' }, salesLineId: { in: docs.flatMap((d) => d.lines.map((l) => l.id)) } }, _sum: { qty: true } });
       const prep = await this.prisma.db.user.findMany({ where: { id: { in: docs.map((d) => d.preparedBy) } }, select: { id: true, fullName: true } });
       return docs.map((d) => ({ id: d.id, controlNo: d.controlNo, drSiNo: d.drSiNo, date: dateStr(d.docDate), branch: d.location.name, customer: d.customer?.name ?? d.customerName ?? null, phone: d.customerPhone, preparedBy: prep.find((p) => p.id === d.preparedBy)?.fullName ?? null, outsideWindow: daysBetween(d.docDate, todayManila()) > REPLACEMENT_WINDOW_DAYS,
@@ -135,7 +137,13 @@ export class ReplacementsService implements OnModuleInit {
       const t = await this.prisma.db.replacementTicket.findUniqueOrThrow({ where: { id } });
       if (t.status !== 'REPLACED') return;
       if (outcome === 'APPROVED') {
-        await this.prisma.db.replacementTicket.update({ where: { id }, data: { status: 'CLOSED', closedAt: new Date() } });
+        // books the cost of the replacement given: Dr Replacement Cost / Cr the branch's inventory, at the cost of the batches it came from
+        const picks = (t.replacementPicks as unknown as { batchId: string; qty: number; unitCost: string }[] | null) ?? [];
+        const prod = t.replacementProductId ? await this.prisma.db.product.findUnique({ where: { id: t.replacementProductId }, select: { category: { select: { accountingClass: true } } } }) : null;
+        await this.prisma.db.$transaction(async (tx) => {
+          await tx.replacementTicket.update({ where: { id }, data: { status: 'CLOSED', closedAt: new Date() } });
+          if (t.replacedLocationId && prod) await this.posting.post(tx, { type: 'ReplacementTicket', id, date: todayManila(), createdBy: actorId }, (r) => r11ReplacementCost(r, { locationId: t.replacedLocationId!, ref: t.ticketNo, lines: picks.map((p) => ({ accountingClass: prod.category.accountingClass, qty: p.qty, unitCost: p.unitCost })) }));
+        });
         await this.tell({ type: 'REPLACEMENT_CLOSED', title: `${t.ticketNo} (DR ${t.drSiNo}) approved by the Head Auditor and closed`, link: this.link(id) }, await this.involved(t));
         return;
       }
@@ -157,7 +165,15 @@ export class ReplacementsService implements OnModuleInit {
     if (t.differenceSettledAt) throw new BadRequestException('Already settled');
     const allowed = user.permissions.has('replacement.view') || (user.permissions.has('replacement.create') && (!user.locationScoped || user.locationIds.includes(t.replacedLocationId ?? '')));
     if (!allowed) throw new ForbiddenException('Only the branch that gave the replacement (or the auditors / Accounting) confirms this');
-    await requestContext.runSystem(() => this.prisma.db.replacementTicket.update({ where: { id }, data: { differenceSettledAt: new Date(), differenceSettledBy: user.id, differenceNote: input.note ?? t.differenceNote } }));
+    await requestContext.runSystem(async () => {
+      const sale = t.salesDocId ? await this.prisma.db.salesDoc.findUnique({ where: { id: t.salesDocId }, include: { customer: { select: { id: true, type: true } } } }) : null;
+      // a sale on credit (a dealer, an agent): the difference goes to that customer's receivable; otherwise it is cash at the branch that gave the replacement
+      const onCredit = sale?.paymentMode === 'AR_PDC' && sale.customer ? { type: sale.customer.type, id: sale.customer.id } : sale?.paymentMode === 'AR_PDC' && sale.agentId ? { type: 'AGENT', id: sale.agentId } : null;
+      await this.prisma.db.$transaction(async (tx) => {
+        await tx.replacementTicket.update({ where: { id }, data: { differenceSettledAt: new Date(), differenceSettledBy: user.id, differenceNote: input.note ?? t.differenceNote } });
+        if (t.replacedLocationId) await this.posting.post(tx, { type: 'ReplacementTicket', id, date: todayManila(), createdBy: user.id }, (r) => r11bReplacementDifference(r, { locationId: t.replacedLocationId!, ref: t.ticketNo, amount: t.priceDifference!, channel: sale?.channel ?? 'WALK_IN', counterparty: onCredit }));
+      });
+    });
     await this.audit.log({ action: 'SETTLE_DIFFERENCE', entityType: 'ReplacementTicket', entityId: id, after: { by: user.id, note: input.note } });
     const d = D(t.priceDifference);
     await this.tell({ type: 'REPLACEMENT_SETTLED', title: `${t.ticketNo}: the price difference ${peso(d.abs())} was ${d.gt(0) ? 'collected from' : 'refunded / credited to'} the customer (confirmed by ${user.fullName})`, link: this.link(id) }, await this.involved(t));
@@ -204,6 +220,8 @@ export class ReplacementsService implements OnModuleInit {
         const picks = await this.stock.pickFefo(tx, t.locationId, t.productId, t.qty, { preferBatchId: t.batchId ?? undefined, exactBatchId: t.batchId ?? undefined, allowExpired: true });
         await this.stock.post(tx, picks.map((p) => ({ locationId: t.locationId, productId: t.productId, batchId: p.batchId, qtyDelta: -p.qty, movementType: 'RETURN_TO_SUPPLIER' as const, documentType: 'ReplacementTicket', documentId: t.id, unitCost: p.unitCost, businessDate: todayManila(), createdBy: actorId ?? undefined })));
         await tx.replacementTicket.update({ where: { id }, data: { status: 'AWAITING_REPLACEMENT', sentAt: new Date() } });
+        const prod = await tx.product.findUniqueOrThrow({ where: { id: t.productId }, select: { category: { select: { accountingClass: true } } } });
+        await this.posting.post(tx, { type: 'ReplacementTicket', id, date: todayManila(), createdBy: actorId }, (r) => r12SupplierReturn(r, { locationId: t.locationId, ref: t.ticketNo, lines: picks.map((p) => ({ accountingClass: prod.category.accountingClass, qty: p.qty, unitCost: p.unitCost })) }));
       });
       await this.tell({ type: 'SUPPLIER_RETURN_APPROVED', title: `${t.ticketNo} approved: the items left for the supplier. The ticket stays open until the replacement items arrive.`, link: this.link(id) }, [t.createdBy]);
     });
@@ -217,6 +235,7 @@ export class ReplacementsService implements OnModuleInit {
       const t = await this.prisma.db.replacementTicket.findUnique({ where: { id: doc.replacementTicketId } });
       if (!t || !['AWAITING_REPLACEMENT', 'PARTIAL'].includes(t.status)) return;
       await this.prisma.db.$transaction(async (tx) => {
+        const sentValue = (await tx.stockLedger.findMany({ where: { documentType: 'ReplacementTicket', documentId: t.id, movementType: 'RETURN_TO_SUPPLIER' }, select: { qtyDelta: true, unitCost: true } })).reduce((s, r) => s.plus(D(r.unitCost).mul(-r.qtyDelta)), D(0));
         for (const l of doc.lines) {
           const qty = l.qty + l.freeQty; if (qty <= 0) continue;
           await tx.replacementReceipt.upsert({ where: { ticketId_receivingDocId_productId: { ticketId: t.id, receivingDocId: doc.id, productId: l.productId } }, create: { ticketId: t.id, receivingDocId: doc.id, productId: l.productId, qty, unitCost: l.unitCost ?? 0 }, update: { qty } });
@@ -224,6 +243,9 @@ export class ReplacementsService implements OnModuleInit {
         const all = await tx.replacementReceipt.findMany({ where: { ticketId: t.id } });
         const receivedQty = all.reduce((s, r) => s + r.qty, 0); const receivedValue = all.reduce((s, r) => s.plus(D(r.unitCost).mul(r.qty)), D(0));
         const closed = receivedQty >= t.qty;
+        // the arrival clears the receivable up to what we sent (a delivery worth more leaves the rest payable; worth less leaves a balance the supplier still owes)
+        const clearedBefore = D(t.receivedValue).lt(sentValue) ? D(t.receivedValue) : sentValue; const clearedNow = receivedValue.lt(sentValue) ? receivedValue : sentValue;
+        await this.posting.post(tx, { type: 'ReplacementTicket', id: t.id, date: doc.docDate, createdBy: null }, (r) => r12bSupplierOffset(r, { supplierId: doc.supplierId, ref: `${t.ticketNo} / ${doc.controlNo}`, amount: clearedNow.minus(clearedBefore) }));
         await tx.replacementTicket.update({ where: { id: t.id }, data: { receivedQty, receivedValue: receivedValue.toFixed(2), status: closed ? 'CLOSED' : 'PARTIAL', closedAt: closed ? new Date() : null, priceDifference: closed ? receivedValue.minus(D(t.unitValue).mul(t.qty)).toFixed(2) : null } });
       });
       const fresh = await this.prisma.db.replacementTicket.findUniqueOrThrow({ where: { id: t.id } });

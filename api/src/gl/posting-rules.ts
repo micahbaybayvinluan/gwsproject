@@ -134,6 +134,40 @@ export function r9bStockExpense(r: AccountResolver, e: { fromLocationId: string;
   const entry: Entry = { rule: 'R9', book: 'GASTOS_DC', lines: consolidate(lines), remarks: `${e.destinationCode === 'BO-BAD' ? 'Bad orders' : 'Marketing'} stock expense ${e.controlNo}` };
   assertBalanced(entry.lines); return [entry];
 }
+/**
+ * Replacement tickets (owner request 2026-10-02).
+ * Customer: the replacement given leaves the branch's inventory at cost and is expensed (the original sale stays as it was; the returned item is not capitalised).
+ */
+export function r11ReplacementCost(r: AccountResolver, e: { locationId: string; ref: string; lines: CostLine[] }): Entry[] {
+  const lines: Line[] = [];
+  for (const l of e.lines) { const amt = D(l.unitCost).mul(l.qty); if (amt.isZero()) continue; lines.push(dr(r.global('REPLACEMENT_EXPENSE'), amt)); lines.push(cr(r.branch(inventoryTemplateFor(l.accountingClass), e.locationId), amt)); }
+  if (!lines.length) return [];
+  const entry: Entry = { rule: 'R11', book: 'GASTOS_DC', lines: consolidate(lines), remarks: `Replacement given ${e.ref}` };
+  assertBalanced(entry.lines); return [entry];
+}
+/** The price difference of a replacement: a positive amount is owed by the customer (cash, or the customer's AR on a credit sale); a negative amount is given back (refund, or credit on the AR). */
+export function r11bReplacementDifference(r: AccountResolver, e: { locationId: string; ref: string; amount: Decimal.Value; channel: string; counterparty?: { type: string; id?: string | null } | null }): Entry[] {
+  const amt = D(e.amount); if (amt.isZero()) return [];
+  const settle = e.counterparty ? r.ar(e.counterparty, e.locationId) : r.branch('CASH_ON_HAND', e.locationId);
+  // a refund / credit reduces sales through the company-wide Sales - Returns account
+  const lines = amt.gt(0) ? [dr(settle, amt), cr(r.branch(salesTemplateFor(e.channel), e.locationId), amt)] : [dr(r.global('SALES_RETURNS'), amt.abs()), cr(settle, amt.abs())];
+  const entry: Entry = { rule: 'R11', book: 'BENTA', lines: consolidate(lines), remarks: `Replacement price difference ${e.ref}` };
+  assertBalanced(entry.lines); return [entry];
+}
+/** Items we return to a supplier leave inventory at cost and become a receivable from that supplier until its replacement arrives. */
+export function r12SupplierReturn(r: AccountResolver, e: { locationId: string; ref: string; lines: CostLine[] }): Entry[] {
+  const lines: Line[] = [];
+  for (const l of e.lines) { const amt = D(l.unitCost).mul(l.qty); if (amt.isZero()) continue; lines.push(dr(r.global('SUPPLIER_RETURNS_RECEIVABLE'), amt)); lines.push(cr(r.branch(inventoryTemplateFor(l.accountingClass), e.locationId), amt)); }
+  if (!lines.length) return [];
+  const entry: Entry = { rule: 'R12', book: 'GENERAL', lines: consolidate(lines), remarks: `Returned to supplier ${e.ref}` };
+  assertBalanced(entry.lines); return [entry];
+}
+/** The replacement arrived (its delivery was booked Dr Inventory / Cr AP): the part that replaces the returned items clears the receivable against what we owe for that delivery. */
+export function r12bSupplierOffset(r: AccountResolver, e: { supplierId: string | null; ref: string; amount: Decimal.Value }): Entry[] {
+  const amt = D(e.amount); if (amt.lte(0)) return [];
+  const entry: Entry = { rule: 'R12', book: 'GENERAL', lines: consolidate([dr(r.ap(e.supplierId), amt), cr(r.global('SUPPLIER_RETURNS_RECEIVABLE'), amt)]), remarks: `Replacement received, clears returned items ${e.ref}` };
+  assertBalanced(entry.lines); return [entry];
+}
 // ── R6 transfer between company locations ──
 export function r6Transfer(r: AccountResolver, e: { fromLocationId: string; toLocationId: string; controlNo: string; lines: CostLine[]; shortfall?: { accountingClass: string; qty: number; unitCost: Decimal.Value; charged?: boolean }[] }): Entry[] {
   const lines: Line[] = [];

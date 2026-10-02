@@ -2261,6 +2261,8 @@ describe('Replacement tickets: customer returns and returns to suppliers (owner 
     sup2 = sup;
   });
 
+  const lines = async (type: string, id: string) => (await prisma.journalVoucher.findMany({ where: { sourceDocumentType: type, sourceDocumentId: id }, include: { lines: { include: { account: true } } } })).flatMap((v) => v.lines.map((l) => ({ title: l.account.title, dr: Number(l.debit), cr: Number(l.credit) })));
+  const bal = (ls: { dr: number; cr: number }[]) => ls.reduce((t, l) => t + l.dr, 0) === ls.reduce((t, l) => t + l.cr, 0);
   it('a customer return opens a ticket tied to the DR; any other branch ticks it with a replacement; the price difference is worked out; the Head Auditor approves; everyone concerned is told', async () => {
     await as('fr.mayon.owner').get(`/api/replacements/find-dr?q=${dr}`).expect(403); // franchises do not use tickets
     const found = ok(await as('sales.csr').get(`/api/replacements/find-dr?q=${dr}`)).body as { drSiNo: string; branch: string; customer: string; lines: { lineId: string; product: string; qty: number; available: number }[] }[];
@@ -2282,9 +2284,15 @@ describe('Replacement tickets: customer returns and returns to suppliers (owner 
     for (const u of ['head.auditor', 'acct.assoc', 'admin', 'sales.westave', 'sales.csr']) expect(await notes(u), u).toContain('REPLACEMENT_DONE');
     const req = await prisma.approvalRequest.findFirstOrThrow({ where: { type: 'REPLACEMENT_TICKET', documentId: t.id, status: 'PENDING' } });
     await as('sales.dasma').post(`/api/approvals/${req.id}/decide`).send({ decision: 'APPROVE' }).expect(403);
+    ok(await as('admin').put('/api/settings').send({ 'gl.auto_posting_enabled': true }));
     ok(await as('head.auditor').post(`/api/approvals/${req.id}/decide`).send({ decision: 'APPROVE' }));
     expect(ok(await as('head.auditor').get(`/api/replacements/${t.id}`)).body.status).toBe('CLOSED');
+    // the cost of the 2 replacements (B at ₱600) is expensed against Dasmariñas' inventory
+    let j = await lines('ReplacementTicket', t.id); expect(bal(j)).toBe(true); expect(j.find((x) => /Replacement Cost/.test(x.title))?.dr).toBe(1200); expect(j.some((x) => /Inventory/.test(x.title) && x.cr === 1200)).toBe(true);
     ok(await as('sales.dasma').post(`/api/replacements/${t.id}/settle`).send({ note: 'paid in cash' }));
+    // the ₱400 the customer paid: Dr Cash on Hand / Cr Sales
+    j = await lines('ReplacementTicket', t.id); expect(bal(j)).toBe(true); expect(j.some((x) => /Cash on Hand/i.test(x.title) && x.dr === 400)).toBe(true); expect(j.some((x) => /^Sales/.test(x.title) && x.cr === 400)).toBe(true);
+    ok(await as('admin').put('/api/settings').send({ 'gl.auto_posting_enabled': false }));
     await as('sales.dasma').post(`/api/replacements/${t.id}/settle`).send({}).expect(400);
     expect(await notes('acct.head')).toContain('REPLACEMENT_SETTLED');
     // not approved: the stock goes back and the ticket is open again
@@ -2311,8 +2319,11 @@ describe('Replacement tickets: customer returns and returns to suppliers (owner 
     for (const u of ['head.auditor', 'acct.head', 'admin']) expect(await notes(u), u).toContain('SUPPLIER_RETURN_OPENED');
     await as('wh.incharge').post('/api/replacements/supplier').send({ productId: a, qty: 500, supplierId: sup, reason: 'DEFECTIVE' }).expect(400); // not enough stock
     const req = await prisma.approvalRequest.findFirstOrThrow({ where: { type: 'SUPPLIER_RETURN', documentId: t.id, status: 'PENDING' } });
+    ok(await as('admin').put('/api/settings').send({ 'gl.auto_posting_enabled': true }));
     ok(await as('head.auditor').post(`/api/approvals/${req.id}/decide`).send({ decision: 'APPROVE' }));
     expect(await onHand(wh, a)).toBe(before - 5);
+    // 5 × ₱500 leaves inventory and becomes a receivable from suppliers
+    let j = await lines('ReplacementTicket', t.id); expect(bal(j)).toBe(true); expect(j.find((x) => /Receivable from Suppliers/.test(x.title))?.dr).toBe(2500);
     expect(ok(await as('wh.incharge').get(`/api/replacements/${t.id}`)).body.status).toBe('AWAITING_REPLACEMENT');
     const receive = async (supplierId: string, product: string, qty: number, ticketId: string) => {
       const r = await as('wh.incharge').post('/api/receiving').send({ supplierId, supplierRef: `REPL-${++n}`, replacementTicketId: ticketId, lines: [{ productId: product, qty, expiryDate: '2028-06-30', batchNo: `RP${n}-${run}` }] });
@@ -2332,6 +2343,10 @@ describe('Replacement tickets: customer returns and returns to suppliers (owner 
     await receive(sup, b, 2, t.id); // a different product: value 3×500 + 2×600 = 2,700 against 5×500 = 2,500
     cur = ok(await as('head.auditor').get(`/api/replacements/${t.id}`)).body;
     expect(cur.status).toBe('CLOSED'); expect(cur.receivedQty).toBe(5); expect(Number(cur.priceDifference)).toBe(200);
+    // the arrivals clear the receivable against AP, up to what we sent (2,500); the extra ₱200 stays payable
+    j = await lines('ReplacementTicket', t.id); expect(bal(j)).toBe(true);
+    expect(j.filter((x) => /Receivable from Suppliers/.test(x.title)).reduce((n, x) => n + x.dr - x.cr, 0)).toBe(0);
+    ok(await as('admin').put('/api/settings').send({ 'gl.auto_posting_enabled': false }));
     for (const u of ['wh.incharge', 'head.auditor', 'acct.head', 'admin']) expect(await notes(u), u).toContain('SUPPLIER_REPLACEMENT_CLOSED');
     const sum = ok(await as('acct.head').get('/api/replacements/summary')).body; expect(sum.suppliers.find((x: { code: string }) => x.code === `RTS-${run}`).openTickets).toBe(0);
     await as('sales.westave').get('/api/replacements/summary').expect(403);

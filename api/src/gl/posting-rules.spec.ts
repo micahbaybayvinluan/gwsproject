@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import Decimal from 'decimal.js';
-import { AccountResolver, MissingAccountError, assertBalanced, computeNetPay, r10Deposit, r10Expense, r10FundReplenish, r10FundSetup, r13Remittance, r11ChargeForm, r11PayrollDeduction, r12Revaluation, r13PayrollClose, r13PayrollFinalize, r14Depreciation, r1Receiving, r3r4Sale, r4Collection, r5CostOfSale, r6Transfer, r7FranchiseTransfer, r8ConsignOut, r8ConsigneeSale, r9Writeoff, Entry } from './posting-rules';
+import { r11ReplacementCost, r11bReplacementDifference, r12SupplierReturn, r12bSupplierOffset, AccountResolver, MissingAccountError, assertBalanced, computeNetPay, r10Deposit, r10Expense, r10FundReplenish, r10FundSetup, r13Remittance, r11ChargeForm, r11PayrollDeduction, r12Revaluation, r13PayrollClose, r13PayrollFinalize, r14Depreciation, r1Receiving, r3r4Sale, r4Collection, r5CostOfSale, r6Transfer, r7FranchiseTransfer, r8ConsignOut, r8ConsigneeSale, r9Writeoff, Entry } from './posting-rules';
 
 /** In-memory resolver: account id = `${template}@${location}` or `G:${key}`. */
 const r: AccountResolver = {
@@ -111,5 +111,28 @@ describe('posting rules §10.4', () => {
     const [f] = r10FundReplenish(r, { locationId: 'L1', amount: 1200, ref: 'x' }); expect(dr(f, 'PETTY_CASH@L1')).toBe(1200); expect(cr(f, 'CASH_ON_HAND@L1')).toBe(1200);
     const [g] = r10FundSetup(r, { locationId: 'L1', amount: 5000, fromAccountId: 'BANK', ref: 'setup' }); expect(cr(g, 'BANK')).toBe(5000);
     const [m] = r13Remittance(r, { kind: 'SSS', amount: 5000, paymentAccountId: 'BANK', ref: '2026-09' }); expect(dr(m, 'G:SSS_PAYABLE')).toBe(5000); expect(cr(m, 'BANK')).toBe(5000);
+  });
+});
+
+describe('replacement tickets (owner request 2026-10-02)', () => {
+  it('customer replacement: the cost of what was given is expensed against the branch inventory', () => {
+    const es = r11ReplacementCost(r, { locationId: 'B1', ref: 'RT-1', lines: [{ accountingClass: 'SUPPLEMENT', qty: 2, unitCost: 600 }] });
+    balanced(es); expect(dr(es[0], 'G:REPLACEMENT_EXPENSE')).toBe(1200); expect(cr(es[0], 'INV_SUPPLEMENTS@B1')).toBe(1200);
+  });
+  it('price difference: the customer pays (cash, or the AR of a credit sale) or is refunded / credited', () => {
+    const pay = r11bReplacementDifference(r, { locationId: 'B1', ref: 'RT-1', amount: 400, channel: 'WALK_IN' });
+    balanced(pay); expect(dr(pay[0], 'CASH_ON_HAND@B1')).toBe(400); expect(cr(pay[0], 'SALES_WALK_IN@B1')).toBe(400);
+    const credit = r11bReplacementDifference(r, { locationId: 'B1', ref: 'RT-1', amount: 400, channel: 'DEALER', counterparty: { type: 'DEALER', id: 'D1' } });
+    expect(dr(credit[0], 'AR_DEALER@D1')).toBe(400); expect(cr(credit[0], 'SALES_DEALER@B1')).toBe(400);
+    const refund = r11bReplacementDifference(r, { locationId: 'B1', ref: 'RT-1', amount: -150, channel: 'WALK_IN' });
+    balanced(refund); expect(dr(refund[0], 'G:SALES_RETURNS')).toBe(150); expect(cr(refund[0], 'CASH_ON_HAND@B1')).toBe(150);
+    expect(r11bReplacementDifference(r, { locationId: 'B1', ref: 'x', amount: 0, channel: 'WALK_IN' })).toEqual([]);
+  });
+  it('return to supplier: inventory becomes a receivable from suppliers; the replacement delivery clears it against AP', () => {
+    const out = r12SupplierReturn(r, { locationId: 'WH', ref: 'RT-2', lines: [{ accountingClass: 'SUPPLEMENT', qty: 5, unitCost: 500 }] });
+    balanced(out); expect(dr(out[0], 'G:SUPPLIER_RETURNS_RECEIVABLE')).toBe(2500); expect(cr(out[0], 'INV_SUPPLEMENTS@WH')).toBe(2500);
+    const back = r12bSupplierOffset(r, { supplierId: 'S1', ref: 'RT-2', amount: 2500 });
+    balanced(back); expect(dr(back[0], 'AP@S1')).toBe(2500); expect(cr(back[0], 'G:SUPPLIER_RETURNS_RECEIVABLE')).toBe(2500);
+    expect(r12bSupplierOffset(r, { supplierId: 'S1', ref: 'x', amount: 0 })).toEqual([]);
   });
 });

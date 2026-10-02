@@ -25,7 +25,7 @@
 | # | Recommendation | Why |
 |---|---|---|
 | 1 | **Disposition of the returned item** (restock if fine, send to the supplier, dispose as expense): the Head Auditor chooses when approving a customer replacement; "send to supplier" opens the supplier ticket by itself. | The item the customer returned has to go somewhere; today it is outside the stock. |
-| 2 | **Journals:** replacement difference (sales / refund), returned stock to suppliers (receivable from supplier), loss when a supplier refuses. | So the books follow the tickets; today only the stock and the tickets are recorded. |
+| 2 | **Credit note / refusal:** when a supplier refuses to replace, Accounting writes off the remaining receivable (or records the supplier's credit note) and the ticket closes with the reference. | The receivable from suppliers otherwise stays open. |
 | 3 | **Credit note instead of replacement** when a supplier will not replace (Accounting records it; the ticket closes with the credit note number). | Some suppliers only give credit. |
 | 4 | **Photo required** for every ticket and a **warranty window per product** (30 days for supplements, other for equipment), over the window needing the Head Auditor. | Evidence and fewer disputes. |
 | 5 | **Supplier scorecard** each month: tickets, units returned, average days to replace, units still owed, cost of refusals. Review with the supplier. | Negotiating leverage. |
@@ -35,3 +35,16 @@
 | 9 | **Monthly review** by the Head Auditor of tickets older than 14 days and of customers with repeated returns. | Detect abuse and quality problems. |
 
 Marketing and bad-order (BO) give-outs are a separate process: see "Marketing and BO pull-outs" in the user guide.
+
+## 4. Accounting entries (✔ built; they post when Admin has switched on automatic journal posting)
+
+| Step | Debit | Credit |
+|---|---|---|
+| Customer replacement approved by the Head Auditor | Replacement Cost - Customer Returns (at the cost of the batches given) | Inventory of the branch that gave it |
+| Price difference settled, customer pays | Cash on Hand of that branch (or the customer's AR on a credit sale: dealer, agent) | Sales of the DR's channel |
+| Price difference settled, refund / credit | Sales - Returns | Cash on Hand (or the customer's AR) |
+| Return to supplier approved | Receivable from Suppliers - Returned Items | Inventory of the sender, at cost |
+| Replacement delivery posted (normal delivery entry) | Inventory | Accounts Payable - supplier |
+| ...and the part that replaces what we sent | Accounts Payable - supplier | Receivable from Suppliers - Returned Items |
+
+A replacement delivery worth more than what we sent leaves the extra payable to the supplier; one worth less leaves a receivable balance the supplier still owes. The item a customer returned is not put back into inventory (conservative); the original sale stays as it was.

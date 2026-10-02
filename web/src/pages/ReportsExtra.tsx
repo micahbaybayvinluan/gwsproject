@@ -6,6 +6,7 @@ import { api, fmtDate, peso, today } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { Badge, Button, Card, Empty, ErrorBox, Field, Input, Modal, Select, Textarea } from '@/components/ui/primitives';
 import { DataTable } from '@/components/ui/table';
+import { Searchable } from '@/components/Searchable';
 
 const firstOfMonth = () => `${today().slice(0, 8)}01`;
 
@@ -68,12 +69,12 @@ export function CustomersReportPage() {
     {tab === 'followups' && <Card title="Customers who may have finished their supplements" actions={<Select value={status} onChange={(e) => setStatus(e.target.value)}><option value="">To call (due and upcoming)</option><option value="CONTACTED">Contacted</option><option value="DISMISSED">Dismissed</option></Select>}>
       <p className="mb-3 text-sm text-slate-600">Each product can have <b>days to consume</b> (set on the product). When a customer with a contact number or email buys it, the store is reminded on the day it is probably finished. {me?.roleKey === 'ADMIN' ? 'Edit the SMS / email message and automatic sending in Settings.' : ''}</p>
       {sent && <p className="mb-2 text-sm text-slate-700">{sent}</p>}
-      {fu.data?.length ? <div className="overflow-x-auto"><table className="w-full text-sm"><thead className="text-left text-xs uppercase tracking-wide text-slate-500"><tr><th className="py-2">Customer</th><th>Bought</th><th>Store</th><th>Probably finished</th><th>Status</th><th /></tr></thead><tbody>{fu.data.map((x) => <tr key={x.id} className="border-t align-top">
+      {fu.data?.length ? <div className="overflow-x-auto"><Searchable><table className="w-full text-sm"><thead className="text-left text-xs uppercase tracking-wide text-slate-500"><tr><th className="py-2">Customer</th><th>Bought</th><th>Store</th><th>Probably finished</th><th>Status</th><th /></tr></thead><tbody>{fu.data.map((x) => <tr key={x.id} className="border-t align-top">
         <td className="py-2"><div className="font-medium">{x.customerName || '—'}</div><div className="text-xs text-slate-500">{x.phone && <a className="text-brand underline" href={`tel:${x.phone.replace(/\s/g, '')}`}>{x.phone}</a>}{x.phone && x.email ? ' · ' : ''}{x.email}</div></td>
         <td>{x.qty}× {x.product}</td><td>{x.store}</td>
         <td className={x.due && x.status !== 'CONTACTED' ? 'font-semibold text-brand-dark' : ''}>{fmtDate(x.dueDate)}</td>
         <td><Badge tone={x.status === 'CONTACTED' ? 'green' : x.status === 'NOTIFIED' ? 'amber' : x.status === 'DISMISSED' ? 'slate' : 'blue'}>{x.status === 'PENDING' ? 'upcoming' : x.status.toLowerCase()}</Badge>{x.smsSentAt && <div className="text-xs text-slate-500">SMS sent</div>}{x.emailSentAt && <div className="text-xs text-slate-500">email sent</div>}</td>
-        <td className="whitespace-nowrap text-right">{canSend && x.status !== 'DISMISSED' && <>{x.phone && <Button size="sm" variant="outline" onClick={() => void openCompose(x, 'SMS')}>SMS</Button>} {x.email && <Button size="sm" variant="outline" onClick={() => void openCompose(x, 'EMAIL')}>Email</Button>} {x.status !== 'CONTACTED' && <Button size="sm" onClick={() => upd.mutate({ id: x.id, status: 'CONTACTED' })}>Contacted</Button>} <Button size="sm" variant="ghost" onClick={() => upd.mutate({ id: x.id, status: 'DISMISSED' })}>Dismiss</Button></>}</td></tr>)}</tbody></table></div> : <Empty>No customers to call.</Empty>}
+        <td className="whitespace-nowrap text-right">{canSend && x.status !== 'DISMISSED' && <>{x.phone && <Button size="sm" variant="outline" onClick={() => void openCompose(x, 'SMS')}>SMS</Button>} {x.email && <Button size="sm" variant="outline" onClick={() => void openCompose(x, 'EMAIL')}>Email</Button>} {x.status !== 'CONTACTED' && <Button size="sm" onClick={() => upd.mutate({ id: x.id, status: 'CONTACTED' })}>Contacted</Button>} <Button size="sm" variant="ghost" onClick={() => upd.mutate({ id: x.id, status: 'DISMISSED' })}>Dismiss</Button></>}</td></tr>)}</tbody></table></Searchable></div> : <Empty>No customers to call.</Empty>}
     </Card>}
     {compose && <Modal title={compose.channel === 'SMS' ? 'Send SMS' : 'Send email'} onClose={() => setCompose(null)}>
       <Field label="To"><Input value={compose.to} onChange={(e) => setCompose({ ...compose, to: e.target.value })} /></Field>

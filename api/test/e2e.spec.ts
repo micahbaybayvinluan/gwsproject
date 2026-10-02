@@ -1783,6 +1783,11 @@ describe('Owner requests 2026-09-30 (pricing, 6-Pack Card, franchise receivables
     expect(sum.today.cards).toBe(1); expect(Number(sum.today.amount)).toBe(300); expect(sum.today.stickers).toBe(6);
     expect(ok(await as('sales.westave').get('/api/dashboard')).body.sixPack.stickers).toBe(6);
     expect(ok(await as('sales.westave').get(`/api/expenses?locationId=${west}&from=${today()}&to=${today()}`)).body.some((e: { id: string }) => e.id === r.expenseId)).toBe(true);
+    // search the lists (owner request 2026-10-02): by customer, mobile or card number; the period totals do not change
+    const found = ok(await as('sales.westave').get('/api/six-pack/summary?search=maria%20santos')).body;
+    expect(found.redemptions.length).toBeGreaterThanOrEqual(1); expect(found.stickers.length).toBeGreaterThanOrEqual(1); expect(found.period.cards).toBe(sum.period.cards);
+    expect(ok(await as('sales.westave').get('/api/six-pack/summary?search=0917123')).body.stickers.length).toBeGreaterThanOrEqual(1);
+    const none = ok(await as('sales.westave').get('/api/six-pack/summary?search=nobodyhere')).body; expect(none.redemptions.length).toBe(0); expect(none.stickers.length).toBe(0);
     await as('sales.dasma').get('/api/six-pack/summary?locationId=' + west).expect(403); // another branch
     expect(ok(await as('head.auditor').get('/api/six-pack/summary')).body.period.cards).toBeGreaterThanOrEqual(1);
     ok(await as('sales.westave').post(`/api/sales/${s2.id}/void`).send({ reason: 'customer changed mind' }));

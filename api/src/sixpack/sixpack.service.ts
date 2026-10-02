@@ -172,7 +172,7 @@ export class SixPackService implements OnModuleInit {
   }
 
   /** The store's 6-Pack picture: for the dashboard and the page. */
-  async summary(user: SessionUser, q: { locationId?: string; from?: string; to?: string }) {
+  async summary(user: SessionUser, q: { locationId?: string; from?: string; to?: string; search?: string }) {
     const all = user.permissions.has('sixpack.view.all');
     const locationId = q.locationId || (all ? undefined : this.scopeLocation(user));
     if (locationId) this.scopeLocation(user, locationId);
@@ -193,12 +193,15 @@ export class SixPackService implements OnModuleInit {
     // the DRs come from stickers already limited to the branch the person may see
     const sales = await requestContext.runSystem(async () => await this.prisma.db.salesDoc.findMany({ where: { id: { in: stickers.map((s) => s.saleId) } }, select: { id: true, drSiNo: true } }));
     const locs = await this.prisma.db.location.findMany({ where: { id: { in: [...new Set([...stickers.map((s) => s.locationId), ...reds.map((r) => r.locationId)])] } }, select: { id: true, name: true } });
+    // search (owner request 2026-10-02): every typed word must appear in the customer, mobile, email, DR / SI, card number, branch, associate or date
+    const ws = (q.search ?? '').toLowerCase().split(/\s+/).filter(Boolean); const cap = ws.length ? 500 : 100;
+    const hit = (fields: (string | null | undefined)[]) => { if (!ws.length) return true; const h = fields.filter(Boolean).join(' ').toLowerCase(); return ws.every((w) => h.includes(w)); };
     return { perCard, value, from: dateStr(from), to: dateStr(to), locationId: locationId ?? null,
       today: { stickers: todayS.reduce((t, s) => t + s.stickers, 0), dr: todayS.length, cards: todayR.length, amount: todayR.reduce((t, r) => t.plus(r.amount), D(0)) },
       period: { stickers: stickers.reduce((t, s) => t + s.stickers, 0), dr: stickers.length, cards: reds.length, amount: reds.reduce((t, r) => t.plus(r.amount), D(0)), legacy: reds.filter((r) => r.legacyCardNo).length },
       nearCard: near.sort((a, b) => b.left - a.left).slice(0, 15),
-      stickers: stickers.slice(0, 100).map((s) => ({ id: s.id, date: dateStr(s.businessDate), branch: locs.find((l) => l.id === s.locationId)?.name ?? '', drSiNo: sales.find((x) => x.id === s.saleId)?.drSiNo ?? '', customer: s.customerName, phone: s.phone, stickers: s.stickers, by: nm(s.issuedBy) })),
-      redemptions: reds.slice(0, 100).map((r) => ({ id: r.id, controlNo: r.controlNo, date: dateStr(r.businessDate), branch: locs.find((l) => l.id === r.locationId)?.name ?? '', customer: r.customerName, phone: r.phone, email: r.email, address: r.address, amount: r.amount, legacyCardNo: r.legacyCardNo, by: nm(r.redeemedBy) })) };
+      stickers: stickers.filter((s) => hit([s.customerName, s.phone, s.email, sales.find((x) => x.id === s.saleId)?.drSiNo, locs.find((l) => l.id === s.locationId)?.name, nm(s.issuedBy), dateStr(s.businessDate)])).slice(0, cap).map((s) => ({ id: s.id, date: dateStr(s.businessDate), branch: locs.find((l) => l.id === s.locationId)?.name ?? '', drSiNo: sales.find((x) => x.id === s.saleId)?.drSiNo ?? '', customer: s.customerName, phone: s.phone, stickers: s.stickers, by: nm(s.issuedBy) })),
+      redemptions: reds.filter((r) => hit([r.customerName, r.phone, r.email, r.address, r.controlNo, r.legacyCardNo, locs.find((l) => l.id === r.locationId)?.name, nm(r.redeemedBy), dateStr(r.businessDate)])).slice(0, cap).map((r) => ({ id: r.id, controlNo: r.controlNo, date: dateStr(r.businessDate), branch: locs.find((l) => l.id === r.locationId)?.name ?? '', customer: r.customerName, phone: r.phone, email: r.email, address: r.address, amount: r.amount, legacyCardNo: r.legacyCardNo, by: nm(r.redeemedBy) })) };
   }
 }
 

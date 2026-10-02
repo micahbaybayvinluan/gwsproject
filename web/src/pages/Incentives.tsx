@@ -4,6 +4,7 @@ import { useSearchParams } from 'react-router-dom';
 import { api, peso, today } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { Badge, Button, Card, Empty, ErrorBox, Field, Input, Modal, Select } from '@/components/ui/primitives';
+import { Searchable } from '@/components/Searchable';
 
 interface Incentive { id: string; month: string; agentName: string; branches: string[]; transactions: number; totalSales: number; collected: number; ratePct: number | null; amount: number; notes: string | null; status: string; formNo: string | null; decisionNote: string | null; preparedByName?: string | null; hrSignedByName?: string | null; releasedByName?: string | null; releaseMode: string | null; releaseReference: string | null; releaseDate: string | null; releaseAccount?: string | null }
 interface AgentMonth { agentKey: string; name: string; branches: string[]; linkedUser: string | null; transactions: number; totalSales: number; collected: number; unpaid: number; incentive: Incentive | null }
@@ -38,19 +39,19 @@ export function IncentivesPage() {
     </ol></Card>
 
     {can('incentive.prepare') && <Card title={`Agents' sales in ${month}`}>
-      {agents.data?.length ? <div className="overflow-x-auto"><table className="w-full text-sm"><thead className="text-left text-xs uppercase tracking-wide text-slate-500"><tr><th className="py-1">Agent</th><th>Branches</th><th className="num">DR/SI</th><th className="num">Total sales</th><th className="num">Collected</th><th className="num">Unpaid</th><th>Incentive</th></tr></thead>
+      {agents.data?.length ? <div className="overflow-x-auto"><Searchable><table className="w-full text-sm"><thead className="text-left text-xs uppercase tracking-wide text-slate-500"><tr><th className="py-1">Agent</th><th>Branches</th><th className="num">DR/SI</th><th className="num">Total sales</th><th className="num">Collected</th><th className="num">Unpaid</th><th>Incentive</th></tr></thead>
         <tbody>{agents.data.map((a) => { const v = input[a.agentKey] ?? { rate: '', amount: '', notes: '' }; const calc = v.amount ? Number(v.amount) : v.rate ? Math.round(a.totalSales * Number(v.rate)) / 100 : null; return <tr key={a.agentKey} className="border-t align-top">
           <td className="py-2 font-medium">{a.name}{a.linkedUser && <div className="text-xs font-normal text-slate-500">account: {a.linkedUser}</div>}</td><td className="text-xs text-slate-600">{a.branches.join(', ')}</td><td className="num">{a.transactions}</td><td className="num font-semibold">{peso(a.totalSales)}</td><td className="num">{peso(a.collected)}</td><td className="num">{a.unpaid > 0 ? <span className="text-amber-700">{peso(a.unpaid)}</span> : '—'}</td>
           <td>{a.incentive ? <div><Badge tone={STATUS[a.incentive.status]?.tone}>{STATUS[a.incentive.status]?.label}</Badge><div className="text-xs text-slate-600">{peso(a.incentive.amount)}{a.incentive.formNo ? ` · ${a.incentive.formNo}` : ''}</div></div>
             : a.totalSales > 0 ? <div className="flex flex-wrap items-center gap-1"><Input className="w-20" type="number" step="0.01" placeholder="%" value={v.rate} onChange={(e) => set(a.agentKey, 'rate', e.target.value)} aria-label={`Rate for ${a.name}`} /><span className="text-xs text-slate-400">or ₱</span><Input className="w-28" type="number" step="0.01" placeholder="amount" value={v.amount} onChange={(e) => set(a.agentKey, 'amount', e.target.value)} aria-label={`Amount for ${a.name}`} /><Button size="sm" disabled={!calc || prepare.isPending} onClick={() => prepare.mutate(a)}>Confirm {calc ? peso(calc) : ''}</Button></div>
-            : <span className="text-xs text-slate-400">no sales</span>}</td></tr>; })}</tbody></table></div>
+            : <span className="text-xs text-slate-400">no sales</span>}</td></tr>; })}</tbody></table></Searchable></div>
         : <Empty>No agents.</Empty>}
       <p className="mt-2 text-xs text-slate-500">Total sales are every DR/SI of the agent at every branch in the month (voided ones excluded). Type the incentive as a % of sales or as an amount, then press Confirm: it goes to the Accounting Associate, the Accounting Head and the Owner.</p>
       <ErrorBox error={prepare.error} />
     </Card>}
 
     <Card title="Incentive forms">
-      {rows.length ? <div className="overflow-x-auto"><table className="w-full text-sm"><thead className="text-left text-xs uppercase tracking-wide text-slate-500"><tr><th className="py-1">Form #</th><th>Agent</th><th className="num">Total sales</th><th className="num">Incentive</th><th>Status</th><th>Release</th><th /></tr></thead>
+      {rows.length ? <div className="overflow-x-auto"><Searchable><table className="w-full text-sm"><thead className="text-left text-xs uppercase tracking-wide text-slate-500"><tr><th className="py-1">Form #</th><th>Agent</th><th className="num">Total sales</th><th className="num">Incentive</th><th>Status</th><th>Release</th><th /></tr></thead>
         <tbody>{rows.map((r) => <tr key={r.id} className={`border-t align-top ${sp.get('id') === r.id ? 'bg-amber-50' : ''}`}>
           <td className="py-2">{r.formNo ?? '—'}<div className="text-xs text-slate-500">{r.month}</div></td><td>{r.agentName}<div className="text-xs text-slate-500">by {r.preparedByName}</div></td><td className="num">{peso(r.totalSales)}</td><td className="num font-semibold">{peso(r.amount)}{r.ratePct != null && <div className="text-xs font-normal text-slate-500">{r.ratePct}%</div>}</td>
           <td><Badge tone={STATUS[r.status]?.tone}>{STATUS[r.status]?.label ?? r.status}</Badge>{r.status === 'REJECTED' && r.decisionNote && <div className="text-xs text-red-700">{r.decisionNote}</div>}{r.hrSignedByName && <div className="text-xs text-slate-500">signed · HR {r.hrSignedByName}</div>}</td>
@@ -59,7 +60,7 @@ export function IncentivesPage() {
             {r.formNo && <Button size="sm" variant="outline" onClick={() => api.download(`/api/reports/forms/agent-incentive/${r.id}.pdf`, `${r.formNo}.pdf`)}>Print form</Button>}
             {can('incentive.hr') && r.status === 'APPROVED' && <Button size="sm" disabled={signed.isPending} onClick={() => signed.mutate(r.id)}>Agent signed</Button>}
             {can('incentive.release') && ['APPROVED', 'SIGNED'].includes(r.status) && <Button size="sm" onClick={() => setReleasing(r)}>Tag as released</Button>}
-          </span></td></tr>)}</tbody></table></div>
+          </span></td></tr>)}</tbody></table></Searchable></div>
         : <Empty>No incentive forms for {month}.</Empty>}
       <ErrorBox error={signed.error} />
     </Card>

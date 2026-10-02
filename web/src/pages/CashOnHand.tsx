@@ -4,6 +4,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { api, fmtDate, peso, today } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { Badge, Button, Card, Empty, ErrorBox, Field, Input, Select, Stat } from '@/components/ui/primitives';
+import { Searchable } from '@/components/Searchable';
 
 interface Day { businessDate: string; toDeposit: string; deposited: string; outstanding: string; dueDate: string; daysLeft: number; status: 'DEPOSITED' | 'OPEN' | 'DUE_TODAY' | 'OVERDUE'; extension: { status: string; requestedUntil: string; reason: string } | null }
 interface Branch { location: { id: string; name: string }; maxDays: number; cashOnHand: string; overdue: number; dueToday: number; days: Day[] }
@@ -28,10 +29,10 @@ export function CashOnHandPage() {
   return <div className="space-y-4">
     <h1 className="text-2xl font-bold tracking-tight text-navy">Cash on Hand</h1>
     {all && <Card title="Every branch" actions={<span className="text-xs text-slate-500">Days allowed = how many days after the sales day the cash must be in the bank</span>}>
-      {branches.data?.length ? <div className="overflow-x-auto"><table className="w-full text-sm"><thead className="text-left text-xs uppercase tracking-wide text-slate-500"><tr><th className="py-2">Branch</th><th className="num">Cash on hand</th><th>Overdue</th><th>Due today</th><th>Oldest undeposited</th><th>Days allowed</th><th /></tr></thead><tbody>{branches.data.map((r) => <tr key={r.id} className={`border-t ${r.id === locationId ? 'bg-brand-soft/40' : ''}`}>
+      {branches.data?.length ? <div className="overflow-x-auto"><Searchable><table className="w-full text-sm"><thead className="text-left text-xs uppercase tracking-wide text-slate-500"><tr><th className="py-2">Branch</th><th className="num">Cash on hand</th><th>Overdue</th><th>Due today</th><th>Oldest undeposited</th><th>Days allowed</th><th /></tr></thead><tbody>{branches.data.map((r) => <tr key={r.id} className={`border-t ${r.id === locationId ? 'bg-brand-soft/40' : ''}`}>
         <td className="py-2 font-medium">{r.name}</td><td className="num">{peso(r.cashOnHand)}</td><td>{r.overdue ? <Badge tone="red">{r.overdue} day(s)</Badge> : '—'}</td><td>{r.dueToday ? <Badge tone="amber">{r.dueToday}</Badge> : '—'}</td><td>{r.oldest ? fmtDate(r.oldest) : '—'}</td>
         <td>{can('cashdeposit.settings') ? <span className="flex items-center gap-1"><Input type="number" min={0} max={30} className="w-16" value={days[r.id] ?? String(r.maxDays)} onChange={(e) => setDays({ ...days, [r.id]: e.target.value })} />{days[r.id] !== undefined && days[r.id] !== String(r.maxDays) && <Button size="sm" onClick={() => setMax.mutate({ id: r.id, maxDays: Number(days[r.id]) })}>Save</Button>}</span> : r.maxDays}</td>
-        <td><Button size="sm" variant="outline" onClick={() => { setLocationId(r.id); setSp({ locationId: r.id }); }}>Open</Button></td></tr>)}</tbody></table></div> : <Empty>No branch has cash waiting to be deposited.</Empty>}
+        <td><Button size="sm" variant="outline" onClick={() => { setLocationId(r.id); setSp({ locationId: r.id }); }}>Open</Button></td></tr>)}</tbody></table></Searchable></div> : <Empty>No branch has cash waiting to be deposited.</Empty>}
       <ErrorBox error={setMax.error} />
     </Card>}
     {b && <>
@@ -42,12 +43,12 @@ export function CashOnHandPage() {
         <Stat label="Days allowed to deposit" value={b.maxDays} sub="set by the Head Auditor / Admin" />
       </div>
       <Card title="Sales cash per day">
-        {b.days.length ? <div className="overflow-x-auto"><table className="w-full text-sm"><thead className="text-left text-xs uppercase tracking-wide text-slate-500"><tr><th className="py-2">Sales day</th><th className="num">To deposit</th><th className="num">Deposited</th><th className="num">Still on hand</th><th>Deposit by</th><th>Status</th><th>Extension</th><th /></tr></thead><tbody>{[...b.days].reverse().map((d) => <tr key={d.businessDate} className="border-t">
+        {b.days.length ? <div className="overflow-x-auto"><Searchable><table className="w-full text-sm"><thead className="text-left text-xs uppercase tracking-wide text-slate-500"><tr><th className="py-2">Sales day</th><th className="num">To deposit</th><th className="num">Deposited</th><th className="num">Still on hand</th><th>Deposit by</th><th>Status</th><th>Extension</th><th /></tr></thead><tbody>{[...b.days].reverse().map((d) => <tr key={d.businessDate} className="border-t">
           <td className="py-2">{fmtDate(d.businessDate)}</td><td className="num">{peso(d.toDeposit)}</td><td className="num">{peso(d.deposited)}</td><td className="num font-semibold">{peso(d.outstanding)}</td>
           <td>{fmtDate(d.dueDate)}{d.status !== 'DEPOSITED' && <span className={`ml-1 text-xs ${d.daysLeft < 0 ? 'font-bold text-red-700' : 'text-slate-500'}`}>{d.daysLeft < 0 ? `${-d.daysLeft} day(s) late` : d.daysLeft === 0 ? 'today' : `${d.daysLeft} day(s) left`}</span>}</td>
           <td><Badge tone={TONE[d.status]}>{LABEL[d.status]}</Badge></td>
           <td className="text-xs">{d.extension ? <>{d.extension.status === 'PENDING' ? 'Waiting for Head Auditor + Admin' : d.extension.status === 'APPROVED' ? 'Approved' : 'Not approved'} (until {fmtDate(d.extension.requestedUntil)})</> : '—'}</td>
-          <td>{d.status !== 'DEPOSITED' && can('sale.create') && d.extension?.status !== 'PENDING' && <Button size="sm" variant="outline" onClick={() => setExt({ day: d.businessDate, until: '', reason: '' })}>Request extension</Button>}</td></tr>)}</tbody></table></div> : <Empty>Nothing to deposit.</Empty>}
+          <td>{d.status !== 'DEPOSITED' && can('sale.create') && d.extension?.status !== 'PENDING' && <Button size="sm" variant="outline" onClick={() => setExt({ day: d.businessDate, until: '', reason: '' })}>Request extension</Button>}</td></tr>)}</tbody></table></Searchable></div> : <Empty>Nothing to deposit.</Empty>}
         <p className="mt-3 text-xs text-slate-500">Record each bank deposit in <Link className="text-brand underline" to="/closing">Daily Close</Link> for the sales day it covers. When a day is due, the auditors are reminded; past the deadline without an approved extension, HR is notified to issue a Notice to Explain.</p>
       </Card>
       {ext && <Card title={`Request more days to deposit the ${fmtDate(ext.day)} sales`}>

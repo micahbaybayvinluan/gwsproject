@@ -4,6 +4,7 @@ import { useSearchParams } from 'react-router-dom';
 import { api, today } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { Badge, Button, Card, Empty, ErrorBox, Field, Input, Modal, Select, Textarea } from '@/components/ui/primitives';
+import { Searchable } from '@/components/Searchable';
 
 interface Signer { name: string; title: string; userId?: string | null }
 interface MemoTable { headers: string[]; rows: string[][] }
@@ -24,11 +25,11 @@ export function MemosPage() {
   const rows = list.data ?? [];
   return <div className="space-y-4">
     <div className="flex flex-wrap items-end gap-2"><h1 className="mr-auto text-2xl font-bold tracking-tight text-navy">Memorandums</h1>{can('memo.create') && <Button onClick={() => setComposing(true)}>Write a memo</Button>}</div>
-    <Card>{list.isLoading ? <Empty>Loading…</Empty> : rows.length ? <div className="overflow-x-auto"><table className="w-full text-sm"><thead className="text-left text-xs uppercase tracking-wide text-slate-500"><tr><th className="py-1 pr-3">Memo no.</th><th className="pr-3">Date</th><th className="pr-3">Re</th><th className="pr-3">To</th><th className="pr-3">From</th><th className="pr-3">Read</th><th /></tr></thead>
+    <Card>{list.isLoading ? <Empty>Loading…</Empty> : rows.length ? <div className="overflow-x-auto"><Searchable><table className="w-full text-sm"><thead className="text-left text-xs uppercase tracking-wide text-slate-500"><tr><th className="py-1 pr-3">Memo no.</th><th className="pr-3">Date</th><th className="pr-3">Re</th><th className="pr-3">To</th><th className="pr-3">From</th><th className="pr-3">Read</th><th /></tr></thead>
       <tbody>{rows.map((m) => <tr key={m.id} className={`border-t align-top ${openId === m.id ? 'bg-amber-50' : ''}`}>
         <td className="py-2 pr-3 font-medium">{m.memoNo}{m.status === 'VOIDED' && <div><Badge tone="red">cancelled</Badge></div>}</td><td className="pr-3">{m.memoDate}</td><td className="pr-3">{m.subject}</td><td className="pr-3 text-xs text-slate-600">{m.addressedTo.length > 70 ? `${m.addressedTo.slice(0, 70)}…` : m.addressedTo}</td><td className="pr-3 text-xs">{m.createdBy}</td>
         <td className="pr-3">{m.mine ? (m.mine.acknowledgedAt ? <Badge tone="green">I read it</Badge> : <Badge tone="amber">please read</Badge>) : <span className="text-xs text-slate-500">{m.acknowledgedCount}/{m.recipientCount}</span>}</td>
-        <td className="text-right"><Button size="sm" variant="outline" onClick={() => setSp({ id: m.id })}>Open</Button></td></tr>)}</tbody></table></div> : <Empty>No memos yet.</Empty>}</Card>
+        <td className="text-right"><Button size="sm" variant="outline" onClick={() => setSp({ id: m.id })}>Open</Button></td></tr>)}</tbody></table></Searchable></div> : <Empty>No memos yet.</Empty>}</Card>
     {openId && <MemoView id={openId} onClose={() => setSp({})} onChanged={refresh} canVoid={(m) => me?.roleKey === 'ADMIN' || m.createdBy === me?.fullName} />}
     {composing && <Compose onClose={() => { setComposing(false); if (sp.get('compose') != null) setSp({}); }} onCreated={(m) => { setComposing(false); refresh(); setSp({ id: m.id }); }} prefill={{ compose: sp.get('compose'), franchise: sp.get('franchise'), days: sp.get('days') }} />}
   </div>;

@@ -262,6 +262,7 @@ Waybill Report → **Choose waybill PDF files** (TikTok or Shopee labels) → pi
 81. **Consignment maximum** (`sales.manager`): Agent Consignments → link a consignee to Jerick's outlet → set a maximum (all outlets, and one outlet) → `admin` approves in My Approvals. A consignment out over the maximum is refused when submitted (`sales.westave` → Consignment). `agent.jerick`: Agent Consignments shows what is at the consignee and how much of the maximum is used.
 82. **Warehouse expenses** (`wh.assoc` or `wh.incharge`): Expenses → choose a warehouse account → amount and payee → pay from cash on hand, a bank account or an owner advance (Cash fund is refused).
 83. **Search notifications** (any user): Notifications → type a product name or DR number in the search bar.
+84. **Search lists** (any user): open a list with 6+ rows (for example Chart of Accounts or Cash Fund) and type in **Search this list**. On 6-Pack Card, choose from / to and search a customer name, mobile or DR number: both lists filter.
 
 ## Where the files come out
 

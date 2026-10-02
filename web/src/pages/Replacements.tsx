@@ -5,6 +5,7 @@ import { api, fmtDate, peso } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { Attachments } from '@/components/Attachments';
 import { Badge, Button, Card, Empty, ErrorBox, Field, Input, Modal, Select, Stat, Textarea, statusTone } from '@/components/ui/primitives';
+import { Searchable } from '@/components/Searchable';
 
 interface Ticket {
   id: string; ticketNo: string; kind: 'CUSTOMER' | 'SUPPLIER'; status: string; reason: string; notes: string | null; qty: number; product: { id: string; sku: string; name: string } | null; location: string; createdBy: string; createdAt: string; ageDays: number;
@@ -37,11 +38,11 @@ export function ReplacementsPage() {
       <li><b>Return to a supplier:</b> the ticket is tagged to the supplier; the Head Auditor approves the return. It stays open until replacement items <b>arrive</b> on a supplier delivery linked to the ticket; only that closes it.</li>
     </ul></Card>
     {sum.data && sum.data.suppliers.some((s) => s.openTickets > 0) && <Card title="Suppliers that still owe us replacements"><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{sum.data.suppliers.filter((s) => s.openTickets > 0).map((s) => <Stat key={s.id} label={s.name ?? s.code} value={`${s.unitsOwed} units`} sub={`${s.openTickets} ticket(s) · oldest ${s.oldestOpenDays} days${s.avgDaysToReplace != null ? ` · usually ${s.avgDaysToReplace} days` : ''}`} tone={s.oldestOpenDays > 14 ? 'red' : 'amber'} />)}</div></Card>}
-    {q.isLoading ? <Empty>Loading…</Empty> : !rows.length ? <Empty>No tickets.</Empty> : <Card><div className="overflow-x-auto"><table className="w-full text-sm"><thead className="text-left text-xs uppercase tracking-wide text-slate-500"><tr><th className="py-1 pr-3">Ticket</th><th className="pr-3">Kind</th><th className="pr-3">Item</th><th className="num pr-3">Qty</th><th className="pr-3">DR / supplier</th><th className="pr-3">Branch</th><th className="pr-3">Status</th><th className="num pr-3">Days</th></tr></thead>
+    {q.isLoading ? <Empty>Loading…</Empty> : !rows.length ? <Empty>No tickets.</Empty> : <Card><div className="overflow-x-auto"><Searchable><table className="w-full text-sm"><thead className="text-left text-xs uppercase tracking-wide text-slate-500"><tr><th className="py-1 pr-3">Ticket</th><th className="pr-3">Kind</th><th className="pr-3">Item</th><th className="num pr-3">Qty</th><th className="pr-3">DR / supplier</th><th className="pr-3">Branch</th><th className="pr-3">Status</th><th className="num pr-3">Days</th></tr></thead>
       <tbody>{rows.map((t) => <tr key={t.id} className="cursor-pointer border-t hover:bg-slate-50" onClick={() => nav(`/replacements/${t.id}`)}>
         <td className="py-2 pr-3 font-medium text-brand">{t.ticketNo}</td><td className="pr-3">{t.kind === 'CUSTOMER' ? 'Customer' : 'Supplier'}</td><td className="pr-3">{t.product?.name}</td><td className="num pr-3">{t.qty}</td>
         <td className="pr-3">{t.kind === 'CUSTOMER' ? <>DR {t.drSiNo}<div className="text-xs text-slate-500">{t.customerName ?? ''}</div></> : t.supplier ? (t.supplier.name ?? t.supplier.code) : ''}</td><td className="pr-3">{t.location}</td>
-        <td className="pr-3"><Badge tone={tone(t.status)}>{STATUS[t.status] ?? t.status}</Badge></td><td className="num pr-3">{t.ageDays}</td></tr>)}</tbody></table></div></Card>}
+        <td className="pr-3"><Badge tone={tone(t.status)}>{STATUS[t.status] ?? t.status}</Badge></td><td className="num pr-3">{t.ageDays}</td></tr>)}</tbody></table></Searchable></div></Card>}
     {newKind === 'CUSTOMER' && <NewCustomerTicket initial={sp.get('dr') ?? ''} onClose={() => setNewKind('')} onDone={(id) => nav(`/replacements/${id}`)} />}
     {newKind === 'SUPPLIER' && <NewSupplierTicket onClose={() => setNewKind('')} onDone={(id) => nav(`/replacements/${id}`)} />}
   </div>;

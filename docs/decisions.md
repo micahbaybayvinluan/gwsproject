@@ -122,6 +122,7 @@ Things the build had to decide that the spec does not cover, or where the spec l
 | D113 | Consignment maximums | A consignee account is linked by the Sales Manager to an agent's outlet (and so the agent). The maximum (AGENT_CONSIGNMENT_LIMIT, Owner approves) is per agent for all outlets and, optionally, per outlet; both apply. Value = stock still at the consignee(s) at retail price (SRP) plus the new transfer. Checked when a consignment out is submitted; a linked agent with no approved maximum is stopped. Consignees without an agent are unaffected. |
 | D114 | Warehouse expenses | Warehouse Associate and In-Charge hold expense.create.branch / expense.view for the warehouse's own expenses; they cannot use the cash fund (earlier decision) and main / office accounts stay with Accounting. |
 | D115 | Notification search | The Notifications page searches all of a user's notifications for every typed word (title or text, any order). |
+| D116 | Search in lists | Every table (DataTable component and any plain list table wrapped in Searchable) shows a search box from 6 rows: all typed words must appear in the row, any order; Products and Stock keep their own search. 6-Pack Card has a period (from / to) and a server-side search over stickers given and cards redeemed (customer, mobile, email, DR / SI, card number, branch, associate); the period totals do not change with the search; up to 500 rows while searching, 100 otherwise. |
 
 ## Proposals not implemented (out of scope / for later)
 

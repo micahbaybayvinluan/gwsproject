@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRef, useState } from 'react';
 import { api, peso } from '@/lib/api';
 import { Badge, Button, Card, Empty, ErrorBox, Field, Input, Select } from '@/components/ui/primitives';
+import { Searchable } from '@/components/Searchable';
 
 interface Row { id: string; sku: string; name: string; brand: string | null; retail: string | null; cc: string | null; tiktok: string | null; shopee: string | null; lazada: string | null }
 type Tier = 'TIKTOK' | 'SHOPEE' | 'LAZADA' | 'CC';
@@ -41,9 +42,9 @@ export function EcomPricesPage() {
       </div>
       {imp.data && <div className="mt-2 rounded border border-emerald-200 bg-emerald-50 p-2 text-sm">Masterlist read: {imp.data.rows} rows, {imp.data.matched} matched to products, {imp.data.changed} prices changed.{imp.data.notFound.length > 0 && <details className="mt-1"><summary className="cursor-pointer text-amber-800">{imp.data.notFound.length} names were not found in the product list (set them by hand, or add the product first)</summary><ul className="ml-4 list-disc text-xs">{imp.data.notFound.map((n) => <li key={n}>{n}</li>)}</ul></details>}</div>}
       <ErrorBox error={imp.error ?? save.error} />
-      {rows.length ? <div className="mt-3 overflow-x-auto"><table className="w-full text-sm"><thead className="text-left text-xs uppercase tracking-wide text-slate-500"><tr><th className="py-1 pr-3">Product</th><th className="num pr-3">SRP</th>{COLS.map((c) => <th key={c.key} className="num pr-3">{c.label}</th>)}</tr></thead>
+      {rows.length ? <div className="mt-3 overflow-x-auto"><Searchable><table className="w-full text-sm"><thead className="text-left text-xs uppercase tracking-wide text-slate-500"><tr><th className="py-1 pr-3">Product</th><th className="num pr-3">SRP</th>{COLS.map((c) => <th key={c.key} className="num pr-3">{c.label}</th>)}</tr></thead>
         <tbody>{rows.map((r) => <tr key={r.id} className="border-t"><td className="py-1.5 pr-3"><div className="font-medium">{r.name}</div><div className="text-xs text-slate-500">{r.sku}</div></td><td className="num pr-3">{r.retail ? peso(r.retail) : '—'}</td>
-          {COLS.map((c) => <td key={c.key} className="pr-3"><Input className="num w-28" type="number" step="0.01" value={shown(r, c)} placeholder={c.key === 'lazada' ? 'as Shopee' : undefined} onChange={(e) => setEdits({ ...edits, [`${r.id}:${c.tier}`]: e.target.value })} aria-label={`${c.label} price of ${r.name}`} /></td>)}</tr>)}</tbody></table></div>
+          {COLS.map((c) => <td key={c.key} className="pr-3"><Input className="num w-28" type="number" step="0.01" value={shown(r, c)} placeholder={c.key === 'lazada' ? 'as Shopee' : undefined} onChange={(e) => setEdits({ ...edits, [`${r.id}:${c.tier}`]: e.target.value })} aria-label={`${c.label} price of ${r.name}`} /></td>)}</tr>)}</tbody></table></Searchable></div>
         : <Empty>No products.</Empty>}
       <p className="mt-2 text-xs text-slate-500">Prices apply from today. Empty Lazada prices follow Shopee. Clearing a box removes the price typed today. The Owner alone can change these; Accounting, the Head Auditor and the E-comm Associate are notified.</p>
     </Card>

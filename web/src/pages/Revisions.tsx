@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { api } from '@/lib/api';
 import { Badge, Card, Empty, Field, Input, Select } from '@/components/ui/primitives';
 import { DataTable } from '@/components/ui/table';
+import { Searchable } from '@/components/Searchable';
 
 interface Rev { id: string; date: string; createdAt: string; source: string; sourceLabel: string; documentType: string; documentId: string; controlNo: string | null; location: string | null; staff: string | null; staffUserId: string | null; requestedByName: string | null; approvedByName: string | null; reason: string | null; changes: unknown }
 interface ByStaff { staffUserId: string; staff: string; total: number; bySource: Record<string, number>; lastAt: string }
@@ -34,12 +35,12 @@ export function RevisionsPage() {
       <Field label="Kind"><Select value={source} onChange={(e) => setSource(e.target.value)}><option value="">All</option>{Object.entries(SOURCE).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</Select></Field>
     </div>
     <Card title="Errors per staff (corrections of their documents)">
-      {!by.data?.length ? <Empty>No corrections in this period.</Empty> : <table className="w-full text-sm"><thead className="text-left text-xs text-slate-500"><tr><th>Staff</th><th className="num">Corrections</th><th className="w-1/3" /><th>By kind</th><th>Last</th></tr></thead>
+      {!by.data?.length ? <Empty>No corrections in this period.</Empty> : <Searchable><table className="w-full text-sm"><thead className="text-left text-xs text-slate-500"><tr><th>Staff</th><th className="num">Corrections</th><th className="w-1/3" /><th>By kind</th><th>Last</th></tr></thead>
         <tbody>{by.data.map((r) => <tr key={r.staffUserId} className={`cursor-pointer border-t hover:bg-slate-50 ${staff === r.staffUserId ? 'bg-slate-50' : ''}`} onClick={() => setStaff(staff === r.staffUserId ? '' : r.staffUserId)}>
           <td className="py-1 font-medium">{r.staff}</td><td className={`num font-semibold ${r.total >= 3 ? 'text-red-700' : ''}`}>{r.total}</td>
           <td><div className="h-2 rounded bg-red-200" style={{ width: `${(r.total / max) * 100}%` }} /></td>
           <td className="text-xs">{Object.entries(r.bySource).map(([k, n]) => <Badge key={k}>{SOURCE[k] ?? k}: {n}</Badge>)}</td>
-          <td className="text-xs">{new Date(r.lastAt).toLocaleDateString()}</td></tr>)}</tbody></table>}
+          <td className="text-xs">{new Date(r.lastAt).toLocaleDateString()}</td></tr>)}</tbody></table></Searchable>}
       <p className="mt-2 text-xs text-slate-500">Click a name to filter the log below. Three or more corrections in the period are shown in red.</p>
     </Card>
     <Card title={staff ? `Corrections for ${by.data?.find((r) => r.staffUserId === staff)?.staff ?? ''}` : 'All corrections'}>

@@ -3,6 +3,7 @@ import { useRef, useState } from 'react';
 import { api, peso, today } from '@/lib/api';
 import { Badge, Button, Card, Empty, ErrorBox, Field, Input, Select, Stat } from '@/components/ui/primitives';
 import { Segmented } from '@/components/ui/widgets';
+import { Searchable } from '@/components/Searchable';
 
 interface Row { id: string; platform: string; platformName: string; orderId: string; trackingNo: string | null; qty: number; weightG: number | null; uploaded: string; product: { id: string; sku: string; name: string } | null; guessed: boolean; unitSrp: number | null; priceFrom: string | null; srp: number | null; commission: number | null; transactionFee: number | null; affiliateFee: number | null; shippingFee: number | null; fees: number | null; income: number | null }
 interface Rates { commissionPct: number; transactionPct: number; affiliatePct: number; shippingPerOrder: number }
@@ -49,8 +50,8 @@ export function EcomWaybillsPage() {
     </div>}
     {r && r.byPlatform.length > 1 && <Card title="Per platform"><div className="overflow-x-auto"><table className="w-full text-sm"><thead className="text-left text-xs uppercase tracking-wide text-slate-500"><tr><th className="py-1">Platform</th><th className="num">Waybills</th><th className="num">With product</th><th className="num">SRP</th><th className="num">Fees</th><th className="num">Order income</th></tr></thead><tbody>{r.byPlatform.map((p) => <tr key={p.platform} className="border-t"><td className="py-1.5 font-medium">{p.name}</td><td className="num">{p.waybills}</td><td className="num">{p.priced}</td><td className="num">{peso(p.srp)}</td><td className="num">{peso(p.fees)}</td><td className="num font-semibold">{peso(p.income)}</td></tr>)}</tbody></table></div></Card>}
     <Card title="Waybills">
-      {q.isLoading ? <Empty>Loading…</Empty> : r?.rows.length ? <div className="overflow-x-auto"><table className="w-full text-sm"><thead className="text-left text-xs uppercase tracking-wide text-slate-500"><tr><th className="py-1 pr-3">Platform</th><th className="pr-3">Order / tracking</th><th className="pr-3">Product</th><th className="pr-3">Qty</th><th className="num pr-3">SRP each</th><th className="num pr-3">SRP total</th><th className="num pr-3">Fees</th><th className="num pr-3">Order income</th><th /></tr></thead>
-        <tbody>{r.rows.map((x) => <WaybillRow key={x.id} row={x} onChanged={refresh} />)}</tbody></table></div> : <Empty>No waybills yet: upload the labels above.</Empty>}
+      {q.isLoading ? <Empty>Loading…</Empty> : r?.rows.length ? <div className="overflow-x-auto"><Searchable><table className="w-full text-sm"><thead className="text-left text-xs uppercase tracking-wide text-slate-500"><tr><th className="py-1 pr-3">Platform</th><th className="pr-3">Order / tracking</th><th className="pr-3">Product</th><th className="pr-3">Qty</th><th className="num pr-3">SRP each</th><th className="num pr-3">SRP total</th><th className="num pr-3">Fees</th><th className="num pr-3">Order income</th><th /></tr></thead>
+        <tbody>{r.rows.map((x) => <WaybillRow key={x.id} row={x} onChanged={refresh} />)}</tbody></table></Searchable></div> : <Empty>No waybills yet: upload the labels above.</Empty>}
     </Card>
     {r && <Card title="Platform fee rates used"><p className="mb-3 text-sm text-slate-600">Fees are worked out at these rates on the SRP. “Use actual” copies what the platform really charged, from the payout files Accounting posted.</p>
       <div className="grid gap-4 lg:grid-cols-3">{r.rates.map((p) => <RatesForm key={p.platform} p={p} onSaved={refresh} />)}</div></Card>}

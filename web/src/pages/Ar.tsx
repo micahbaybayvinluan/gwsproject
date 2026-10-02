@@ -7,6 +7,7 @@ import { useAuth } from '@/lib/auth';
 import { Badge, Button, Card, ErrorBox, Field, Input, Select } from '@/components/ui/primitives';
 import { DataTable } from '@/components/ui/table';
 import { Attachments } from '@/components/Attachments';
+import { Searchable } from '@/components/Searchable';
 
 interface ArRow { id: string; location: { id: string; name: string; type?: string }; customer: string; customerId: string | null; agentId: string | null; drSiNo: string; docDate: string; amount: string; paid: string; balance: string; dueDate: string | null; daysOverdue: number; pdc: { bank: string; chequeNo: string } | null }
 
@@ -100,8 +101,8 @@ function OpeningArCard({ highlight }: { highlight: string | null }) {
       </div>}
     </div>}
     <div className="mt-4 flex items-center gap-2 text-sm"><span className="text-slate-500">Show</span>{[['PENDING', 'Waiting for the Owner'], ['APPROVED', 'Approved'], ['REJECTED', 'Rejected'], ['ALL', 'All']].map(([k, label]) => <button key={k} type="button" onClick={() => setShow(k)} className={`rounded-full border px-3 py-0.5 ${show === k ? 'border-navy bg-navy text-white' : 'border-slate-300'}`}>{label}</button>)}</div>
-    {rows.length ? <table className="mt-2 w-full text-sm"><thead className="text-left text-xs uppercase tracking-wide text-slate-500"><tr><th className="py-1">Branch</th><th>Customer</th><th>DR / SI</th><th>Invoice date</th><th>Due</th><th className="num">Amount</th><th>PDC</th><th>Entered by</th><th>Status</th></tr></thead>
-      <tbody>{rows.map((r) => <tr key={r.id} className={`border-t ${r.id === highlight ? 'bg-amber-50' : ''}`}><td className="py-1">{r.location ? locLabel(r.location) : '—'}</td><td>{r.customerName}</td><td>{r.drSiNo}</td><td>{r.docDate}</td><td>{r.dueDate}</td><td className="num">{peso(r.amount)}</td><td>{r.pdcChequeNo ? `${r.pdcChequeNo} · ${r.pdcDate}` : '—'}</td><td>{r.createdByName}</td><td><Badge tone={tone(r.status)}>{r.status === 'PENDING' ? 'Waiting for the Owner' : r.status === 'APPROVED' ? 'Approved · in the branch AR' : 'Rejected'}</Badge>{r.decisionNote && r.status === 'REJECTED' ? <div className="text-xs text-red-700">{r.decisionNote}</div> : null}</td></tr>)}</tbody></table>
+    {rows.length ? <Searchable><table className="mt-2 w-full text-sm"><thead className="text-left text-xs uppercase tracking-wide text-slate-500"><tr><th className="py-1">Branch</th><th>Customer</th><th>DR / SI</th><th>Invoice date</th><th>Due</th><th className="num">Amount</th><th>PDC</th><th>Entered by</th><th>Status</th></tr></thead>
+      <tbody>{rows.map((r) => <tr key={r.id} className={`border-t ${r.id === highlight ? 'bg-amber-50' : ''}`}><td className="py-1">{r.location ? locLabel(r.location) : '—'}</td><td>{r.customerName}</td><td>{r.drSiNo}</td><td>{r.docDate}</td><td>{r.dueDate}</td><td className="num">{peso(r.amount)}</td><td>{r.pdcChequeNo ? `${r.pdcChequeNo} · ${r.pdcDate}` : '—'}</td><td>{r.createdByName}</td><td><Badge tone={tone(r.status)}>{r.status === 'PENDING' ? 'Waiting for the Owner' : r.status === 'APPROVED' ? 'Approved · in the branch AR' : 'Rejected'}</Badge>{r.decisionNote && r.status === 'REJECTED' ? <div className="text-xs text-red-700">{r.decisionNote}</div> : null}</td></tr>)}</tbody></table></Searchable>
       : <p className="mt-2 text-sm text-slate-500">No entries here yet.</p>}
   </Card>;
 }

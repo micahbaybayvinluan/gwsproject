@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api, peso, today } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { Attachments } from '@/components/Attachments';
@@ -19,7 +19,11 @@ export function SixPackPage() {
   const { me, can } = useAuth(); const qc = useQueryClient();
   const all = can('sixpack.view.all'); const [locationId, setLocationId] = useState(all ? '' : me!.locations[0]?.id ?? '');
   const locations = useQuery({ queryKey: ['locations'], queryFn: () => api.get<{ id: string; name: string }[]>('/api/locations'), enabled: all });
-  const sum = useQuery({ queryKey: ['six-pack', locationId], queryFn: () => api.get<Summary>(`/api/six-pack/summary${locationId ? `?locationId=${locationId}` : ''}`) });
+  // period and search (owner request 2026-10-02): the lists below can be searched by customer, mobile, email, DR / SI, card number, branch or associate
+  const [from, setFrom] = useState(''); const [to, setTo] = useState(''); const [text, setText] = useState(''); const [search, setSearch] = useState('');
+  useEffect(() => { const t = setTimeout(() => setSearch(text.trim()), 300); return () => clearTimeout(t); }, [text]);
+  const qs = new URLSearchParams({ ...(locationId ? { locationId } : {}), ...(from ? { from } : {}), ...(to ? { to } : {}), ...(search ? { search } : {}) }).toString();
+  const sum = useQuery({ queryKey: ['six-pack', locationId, from, to, search], queryFn: () => api.get<Summary>(`/api/six-pack/summary${qs ? `?${qs}` : ''}`) });
   const refresh = () => { void qc.invalidateQueries({ queryKey: ['six-pack'] }); void qc.invalidateQueries({ queryKey: ['dashboard'] }); };
   const s = sum.data;
   return <div className="space-y-4">
@@ -29,6 +33,7 @@ export function SixPackPage() {
       <li><b>2.</b> At {s?.perCard ?? 6} stickers (from any branch) the customer gets a {s ? peso(s.value) : '₱300'} card.</li>
       <li><b>3.</b> Redeem it here: complete the customer’s data; the {s ? peso(s.value) : '₱300'} becomes the branch’s <b>6-Pack Card</b> expense, paid from the cash on hand.</li>
     </ol></Card>
+    <div className="grid gap-3 md:grid-cols-4"><Field label="Stickers and cards from"><Input type="date" value={from || s?.from || ''} onChange={(e) => setFrom(e.target.value)} /></Field><Field label="To"><Input type="date" value={to || s?.to || ''} onChange={(e) => setTo(e.target.value)} /></Field><Field label="Search the stickers given and cards redeemed" className="md:col-span-2"><Input type="search" value={text} onChange={(e) => setText(e.target.value)} placeholder="Customer, mobile, email, DR / SI, card number, branch, associate…" /></Field></div>
     {s && <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
       <Stat label="Stickers today" value={s.today.stickers} sub={`${s.today.dr} DR with stickers`} /><Stat label="Cards redeemed today" value={s.today.cards} sub={peso(s.today.amount)} tone={s.today.cards ? 'amber' : undefined} />
       <Stat label={`Stickers ${s.from} to ${s.to}`} value={s.period.stickers} sub={`${s.period.dr} DR`} /><Stat label="Cards redeemed in the period" value={s.period.cards} sub={`${peso(s.period.amount)}${s.period.legacy ? ` · ${s.period.legacy} old paper card${s.period.legacy === 1 ? '' : 's'}` : ''}`} tone={s.period.legacy ? 'red' : undefined} />

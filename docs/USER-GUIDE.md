@@ -509,6 +509,10 @@ Each platform has its own tab, reports and accounts; nothing is mixed. E-commerc
 <!-- for: sale.create, sale.create.warehouse -->
 In **New Sale**, under **Agent's outlet / gym (optional)**, pick the **agent** first and then one of that agent's **approved outlets**. The sale shows the outlet in the Sales list and the agent sees the order under My Sales and on the outlet. Tagging does not change the price or the agent's incentive. If the outlet is not listed, the agent uploads it under Outlets and the Sales Manager approves it first.
 
+## Searching any list
+<!-- for: all -->
+Every list with six or more rows has a **Search this list** box above it. Type part of a name, a number, a product, a branch or a date: every word you type must appear in the row (in any order), and the other rows are hidden. Clear the box to see everything again. A search on the list only looks at what is loaded; on **6-Pack Card** the search looks through the whole period you chose (change **from / to** to look further back), and on **Notifications** it looks through all your notifications.
+
 ## Searching your notifications
 <!-- for: notification.view -->
 On **Notifications**, type in the search bar to find the notifications about one item: a product, a DR / form number, a branch or a person. Every word you type must appear in the notification (in any order); the search looks through all your notifications, not only the latest ones.
@@ -578,6 +582,8 @@ A sale paid by **credit card** uses the credit-card price: SRP ÷ 0.96, for exam
 
 ## 6-Pack Card
 <!-- for: sixpack.issue, sixpack.view.all -->
+**Search:** on **6-Pack Card**, choose the period (from / to) and type in **Search the stickers given and cards redeemed**: customer, mobile, email, DR / SI, card number, branch or associate. Both lists (Stickers given and Cards redeemed) are filtered; the totals above stay for the whole period.
+
 1. On **New Sale** tick **6-Pack sticker given** and type the customer's full name and mobile number. One sticker is recorded for each supplement on the DR.
 2. At six stickers (from any branch) the customer earns a ₱300 card. Open **6-Pack Card → Redeem a card**: type the number → **Find** (shows the balance) → complete name, email and address → **Redeem**.
 3. The ₱300 is booked as your branch's **6-Pack Card** expense, paid from the cash on hand, tagged to the customer.

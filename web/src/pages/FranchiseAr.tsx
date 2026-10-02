@@ -4,6 +4,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { api, peso, today } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { Badge, Button, Card, Empty, ErrorBox, Field, Input, Modal, Select, Stat } from '@/components/ui/primitives';
+import { Searchable } from '@/components/Searchable';
 
 interface Inv { id: string; controlNo: string; source: string; transferId: string | null; issueDate: string; dueDate: string; originalDueDate: string; extended: boolean; status: string; amount: string; principalPaid: string; unpaid: string; penalty: string; penaltyPaid: string; interest: string; interestPaid: string; chargesDue: string; totalDue: string; daysOverdue: number; twoMonthsOverdue: boolean; pendingExtension: { requestedDueDate: string } | null }
 interface Franchise { locationId: string; code: string; name: string; owner: string | null; creditHold: boolean; creditHoldNote: string | null; invoices: Inv[]; totals: { goods: string; penalty: string; interest: string; total: string; overdue: string; overdueCount: number; flagged: number } }
@@ -56,8 +57,8 @@ export function FranchiseArPage() {
         {f.creditHold && <p className="mt-2 rounded border border-red-200 bg-brand-soft p-2 text-sm text-brand-dark">On cash-before-delivery{f.creditHoldNote ? `: ${f.creditHoldNote}` : ''}. Goods are released only after payment is received.</p>}
         {maxDays > 0 && rules && <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm"><div className="mb-1 font-semibold text-amber-900">Recommended process ({maxDays} days overdue at most)</div><ul className="space-y-0.5">{actions(maxDays, rules.flagDays).map((a) => <li key={a.when}><b>{a.when}:</b> {a.what}</li>)}</ul>
           {can('memo.create') && <div className="mt-2"><Link className="text-sm font-semibold text-brand hover:underline" to={`/memos?compose=overdue&franchise=${f.locationId}&days=${maxDays >= (rules?.flagDays ?? 60) ? 'demand' : 'notice'}`}>{maxDays >= (rules?.flagDays ?? 60) ? 'Write the demand memo →' : 'Write a notice memo →'}</Link></div>}</div>}
-        {f.invoices.length ? <div className="mt-3 overflow-x-auto"><table className="w-full text-sm"><thead className="text-left text-xs uppercase tracking-wide text-slate-500"><tr><th className="py-1 pr-3">Invoice</th><th className="pr-3">Received</th><th className="pr-3">Due</th><th className="num pr-3">Goods</th><th className="num pr-3">Paid</th><th className="num pr-3">Penalty</th><th className="num pr-3">Interest</th><th className="num pr-3">Total due</th><th className="pr-3">Status</th><th /></tr></thead>
-          <tbody>{f.invoices.map((i) => <InvoiceRow key={i.id} inv={i} open={open === i.id} toggle={() => setOpen(open === i.id ? null : i.id)} canPay={can('franchise.ar.pay')} canWaive={can('franchise.ar.manage')} canExtend={owner || can('franchise.ar.manage')} act={(kind) => setModal({ kind, inv: i })} />)}</tbody></table></div>
+        {f.invoices.length ? <div className="mt-3 overflow-x-auto"><Searchable><table className="w-full text-sm"><thead className="text-left text-xs uppercase tracking-wide text-slate-500"><tr><th className="py-1 pr-3">Invoice</th><th className="pr-3">Received</th><th className="pr-3">Due</th><th className="num pr-3">Goods</th><th className="num pr-3">Paid</th><th className="num pr-3">Penalty</th><th className="num pr-3">Interest</th><th className="num pr-3">Total due</th><th className="pr-3">Status</th><th /></tr></thead>
+          <tbody>{f.invoices.map((i) => <InvoiceRow key={i.id} inv={i} open={open === i.id} toggle={() => setOpen(open === i.id ? null : i.id)} canPay={can('franchise.ar.pay')} canWaive={can('franchise.ar.manage')} canExtend={owner || can('franchise.ar.manage')} act={(kind) => setModal({ kind, inv: i })} />)}</tbody></table></Searchable></div>
           : <Empty>No open invoices.</Empty>}
       </Card>;
     })}
@@ -168,7 +169,7 @@ function ShippingCharges({ mark }: { mark: string | null }) {
   const waiting = rows.filter((r) => r.status === 'TO_FOLLOW').length;
   return <Card title={<span className="flex flex-wrap items-center gap-2">Shipping charges billed to franchises{waiting > 0 && <Badge tone="amber">{waiting} to follow</Badge>}</span>}>
     <p className="mb-2 text-sm text-slate-600">Shipping on a franchise sale is tagged <b>to follow</b>. The Franchise Coordinator fills in the amount within <b>2 days</b>; it then becomes a <b>separate franchise invoice</b> (not part of the order), with the usual due date, penalty and interest. A later change needs the Owner's approval.</p>
-    <div className="overflow-x-auto"><table className="w-full text-sm"><thead className="text-left text-xs uppercase tracking-wide text-slate-500"><tr><th className="py-1 pr-3">Franchise</th><th className="pr-3">Sale (DR)</th><th className="pr-3">Fill in by</th><th className="pr-3">Status</th><th className="num pr-3">Amount</th><th /></tr></thead>
+    <div className="overflow-x-auto"><Searchable><table className="w-full text-sm"><thead className="text-left text-xs uppercase tracking-wide text-slate-500"><tr><th className="py-1 pr-3">Franchise</th><th className="pr-3">Sale (DR)</th><th className="pr-3">Fill in by</th><th className="pr-3">Status</th><th className="num pr-3">Amount</th><th /></tr></thead>
       <tbody>{rows.map((r) => <tr key={r.id} className={`border-t ${mark === r.id ? 'bg-amber-50' : ''}`}>
         <td className="py-2 pr-3 font-medium">{r.franchise}</td>
         <td className="pr-3"><Link className="text-brand hover:underline" to={`/sales/${r.saleId}`}>{r.drSiNo}</Link></td>
@@ -179,7 +180,7 @@ function ShippingCharges({ mark }: { mark: string | null }) {
           {can('franchise.shipping.fill') && r.status === 'TO_FOLLOW' && <Button size="sm" onClick={() => { setFill(r); setF({ amount: '', courier: r.courier ?? '', reference: r.reference ?? '', notes: '' }); }}>Fill in the amount</Button>}
           {can('franchise.shipping.fill') && !r.pendingEdit && <Button size="sm" variant="outline" onClick={() => { setEdit(r); setE({ amount: r.amount ?? '', fillBy: '', reason: '' }); }}>{r.status === 'TO_FOLLOW' ? 'Ask for more time' : 'Ask to change'}</Button>}
           {r.invoiceId && <Link className="text-xs font-semibold text-brand hover:underline" to={`/franchise-ar?invoice=${r.invoiceId}`}>invoice</Link>}
-        </td></tr>)}</tbody></table></div>
+        </td></tr>)}</tbody></table></Searchable></div>
     {fill && <Modal title={`Shipping charge · ${fill.franchise} · DR ${fill.drSiNo}`} onClose={() => setFill(null)}>
       <div className="space-y-3"><Field label="Shipping amount to bill the franchise (₱)"><Input type="number" inputMode="decimal" step="0.01" min={0} value={f.amount} onChange={(x) => setF({ ...f, amount: x.target.value })} autoFocus data-testid="ship-amount" /></Field>
         <Field label="Courier (optional)"><Input value={f.courier} onChange={(x) => setF({ ...f, courier: x.target.value })} /></Field><Field label="Waybill / reference (optional)"><Input value={f.reference} onChange={(x) => setF({ ...f, reference: x.target.value })} /></Field><Field label="Notes (optional)"><Input value={f.notes} onChange={(x) => setF({ ...f, notes: x.target.value })} /></Field>

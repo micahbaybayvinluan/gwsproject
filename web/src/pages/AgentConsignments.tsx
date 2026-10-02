@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { api, fmtDate, peso } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { Badge, Button, Card, Empty, ErrorBox, Field, Input, Select, Stat } from '@/components/ui/primitives';
+import { Searchable } from '@/components/Searchable';
 
 interface Csg { agreementId: string; consigneeId: string; consignee: string; agentName: string | null; outletId: string | null; items: { productId: string; name: string; qty: number; value: number }[]; value: number; unpaid: number; lastSent: string | null; lastReport: string | null; idleDays: number | null; ageFlag: number | null }
 interface Totals { outstanding: number; unpaid: number; limit: number | null; pendingLimit: number | null; headroom: number | null; usedPct: number | null; outlets: { outletId: string; outletName: string; used: number; limit: number | null; pending: boolean }[] }
@@ -63,7 +64,7 @@ function Overview() {
           <Field label="Applies to"><Select value={lim.outletId} onChange={(e) => setLim({ ...lim, outletId: e.target.value })}><option value="">All outlets together</option>{outlets.data?.filter((o) => o.agentKey === lim.agentKey).map((o) => <option key={o.id} value={o.id}>Only {o.name}</option>)}</Select></Field>
           <Field label="Maximum (₱ at retail)"><Input type="number" min={0} step="1000" value={lim.amount} onChange={(e) => setLim({ ...lim, amount: e.target.value })} /></Field><Field label="Note"><Input value={lim.notes} onChange={(e) => setLim({ ...lim, notes: e.target.value })} /></Field></div>
         <Button className="mt-3" disabled={!lim.agentKey || !(Number(lim.amount) > 0) || setLimit.isPending} onClick={() => { setMsg(''); setLimit.mutate(); }}>Send for the Owner's approval</Button><ErrorBox error={setLimit.error} />{msg && <p className="mt-2 text-sm text-emerald-700">{msg}</p>}
-        {d.limits.length > 0 && <table className="mt-3 w-full text-sm"><thead className="text-left text-xs uppercase text-slate-500"><tr><th className="py-1">Agent</th><th>Applies to</th><th className="num">Maximum</th><th>Status</th></tr></thead><tbody>{d.limits.map((l) => <tr key={l.id} className="border-t"><td className="py-1.5">{l.agentName}</td><td>{l.outletName ?? 'All outlets'}</td><td className="num">{peso(l.amount)}</td><td><Badge tone={l.status === 'APPROVED' ? 'green' : 'amber'}>{l.status === 'APPROVED' ? 'approved' : 'waiting for the Owner'}</Badge></td></tr>)}</tbody></table>}
+        {d.limits.length > 0 && <Searchable><table className="mt-3 w-full text-sm"><thead className="text-left text-xs uppercase text-slate-500"><tr><th className="py-1">Agent</th><th>Applies to</th><th className="num">Maximum</th><th>Status</th></tr></thead><tbody>{d.limits.map((l) => <tr key={l.id} className="border-t"><td className="py-1.5">{l.agentName}</td><td>{l.outletName ?? 'All outlets'}</td><td className="num">{peso(l.amount)}</td><td><Badge tone={l.status === 'APPROVED' ? 'green' : 'amber'}>{l.status === 'APPROVED' ? 'approved' : 'waiting for the Owner'}</Badge></td></tr>)}</tbody></table></Searchable>}
         <p className="mt-2 text-xs text-slate-500">Consignment is valued at retail price (SRP) of the stock still at the consignee. A consignment out that would go over the agent's maximum (or the outlet's) is stopped when it is submitted.</p></Card>}
     </>}</div>;
 }

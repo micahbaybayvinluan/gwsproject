@@ -4,6 +4,7 @@ import { useSearchParams } from 'react-router-dom';
 import { api, fmtDate, peso, today } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { Badge, Button, Card, Empty, ErrorBox, Field, Input, Select, Stat } from '@/components/ui/primitives';
+import { Searchable } from '@/components/Searchable';
 
 type P = 'TIKTOK' | 'SHOPEE' | 'LAZADA';
 const PLATFORMS: { key: P; name: string; color: string; seller: string }[] = [
@@ -122,10 +123,10 @@ function OrdersTab({ p, manage, warehouses }: { p: P; manage: boolean; warehouse
       </div>}
     </Card>}
     <Card title="E-commerce pull-outs">
-      {list.data?.length ? <table className="w-full text-sm [&_td]:px-2 [&_th]:px-2"><thead className="text-left text-xs uppercase tracking-wide text-slate-500"><tr><th className="py-1">Pull-out</th><th>Date</th><th>From</th><th className="text-right">Orders</th><th className="text-right">Units</th><th>Status</th><th /></tr></thead><tbody>
+      {list.data?.length ? <Searchable><table className="w-full text-sm [&_td]:px-2 [&_th]:px-2"><thead className="text-left text-xs uppercase tracking-wide text-slate-500"><tr><th className="py-1">Pull-out</th><th>Date</th><th>From</th><th className="text-right">Orders</th><th className="text-right">Units</th><th>Status</th><th /></tr></thead><tbody>
         {list.data.map((d) => <Fragment key={d.id}><tr className="border-t"><td className="py-2 font-medium">{d.controlNo}</td><td>{fmtDate(d.docDate)}</td><td>{d.from}</td><td className="text-right">{d.orders}</td><td className="text-right">{d.units}</td><td><Badge tone={STATUS_TONE(d.status === 'RECEIVED' ? 'POSTED' : d.status)}>{d.status === 'RECEIVED' ? 'Approved – shipped' : d.status === 'SUBMITTED' ? 'Waiting for In-Charge' : d.status}</Badge></td><td className="text-right"><Button size="sm" variant="outline" onClick={() => setOpen(open === d.id ? null : d.id)}>{open === d.id ? 'Close' : 'Open'}</Button></td></tr>
           {open === d.id && <tr><td colSpan={7} className="bg-slate-50 p-3"><PulloutView id={d.id} manage={manage} onChange={refresh} /></td></tr>}</Fragment>)}
-      </tbody></table> : <Empty>No pull-out yet. Upload an order file to create one.</Empty>}
+      </tbody></table></Searchable> : <Empty>No pull-out yet. Upload an order file to create one.</Empty>}
     </Card>
   </div>;
 }
@@ -190,10 +191,10 @@ function PayoutsTab({ p, manage, initialOpen }: { p: P; manage: boolean; initial
       {warn.map((w) => <p key={w} className="mt-2 text-sm text-amber-700">{w}</p>)}
     </Card>}
     <Card title="Payouts">
-      {list.data?.length ? <table className="w-full text-sm [&_td]:px-2 [&_th]:px-2"><thead className="text-left text-xs uppercase tracking-wide text-slate-500"><tr><th className="py-1">No.</th><th>Date</th><th>File</th><th className="text-right">Orders</th><th className="text-right">Gross sales</th><th className="text-right">Payout</th><th>Status</th><th /></tr></thead><tbody>
+      {list.data?.length ? <Searchable><table className="w-full text-sm [&_td]:px-2 [&_th]:px-2"><thead className="text-left text-xs uppercase tracking-wide text-slate-500"><tr><th className="py-1">No.</th><th>Date</th><th>File</th><th className="text-right">Orders</th><th className="text-right">Gross sales</th><th className="text-right">Payout</th><th>Status</th><th /></tr></thead><tbody>
         {list.data.map((s) => <Fragment key={s.id}><tr className="border-t"><td className="py-2 font-medium">{s.controlNo}</td><td>{fmtDate(s.docDate)}</td><td className="max-w-48 truncate text-xs text-slate-500">{s.sourceFile}</td><td className="text-right">{s.orders}</td><td className="text-right">{peso(s.grossSales)}</td><td className="text-right font-semibold">{peso(s.payout)}</td><td><Badge tone={STATUS_TONE(s.status)}>{s.status === 'SUBMITTED' ? 'With Accounting' : s.status}</Badge></td><td className="text-right"><Button size="sm" variant="outline" onClick={() => setOpen(open === s.id ? null : s.id)}>{open === s.id ? 'Close' : 'Open'}</Button></td></tr>
           {open === s.id && <tr><td colSpan={8} className="bg-slate-50 p-3"><SettlementView id={s.id} manage={manage} p={p} /></td></tr>}</Fragment>)}
-      </tbody></table> : <Empty>No payout uploaded yet.</Empty>}
+      </tbody></table></Searchable> : <Empty>No payout uploaded yet.</Empty>}
     </Card>
   </div>;
 }
@@ -237,10 +238,10 @@ function SettlementView({ id, manage, p }: { id: string; manage: boolean; p: P }
       </div>
     </div>
     <details><summary className="cursor-pointer text-sm font-semibold text-navy">Orders in the file ({s.details.length})</summary>
-      <table className="mt-2 w-full text-xs [&_td]:px-2 [&_th]:px-2"><thead className="text-left text-slate-500"><tr><th>Order ID</th><th>What happens</th><th className="text-right">Gross</th><th className="text-right">Fees</th><th className="text-right">Refund</th><th className="text-right">Payout</th></tr></thead><tbody>{s.details.map((d) => {
+      <Searchable><table className="mt-2 w-full text-xs [&_td]:px-2 [&_th]:px-2"><thead className="text-left text-slate-500"><tr><th>Order ID</th><th>What happens</th><th className="text-right">Gross</th><th className="text-right">Fees</th><th className="text-right">Refund</th><th className="text-right">Payout</th></tr></thead><tbody>{s.details.map((d) => {
         const a = d.amounts; const fees = a.commission + a.transactionFee + a.shippingFee + a.affiliateFee + a.otherFees - a.adjustments;
         return <tr key={d.orderId} className={`border-t ${d.included ? '' : 'text-slate-400'}`}><td className="py-1 font-mono">{d.orderId}</td><td>{KIND[d.kind]}{d.kind === 'UNKNOWN' && d.included ? ' — booked, no stock' : d.kind === 'UNKNOWN' ? ' — skipped' : ''}</td><td className="text-right">{peso(a.grossSales)}</td><td className="text-right">{peso(fees)}</td><td className="text-right">{peso(a.refunds)}</td><td className="text-right">{peso(a.payout)}</td></tr>;
-      })}</tbody></table></details>
+      })}</tbody></table></Searchable></details>
   </div>;
 }
 
@@ -316,7 +317,7 @@ function AdsTab({ p, manage }: { p: P; manage: boolean }) {
       </div>
       <ErrorBox error={add.error ?? upload.error} />
     </Card>}
-    <Card title={`Ads recorded · total ${peso(total)}`}>{list.data?.length ? <table className="w-full text-sm [&_td]:px-2 [&_th]:px-2"><thead className="text-left text-xs uppercase tracking-wide text-slate-500"><tr><th className="py-1">Month</th><th className="text-right">Amount</th><th>Paid from</th><th>Reference</th></tr></thead><tbody>{list.data.map((a) => <tr key={a.id} className="border-t"><td className="py-1.5">{a.month}</td><td className="text-right">{peso(a.amount)}</td><td>{a.paidFrom}</td><td className="text-xs text-slate-500">{a.reference}</td></tr>)}</tbody></table> : <Empty>No ads recorded yet.</Empty>}</Card>
+    <Card title={`Ads recorded · total ${peso(total)}`}>{list.data?.length ? <Searchable><table className="w-full text-sm [&_td]:px-2 [&_th]:px-2"><thead className="text-left text-xs uppercase tracking-wide text-slate-500"><tr><th className="py-1">Month</th><th className="text-right">Amount</th><th>Paid from</th><th>Reference</th></tr></thead><tbody>{list.data.map((a) => <tr key={a.id} className="border-t"><td className="py-1.5">{a.month}</td><td className="text-right">{peso(a.amount)}</td><td>{a.paidFrom}</td><td className="text-xs text-slate-500">{a.reference}</td></tr>)}</tbody></table></Searchable> : <Empty>No ads recorded yet.</Empty>}</Card>
   </div>;
 }
 
@@ -327,7 +328,7 @@ function TrackerTab({ p, overdueDays }: { p: P; overdueDays: number }) {
   return <Card title="Order tracker">
     <p className="mb-3 text-sm text-slate-600">Every order pulled out, until it is paid or comes back. Shipped more than {overdueDays} days ago and neither paid nor returned = <b className="text-red-700">overdue</b>: follow it up with the platform (or claim a lost parcel). You are reminded every Friday.</p>
     <div className="mb-3 flex flex-wrap gap-2"><Select className="w-56" value={status} onChange={(e) => setStatus(e.target.value)}><option value="">All orders</option><option value="OVERDUE">Overdue</option>{Object.entries(ORDER_STATUS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</Select><Input className="w-64" placeholder="Search order ID or tracking no." value={search} onChange={(e) => setSearch(e.target.value)} /></div>
-    {list.data?.orders.length ? <table className="w-full text-sm [&_td]:px-2 [&_th]:px-2"><thead className="text-left text-xs uppercase tracking-wide text-slate-500"><tr><th className="py-1">Order ID</th><th>Tracking</th><th>Pull-out</th><th className="text-right">Units</th><th>Status</th><th className="text-right">Days since shipped</th></tr></thead><tbody>{list.data.orders.map((o) => <tr key={o.id} className={`border-t ${o.overdue ? 'bg-red-50' : ''}`}><td className="py-1.5 font-mono text-xs">{o.orderId}</td><td className="text-xs">{o.trackingNo}</td><td className="text-xs">{o.pullOutNo}</td><td className="text-right">{o.units}</td><td><Badge tone={o.overdue ? 'red' : ORDER_STATUS[o.status]?.tone ?? 'slate'}>{o.overdue ? 'Overdue' : ORDER_STATUS[o.status]?.label ?? o.status}</Badge></td><td className="text-right">{o.daysSinceShipped ?? '—'}</td></tr>)}</tbody></table> : <Empty>No orders.</Empty>}
+    {list.data?.orders.length ? <Searchable><table className="w-full text-sm [&_td]:px-2 [&_th]:px-2"><thead className="text-left text-xs uppercase tracking-wide text-slate-500"><tr><th className="py-1">Order ID</th><th>Tracking</th><th>Pull-out</th><th className="text-right">Units</th><th>Status</th><th className="text-right">Days since shipped</th></tr></thead><tbody>{list.data.orders.map((o) => <tr key={o.id} className={`border-t ${o.overdue ? 'bg-red-50' : ''}`}><td className="py-1.5 font-mono text-xs">{o.orderId}</td><td className="text-xs">{o.trackingNo}</td><td className="text-xs">{o.pullOutNo}</td><td className="text-right">{o.units}</td><td><Badge tone={o.overdue ? 'red' : ORDER_STATUS[o.status]?.tone ?? 'slate'}>{o.overdue ? 'Overdue' : ORDER_STATUS[o.status]?.label ?? o.status}</Badge></td><td className="text-right">{o.daysSinceShipped ?? '—'}</td></tr>)}</tbody></table></Searchable> : <Empty>No orders.</Empty>}
   </Card>;
 }
 
@@ -340,7 +341,7 @@ function SkuTab({ p, manage }: { p: P; manage: boolean }) {
     <p className="mb-3 text-sm text-slate-600">When the Seller SKU in {pf.name} is the same as the GWS SKU (or barcode), nothing needs to be done. Otherwise the match is saved here the first time an order file shows the SKU.</p>
     {manage && <div className="mb-3 grid gap-3 md:grid-cols-2"><Field label={`${pf.name} Seller SKU`}><Input value={sku} onChange={(e) => setSku(e.target.value)} /></Field><Field label="GWS product">{sku.trim() ? <ProductSearch onPick={(x) => save.mutate(x.id)} /> : <Input disabled placeholder="Type the platform SKU first" />}</Field></div>}
     <ErrorBox error={save.error} />
-    {list.data?.length ? <table className="w-full text-sm [&_td]:px-2 [&_th]:px-2"><thead className="text-left text-xs uppercase tracking-wide text-slate-500"><tr><th className="py-1">{pf.name} SKU</th><th>GWS product</th><th /></tr></thead><tbody>{list.data.map((m) => <tr key={m.id} className="border-t"><td className="py-1.5 font-mono text-xs">{m.platformSku}</td><td>{m.product?.name} <span className="text-xs text-slate-500">{m.product?.sku}</span></td><td className="text-right">{manage && <button className="text-xs text-red-600" onClick={() => del.mutate(m.id)}>Remove</button>}</td></tr>)}</tbody></table> : <Empty>No saved matches.</Empty>}
+    {list.data?.length ? <Searchable><table className="w-full text-sm [&_td]:px-2 [&_th]:px-2"><thead className="text-left text-xs uppercase tracking-wide text-slate-500"><tr><th className="py-1">{pf.name} SKU</th><th>GWS product</th><th /></tr></thead><tbody>{list.data.map((m) => <tr key={m.id} className="border-t"><td className="py-1.5 font-mono text-xs">{m.platformSku}</td><td>{m.product?.name} <span className="text-xs text-slate-500">{m.product?.sku}</span></td><td className="text-right">{manage && <button className="text-xs text-red-600" onClick={() => del.mutate(m.id)}>Remove</button>}</td></tr>)}</tbody></table></Searchable> : <Empty>No saved matches.</Empty>}
   </Card>;
 }
 

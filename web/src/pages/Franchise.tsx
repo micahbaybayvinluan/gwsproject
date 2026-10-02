@@ -6,6 +6,7 @@ import { api, peso, today } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { Badge, Button, Card, Empty, ErrorBox, Field, Input, Select, Stat, Textarea } from '@/components/ui/primitives';
 import { cn } from '@/lib/utils';
+import { Searchable } from '@/components/Searchable';
 
 interface Portal { franchise: { name: string }; stockLines: number; stockUnits: number; incoming: { id: string; controlNo: string; from: string; lines: number }[]; todaySales: { count: number; total: string }; arToWarehouse: { openInvoices: string; transfersAtFranchiseCost: string; goods?: string; penaltyAndInterest?: string; overdue?: string; overdueCount?: number; nextDue?: string | null; creditHold?: boolean } | null; expiring: { bucket: string; qty: number }[]; isOwner: boolean; associateReceives: boolean }
 interface Staff { id: string; fullName: string; username: string }
@@ -90,7 +91,7 @@ function StaffTab() {
       <ErrorBox error={assign.error} />
     </Card>}
     <div className="grid gap-5 xl:grid-cols-2">
-      <Card title="Salaries paid">{!salaries.data?.length ? <Empty>No salaries recorded yet.</Empty> : <table className="w-full text-sm"><thead className="text-left text-[11px] uppercase tracking-wide text-slate-500"><tr><th>Associate</th><th>Period</th><th className="num">Gross</th><th className="num">Charges</th><th className="num">Net</th></tr></thead><tbody>{salaries.data.map((x) => <tr key={x.id} className="border-t border-slate-100"><td className="py-1.5">{x.staff}</td><td className="text-xs">{x.periodFrom} – {x.periodTo}</td><td className="num">{peso(Number(x.basic) + Number(x.allowances))}</td><td className="num text-brand-dark">{Number(x.chargesDeducted) ? peso(x.chargesDeducted) : '—'}</td><td className="num font-semibold">{peso(x.netPay)}</td></tr>)}</tbody></table>}</Card>
+      <Card title="Salaries paid">{!salaries.data?.length ? <Empty>No salaries recorded yet.</Empty> : <Searchable><table className="w-full text-sm"><thead className="text-left text-[11px] uppercase tracking-wide text-slate-500"><tr><th>Associate</th><th>Period</th><th className="num">Gross</th><th className="num">Charges</th><th className="num">Net</th></tr></thead><tbody>{salaries.data.map((x) => <tr key={x.id} className="border-t border-slate-100"><td className="py-1.5">{x.staff}</td><td className="text-xs">{x.periodFrom} – {x.periodTo}</td><td className="num">{peso(Number(x.basic) + Number(x.allowances))}</td><td className="num text-brand-dark">{Number(x.chargesDeducted) ? peso(x.chargesDeducted) : '—'}</td><td className="num font-semibold">{peso(x.netPay)}</td></tr>)}</tbody></table></Searchable>}</Card>
       <Card title="Charges">{!charges.data?.length ? <Empty>No charges.</Empty> : <table className="w-full text-sm"><tbody>{charges.data.map((x) => <tr key={x.id} className="border-t border-slate-100"><td className="py-1.5">{x.staff}</td><td className="text-xs">{KIND[x.kind] ?? x.kind}: {x.reason}</td><td className="num font-semibold">{peso(x.amount)}</td><td className="text-right">{x.deducted ? <Badge tone="green">deducted</Badge> : <Badge tone="amber">open</Badge>}{x.acknowledgedAt && <Badge tone="blue">seen</Badge>}</td></tr>)}</tbody></table>}</Card>
     </div>
   </div>;

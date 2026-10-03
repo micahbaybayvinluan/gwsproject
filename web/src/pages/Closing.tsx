@@ -13,7 +13,7 @@ import { Searchable } from '@/components/Searchable';
 
 const DENOMS = [1000, 500, 200, 100, 50, 20, 10, 5, 1];
 interface CashOnHand { cashOnHand: string; days: { businessDate: string; toDeposit: string; deposited: string; outstanding: string; dueDate: string; daysLeft: number; status: string }[] }
-interface Summary { businessDate: string; cashSalesOnly: string; cashCollections: string; cashSales: string; cashExpenses: string; fundReplenishment?: string; expectedCash: string; totalCashDeposit: string; salesCount: number; expenseCount: number; closed: boolean; close: { countedCash: string | null; cashVariance: string | null; moneyBreakdown: Record<string, number> | null } | null }
+interface Summary { businessDate: string; cashSalesOnly: string; cashCollections: string; cashSales: string; cashExpenses: string; fundReplenishment?: string; replacementCash?: string; expectedCash: string; totalCashDeposit: string; salesCount: number; expenseCount: number; closed: boolean; close: { countedCash: string | null; cashVariance: string | null; moneyBreakdown: Record<string, number> | null } | null }
 
 /** §8.4 Daily close: summary, Money Breakdown cash count (variance recorded, not blocking), post-close edit requests, deposit. */
 export function ClosingPage() {
@@ -37,7 +37,7 @@ export function ClosingPage() {
     {d && <>
       <div className="flex items-center gap-2 text-sm">{d.closed ? <Badge tone="red">CLOSED — edits need approval</Badge> : <Badge tone="green">OPEN (closes 00:00 Manila)</Badge>}</div>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <Stat label="Cash sales" value={peso(d.cashSalesOnly)} sub={`${d.salesCount} DR · + collections ${peso(d.cashCollections)}`} />
+        <Stat label="Cash sales" value={peso(d.cashSalesOnly)} sub={`${d.salesCount} DR · + collections ${peso(d.cashCollections)}${Number(d.replacementCash ?? 0) ? ` · replacement payments ${peso(d.replacementCash)}` : ''}`} />
         <Stat label="Cash-paid expenses" value={peso(d.cashExpenses)} sub={`${d.expenseCount} expense(s)`} />
         <Stat label="Expected cash" value={peso(d.expectedCash)} sub={Number(d.fundReplenishment ?? 0) ? `after ${peso(d.fundReplenishment)} cash fund replenishment` : undefined} />
         <Stat label="Total cash deposit" value={peso(d.totalCashDeposit)} tone="green" />

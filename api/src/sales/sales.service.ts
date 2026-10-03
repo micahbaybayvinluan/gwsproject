@@ -136,11 +136,7 @@ export class SalesService implements OnModuleInit {
         const tierPrice = classFree ? ZERO : tier === 'FRANCHISE' || !isPlastic ? D(await this.master.priceFor(product.id, tier, docDate, tx)) : ZERO;
         let unitPrice = classFree ? ZERO : l.unitPrice != null ? D(l.unitPrice) : tierPrice;
         let memberBacked = false;
-        if (!classFree && l.unitPrice == null && (tier === 'RETAIL' || tier === 'CC') && offers.has(product.id) && D(offers.get(product.id)!).lt(tierPrice)) { unitPrice = D(offers.get(product.id)!); memberBacked = true; }
-        if (!classFree && l.unitPrice == null && !franchiseUser) {
-          const promo = tier === 'RETAIL' && loc.type !== 'FRANCHISE' ? branchPromo.get(product.id) : tier === 'FRANCHISE' ? franchisePromo.get(product.id) : undefined;
-          if (promo && D(promo).lt(unitPrice)) { unitPrice = D(promo); memberBacked = true; }
-        }
+        if (!classFree && l.unitPrice == null && !franchiseUser) { const a = this.autoPriceFor(product.id, tier, tierPrice, { offers, branchPromo, franchisePromo, franchiseLoc: loc.type === 'FRANCHISE' }); if (a) { unitPrice = a.price; memberBacked = true; } }
         const isFreebie = classFree || (isPlastic && unitPrice.isZero());
         if (!isFreebie && product.category.accountingClass === 'SUPPLEMENT') supplementUnits += l.qty;
         if (franchiseUser && l.unitPrice != null && !unitPrice.equals(tierPrice)) {
@@ -231,6 +227,31 @@ export class SalesService implements OnModuleInit {
     // shipping charged to the franchise: "to follow" for the Franchise Coordinator, or typed now; either way its own receivable, separate from the order
     if (ship) await this.franchiseShipping.createForSale({ id: doc.id, controlNo: doc.controlNo, drSiNo: doc.drSiNo, locationId }, franchiseCustomer!.locationId!, { mode: ship.mode as 'TO_FOLLOW' | 'AMOUNT', amount: ship.amount, courier: ship.courier, reference: ship.reference }, user);
     return this.get(doc.id, user);
+  }
+
+  /** The price that applies by itself for an item (a member price or a running promo), when it is lower than the list price. The lowest wins. */
+  private autoPriceFor(productId: string, tier: string, tierPrice: Prisma.Decimal, ctx: { offers: Map<string, Prisma.Decimal>; branchPromo: Map<string, Prisma.Decimal>; franchisePromo: Map<string, Prisma.Decimal>; franchiseLoc: boolean }): { price: Prisma.Decimal; source: 'MEMBER' | 'PROMO' } | null {
+    let best: { price: Prisma.Decimal; source: 'MEMBER' | 'PROMO' } | null = null;
+    if ((tier === 'RETAIL' || tier === 'CC') && ctx.offers.has(productId)) { const o = D(ctx.offers.get(productId)!); if (o.lt(tierPrice)) best = { price: o, source: 'MEMBER' }; }
+    const promo = tier === 'RETAIL' && !ctx.franchiseLoc ? ctx.branchPromo.get(productId) : tier === 'FRANCHISE' ? ctx.franchisePromo.get(productId) : undefined;
+    if (promo && D(promo).lt(best?.price ?? tierPrice)) best = { price: D(promo), source: 'PROMO' };
+    return best;
+  }
+
+  /** For New Sale: the member / promo price of each item, so the price box is filled in by itself (and can still be changed). */
+  async autoPrices(user: SessionUser, i: { locationId?: string; tier: string; memberId?: string | null; productIds: string[]; docDate?: string }) {
+    const locationId = i.locationId ?? user.locationIds[0]; if (!locationId || franchiseUserOf(user)) return {};
+    if (user.locationScoped && !user.locationIds.includes(locationId)) throw new ForbiddenException('Outside your branch');
+    if (!user.permissions.has(`price.view.${i.tier}`)) return {};
+    const loc = await this.prisma.db.location.findUniqueOrThrow({ where: { id: locationId }, select: { type: true } });
+    const date = i.docDate ? toDateOnly(i.docDate) : todayManila();
+    const ctx = { offers: i.memberId ? await this.loyalty.offerPrices(date) : new Map<string, Prisma.Decimal>(), branchPromo: await this.promos.activePrices(date, 'BRANCHES'), franchisePromo: await this.promos.activePrices(date, 'FRANCHISES'), franchiseLoc: loc.type === 'FRANCHISE' };
+    const out: Record<string, { price: number; listPrice: number; source: 'MEMBER' | 'PROMO' }> = {};
+    for (const pid of [...new Set(i.productIds)].slice(0, 100)) {
+      const lp = await this.master.priceFor(pid, i.tier, date); if (lp == null) continue;
+      const a = this.autoPriceFor(pid, i.tier, D(lp), ctx); if (a) out[pid] = { price: Number(a.price), listPrice: Number(lp), source: a.source };
+    }
+    return out;
   }
 
   private validatePayment(input: SalesInput) {

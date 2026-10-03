@@ -146,9 +146,10 @@ export function r11ReplacementCost(r: AccountResolver, e: { locationId: string; 
   assertBalanced(entry.lines); return [entry];
 }
 /** The price difference of a replacement: a positive amount is owed by the customer (cash, or the customer's AR on a credit sale); a negative amount is given back (refund, or credit on the AR). */
-export function r11bReplacementDifference(r: AccountResolver, e: { locationId: string; ref: string; amount: Decimal.Value; channel: string; counterparty?: { type: string; id?: string | null } | null }): Entry[] {
+export function r11bReplacementDifference(r: AccountResolver, e: { locationId: string; ref: string; amount: Decimal.Value; channel: string; counterparty?: { type: string; id?: string | null } | null; mode?: 'CASH' | 'ONLINE' | 'CREDIT_CARD'; paymentAccountId?: string | null }): Entry[] {
   const amt = D(e.amount); if (amt.isZero()) return [];
-  const settle = e.counterparty ? r.ar(e.counterparty, e.locationId) : r.branch('CASH_ON_HAND', e.locationId);
+  // how the customer paid (or was refunded): the drawer, or the bank / GCash / card account chosen
+  const settle = e.counterparty ? r.ar(e.counterparty, e.locationId) : e.mode && e.mode !== 'CASH' && e.paymentAccountId ? e.paymentAccountId : r.branch('CASH_ON_HAND', e.locationId);
   // a refund / credit reduces sales through the company-wide Sales - Returns account
   const lines = amt.gt(0) ? [dr(settle, amt), cr(r.branch(salesTemplateFor(e.channel), e.locationId), amt)] : [dr(r.global('SALES_RETURNS'), amt.abs()), cr(settle, amt.abs())];
   const entry: Entry = { rule: 'R11', book: 'BENTA', lines: consolidate(lines), remarks: `Replacement price difference ${e.ref}` };

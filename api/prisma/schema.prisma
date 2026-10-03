@@ -2396,6 +2396,7 @@ model ReplacementTicket {
   replacementPicks     Json?     @map("replacement_picks")
   /// replacement value − the value on the DR: + the customer pays, − the customer is refunded / credited
   priceDifference      Decimal?  @map("price_difference") @db.Decimal(14, 2)
+  replacedOn           DateTime? @map("replaced_on") @db.Date // the day the branch gave the replacement (the stock leaves on this day)
   differenceSettledAt  DateTime? @map("difference_settled_at")
   differenceSettledBy  String?   @map("difference_settled_by")
   differenceNote       String?   @map("difference_note")
@@ -3067,4 +3068,27 @@ model CustomerContact {
   @@index([followUpId])
   @@index([kind, outcome])
   @@map("customer_contacts")
+}
+
+/// Money moving because of a replacement's price difference (owner request 2026-10-08): the customer paid the difference, or it was refunded, on a day the
+/// branch states. It shows on that day's Daily Sales Report as Replacement Payments, apart from normal sales. A closed day needs the Head Auditor.
+model ReplacementPayment {
+  id                String    @id @default(uuid())
+  ticketId          String    @map("ticket_id")
+  locationId        String    @map("location_id")
+  businessDate      DateTime  @map("business_date") @db.Date
+  direction         String // IN = the customer paid | OUT = refunded to the customer
+  mode              String // CASH | ONLINE | CREDIT_CARD
+  paymentAccountId  String?   @map("payment_account_id")
+  amount            Decimal   @db.Decimal(14, 2)
+  note              String?
+  status            String    @default("APPLIED") // APPLIED | PENDING_APPROVAL | REJECTED
+  approvalRequestId String?   @map("approval_request_id")
+  createdBy         String    @map("created_by")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  appliedAt         DateTime? @map("applied_at")
+
+  @@index([locationId, businessDate, status])
+  @@index([ticketId])
+  @@map("replacement_payments")
 }

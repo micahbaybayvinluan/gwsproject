@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { api, peso } from '@/lib/api';
 import { Badge, Button, ErrorBox, Field, Input, Modal } from '@/components/ui/primitives';
 import type { MemberLite } from '@/components/MemberPicker';
+import { PickedInput } from '@/components/PickedInput';
 
 interface V { id: string; code: string; kind: 'AMOUNT' | 'PERCENT'; value: number; minPurchase: number; expiresOn: string }
 const TONE: Record<string, 'slate' | 'blue' | 'amber'> = { BRONZE: 'slate', SILVER: 'blue', GOLD: 'amber' };
@@ -28,7 +29,7 @@ export function LostSaleButton({ locationId, memberId }: { locationId: string; m
   return <div className="md:col-span-3"><Button type="button" size="sm" variant="outline" onClick={() => { setDone(''); setOpen(true); }}>Customer asked for an item we didn't have</Button>{done && <span className="ml-3 text-xs text-emerald-700">{done}</span>}
     {open && <Modal title="Item we didn't have" onClose={() => setOpen(false)}>
       <p className="mb-2 text-sm text-slate-600">This helps us stock what customers ask for. Pick the product, or type what they asked for.</p>
-      <Field label="Item"><div className="relative">{pick ? <div className="flex items-center gap-2 rounded-xl bg-slate-100 px-3 py-2 text-sm">{pick.name}<button type="button" className="ml-auto text-red-600" onClick={() => setPick(null)}>✕</button></div> : <Input autoFocus value={text} onChange={(e) => setText(e.target.value)} placeholder="e.g. chocolate whey 5 lb, pink creatine gummies…" />}{!pick && prods.data && prods.data.length > 0 && <ul className="absolute z-20 mt-1 max-h-52 w-full overflow-auto rounded-xl border bg-white text-sm shadow-lg">{prods.data.map((p) => <li key={p.id}><button type="button" className="w-full px-3 py-2 text-left hover:bg-slate-50" onClick={() => { setPick({ id: p.id, name: p.name }); setText(''); }}>{p.sku} · {p.name}</button></li>)}</ul>}</div></Field>
+      <Field label="Item"><PickedInput autoFocus picked={pick ? pick.name : null} placeholder="e.g. chocolate whey 5 lb, pink creatine gummies…" search={text} onSearch={setText} onClear={() => setPick(null)}>{prods.data && prods.data.length > 0 && <ul className="absolute z-20 mt-1 max-h-52 w-full overflow-auto rounded-xl border bg-white text-sm shadow-lg">{prods.data.map((p) => <li key={p.id}><button type="button" className="w-full px-3 py-2 text-left hover:bg-slate-50" onClick={() => { setPick({ id: p.id, name: p.name }); setText(''); }}>{p.sku} · {p.name}</button></li>)}</ul>}</PickedInput></Field>
       <Field label="How many" className="mt-2"><Input type="number" min={1} value={qty} onChange={(e) => setQty(e.target.value)} /></Field>
       <ErrorBox error={save.error} /><div className="mt-3 flex gap-2"><Button disabled={(!pick && text.trim().length < 2) || save.isPending} onClick={() => save.mutate()}>Save</Button><Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button></div>
     </Modal>}

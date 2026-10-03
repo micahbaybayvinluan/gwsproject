@@ -172,6 +172,15 @@ export async function fillDailySalesTemplate(rep: DailySalesReport, file: string
   pa.getRow(1).font = { bold: true };
   for (const a of rep.byPaymentAccount) pa.addRow({ account: a.account, mode: a.mode, count: a.count, amount: asNum(a.amount) });
   if (rep.byPaymentAccount.length) { const last = pa.rowCount; pa.addRow({ account: 'TOTAL', count: { formula: `SUM(C2:C${last})` }, amount: { formula: `SUM(D2:D${last})` } }).font = { bold: true }; }
+  // replacement payments: the price difference of replacements paid by / refunded to customers on this day, apart from sales
+  const rpw = wb.addWorksheet('REPLACEMENT PAYMENTS');
+  rpw.columns = [{ header: 'Ticket', key: 'ticket', width: 14 }, { header: 'DR/SI', key: 'dr', width: 12 }, { header: 'Customer', key: 'customer', width: 26 }, { header: 'Item given', key: 'item', width: 30 }, { header: 'How', key: 'how', width: 22 }, { header: 'Account', key: 'account', width: 28 }, { header: 'Amount (− = refunded)', key: 'amount', width: 20, style: { numFmt: '#,##0.00' } }];
+  rpw.getRow(1).font = { bold: true };
+  for (const x of rep.replacements.rows) rpw.addRow({ ticket: x.ticketNo, dr: x.drSiNo ?? '', customer: x.customer ?? '', item: x.item ?? '', how: `${x.direction === 'IN' ? 'paid' : 'refunded'} · ${x.mode.toLowerCase().replace('_', ' ')}`, account: x.account ?? '', amount: asNum(x.signed) });
+  rpw.addRow({}); const rl = rpw.rowCount;
+  for (const [label, v] of [['Replacement cash (joins the cash deposit)', rep.replacements.cash], ['Replacement online', rep.replacements.online], ['Replacement card', rep.replacements.card], ['Total replacement payments', rep.replacements.total]] as const) rpw.addRow({ item: label, amount: asNum(v) }).font = { bold: true };
+  void rl;
+  rpw.addRow({ item: 'Total cash deposit incl. replacement cash', amount: asNum(rep.totalCashDeposit) }).font = { bold: true };
   return restorePalette(file, Buffer.from(await wb.xlsx.writeBuffer()));
 }
 function compactExp<T extends { accountTitle: string; payee: string | null; amount: unknown }>(rows: T[], cap: number): T[] {

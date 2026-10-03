@@ -572,6 +572,18 @@ The result also goes into the member's contact log. Product or service trouble (
 
 **Prices.** An item with a promo price is sold at that price **by itself at New Sale** (no special-price approval), for branch sales on the retail price list (cash / online; credit-card sales keep the card price), and for franchise promos when the Franchise Coordinator records a franchise sale. A price typed by hand wins, and a member price is used when it is lower. When the promo ends or is cancelled the normal price returns. The Owner or the Head Auditor can **Cancel promo** with a reason: everyone concerned is told and the memo is withdrawn.
 
+## Replacement price difference: how it was paid, and the day
+<!-- for: replacement.create, replacement.view, approval.act.REPLACEMENT_PAYMENT -->
+**When the replacement is given** (Replacement Tickets → open the ticket → *We gave the replacement*): choose the product (the box shows your choice; the price is filled in from the price list and you may change it) and the **day the replacement was given**. The stock leaves on that day, so that day's inventory changes. The Head Auditor approves every replacement; if the day is already closed the request says so.
+
+**When the customer pays the difference (or is refunded):** *Record the payment of the difference* (or *the refund given*). Choose **how**: cash, online (pick the bank / GCash account) or credit card, and the **day** it was paid. It then appears in the **Daily Sales Report of that day under Replacement payments**, apart from normal sales: cash joins the day's cash and deposit, online and card show with their account. The Excel report has its own sheet *REPLACEMENT PAYMENTS*; Daily Close shows it in the expected cash. A sale made on credit puts the difference on the customer's receivable instead.
+
+**A day that is already closed** needs the **Head Auditor's approval** (My Approvals → *Replacement payment dated on a closed day*). Until then it is not in that day's report. If it is not approved, record it again with the right day. The Head Auditor recording it himself needs no second approval.
+
+## Choosing items from a search box
+<!-- for: all -->
+Wherever you choose **one** item from a search (a product, an outlet, the product given in a replacement…), the item you pick is shown **inside the box** with a *✕ change* button, so there is no doubt what is chosen. Prices that depend on the item (the replacement price, a member price, a promo price) are **filled in for you** and can always be changed. At **New Sale**, member prices and running promo prices fill the price box by themselves; edit the box to charge something else.
+
 ## Email and SMS campaigns
 <!-- for: member.blast -->
 1. Open **Email & SMS**. The two boxes at the top say whether email and SMS are ready. Setup (once, in `api/.env`, then restart): **email** = `SMTP_URL` (your mail server) and `MAIL_FROM` (the one company email all blasts come from), **SMS** = `SEMAPHORE_API_KEY` (and `SEMAPHORE_SENDER`), and `PUBLIC_URL` (the web address customers use, so the unsubscribe link works).

@@ -8,13 +8,15 @@ import { D, ZERO } from '../common/money';
 
 export interface RSale { id: string; paymentAccount?: string | null; drSiNo: string; channel: string; channelSub: string | null; paymentMode: string; customerName: string | null; agentName: string | null; riderName: string | null; deliveryFee: Decimal; riderIncentive: Decimal; shippingFee: Decimal; shippingExpense: Decimal; marketplaceCharges: Decimal; productTotal: Decimal; grandTotal: Decimal; cardMid: string | null; cardSlipNo: string | null; cardApprovalCode: string | null; cardBatchNo: string | null; notes: string | null; lines: { productName: string; qty: number; unitPrice: Decimal; amount: Decimal; isFreebie: boolean; accountingClass: string }[] }
 export interface RExpense { accountTitle: string; payee: string | null; amount: Decimal; paidFrom: string; /** a rider incentive paid from a sale: shown in the rider summary, so not repeated in the rider expense box */ inRiderSummary?: boolean }
+/** A replacement's price difference paid by (IN) or refunded to (OUT) the customer on this day: shown apart from normal sales (owner request 2026-10-08). */
+export interface RRepPay { ticketNo: string; drSiNo: string | null; customer: string | null; item: string | null; direction: 'IN' | 'OUT'; mode: 'CASH' | 'ONLINE' | 'CREDIT_CARD'; account: string | null; amount: Decimal; givenOn: string | null }
 export interface RClose { moneyBreakdown: Record<string, number> | null; countedCash: Decimal | null; expectedCash: Decimal | null; cashVariance: Decimal | null }
 
 const sum = (xs: Decimal[]) => xs.reduce((s, x) => s.plus(x), ZERO);
 const prod = (s: RSale[]) => sum(s.map((x) => x.productTotal));
 const isShipping = (s: RSale) => s.channel === 'SHIPPING_COURIER' || s.channel === 'SHIPPING_MARKETPLACE';
 
-export function buildDailySalesReport(input: { branch: string; date: string; sales: RSale[]; expenses: RExpense[]; close: RClose | null; preparedBy: string; majorExpenseTitles?: RegExp }) {
+export function buildDailySalesReport(input: { branch: string; date: string; sales: RSale[]; expenses: RExpense[]; close: RClose | null; preparedBy: string; majorExpenseTitles?: RegExp; replacementPayments?: RRepPay[] }) {
   const S = input.sales.filter((s) => s.channelSub !== 'CONSIGNMENT');
   const by = (mode: string, ch: (s: RSale) => boolean) => S.filter((s) => s.paymentMode === mode && ch(s));
   const deliv = (s: RSale) => s.channel === 'DELIVERY' || (!!s.riderName && ['WALK_IN', 'PERSONAL', 'OTHER'].includes(s.channel));
@@ -51,13 +53,17 @@ export function buildDailySalesReport(input: { branch: string; date: string; sal
   const accountMap = new Map<string, { account: string; mode: string; count: number; amount: Decimal }>();
   for (const s of S.filter((x) => x.paymentMode === 'ONLINE' || x.paymentMode === 'CREDIT_CARD')) { const k = `${s.paymentAccount ?? 'Not set'}|${s.paymentMode}`; const cur = accountMap.get(k) ?? { account: s.paymentAccount ?? 'Not set', mode: s.paymentMode === 'CREDIT_CARD' ? 'Credit card' : 'Online', count: 0, amount: ZERO }; cur.count++; cur.amount = cur.amount.plus(s.grandTotal); accountMap.set(k, cur); }
   const byPaymentAccount = [...accountMap.values()].sort((a, b) => a.account.localeCompare(b.account));
+  // replacement payments: money in (+) or refunded (−), by how it moved; the cash part joins the drawer and the deposit
+  const rp = (input.replacementPayments ?? []).map((x) => ({ ...x, signed: x.direction === 'IN' ? x.amount : x.amount.negated() }));
+  const rpBy = (mode: string) => sum(rp.filter((x) => x.mode === mode).map((x) => x.signed));
+  const replacements = { rows: rp, cash: rpBy('CASH'), online: rpBy('ONLINE'), card: rpBy('CREDIT_CARD'), total: sum(rp.map((x) => x.signed)), count: rp.length };
   return {
     header: { branch: input.branch, date: input.date, systemDate: new Date().toISOString(), preparedBy: input.preparedBy },
     sales: S,
     cash: { ...cash, subtotal: cashSubtotal }, creditCard: { ...cc, total: ccTotal, ...ccCounts }, onlineWalkIn: onlineWalk, onlineDelivery, shipping, onlineCcShippingTotal: onlineCcShipTotal, ar: arTotal,
     channelTotals, productCounts, feesBox: { deliveryFee: sum(S.map((s) => s.deliveryFee)), shippingFee: sum(S.map((s) => s.shippingFee)) }, riders, moneyBreakdown: input.close?.moneyBreakdown ?? null, cashCount: input.close ? { counted: input.close.countedCash, expected: input.close.expectedCash, variance: input.close.cashVariance } : null,
     expenses, expenseTotals: { major: sum(expenses.filter((e) => e.group === 'MAJOR').map((e) => e.amount)), other: sum(expenses.filter((e) => e.group === 'OTHER').map((e) => e.amount)), total: totalExpenses, riderExpense, shippingExpense },
-    freebies, byPaymentAccount, bankDeposit: { cash: cashSubtotal, expenses: cashExpenses, total: cashSubtotal.minus(cashExpenses) }, totalCashDeposit: cashSubtotal.minus(cashExpenses), overallSales: overall, totalProducts: channelTotals.reduce((n, c) => n + c.products, 0),
+    freebies, byPaymentAccount, replacements, bankDeposit: { cash: cashSubtotal, replacementCash: replacements.cash, expenses: cashExpenses, total: cashSubtotal.plus(replacements.cash).minus(cashExpenses) }, totalCashDeposit: cashSubtotal.plus(replacements.cash).minus(cashExpenses), overallSales: overall, totalProducts: channelTotals.reduce((n, c) => n + c.products, 0),
     sheets: {
       walkIn: S.filter(walk).map(rowOf), delivery: S.filter(deliv).map(rowOf), shipping: ship.map(rowOf), creditCard: S.filter((s) => s.paymentMode === 'CREDIT_CARD').map((s) => ({ ...rowOf(s), customer: s.customerName, mid: s.cardMid, slip: s.cardSlipNo, approval: s.cardApprovalCode, batch: s.cardBatchNo })),
       receiptTracker: S.map((s) => ({ drSiNo: s.drSiNo, channel: s.channel, paymentMode: s.paymentMode, amount: s.grandTotal, customer: s.customerName ?? s.agentName ?? '' })),

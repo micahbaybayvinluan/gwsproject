@@ -8,8 +8,8 @@ import { ReplacementsService } from './replacements.service';
 const Reason = z.enum(['DAMAGED', 'DEFECTIVE', 'WRONG_ITEM', 'EXPIRED', 'OTHER']);
 const Customer = z.object({ salesLineId: z.string().uuid(), qty: z.number().int().positive(), reason: Reason, notes: z.string().trim().max(500).optional(), locationId: z.string().uuid().optional() });
 const Supplier = z.object({ productId: z.string().uuid(), qty: z.number().int().positive(), batchId: z.string().uuid().optional(), supplierId: z.string().uuid().optional(), reason: Reason, notes: z.string().trim().max(500).optional(), locationId: z.string().uuid().optional() });
-const Replace = z.object({ productId: z.string().uuid().optional(), qty: z.number().int().positive().optional(), unitPrice: z.number().nonnegative().optional(), note: z.string().trim().max(500).optional(), locationId: z.string().uuid().optional() });
-const Settle = z.object({ note: z.string().trim().max(500).optional() });
+const Replace = z.object({ productId: z.string().uuid().optional(), qty: z.number().int().positive().optional(), unitPrice: z.number().nonnegative().optional(), note: z.string().trim().max(500).optional(), locationId: z.string().uuid().optional(), givenOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() });
+const Settle = z.object({ note: z.string().trim().max(500).optional(), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), mode: z.enum(['CASH', 'ONLINE', 'CREDIT_CARD']).optional(), paymentAccountId: z.string().uuid().nullable().optional() });
 const Cancel = z.object({ reason: z.string().trim().min(3) });
 
 @Controller('api/replacements')

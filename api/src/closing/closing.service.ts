@@ -49,8 +49,11 @@ export class ClosingService implements OnModuleInit {
     // cash taken from today's cash sales to top the branch cash fund back up leaves the drawer too
     const fundReplenishment = sum((await this.prisma.db.cashFundTxn.findMany({ where: { locationId, businessDate, kind: 'REPLENISH' }, select: { amount: true } })).map((t) => t.amount));
     const close = await this.prisma.db.dailyClose.findUnique({ where: { locationId_businessDate: { locationId, businessDate } } });
-    const expectedCash = cashSales.minus(cashExpenses).minus(fundReplenishment);
-    return { locationId, businessDate: dateStr(businessDate), cashSalesOnly, cashCollections, cashSales, cashExpenses, fundReplenishment, expectedCash, totalCashDeposit: expectedCash, salesCount: sales.length, expenseCount: expenses.length, closed: !!close, close };
+    // price differences of replacements paid in cash (or refunded in cash) on the day (owner request 2026-10-08)
+    const rpay = await this.prisma.db.replacementPayment.findMany({ where: { locationId, businessDate, status: 'APPLIED', mode: 'CASH' }, select: { direction: true, amount: true } });
+    const replacementCash = sum(rpay.filter((p) => p.direction === 'IN').map((p) => p.amount)).minus(sum(rpay.filter((p) => p.direction === 'OUT').map((p) => p.amount)));
+    const expectedCash = cashSales.plus(replacementCash).minus(cashExpenses).minus(fundReplenishment);
+    return { locationId, businessDate: dateStr(businessDate), cashSalesOnly, cashCollections, cashSales, replacementCash, cashExpenses, fundReplenishment, expectedCash, totalCashDeposit: expectedCash, salesCount: sales.length, expenseCount: expenses.length, closed: !!close, close };
   }
 
   /** Associate fills the Money Breakdown; variance recorded, not blocking (§18.3). */

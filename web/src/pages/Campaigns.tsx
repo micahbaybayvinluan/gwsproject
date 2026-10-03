@@ -5,6 +5,7 @@ import { api, fmtDate, peso } from '@/lib/api';
 import { Badge, Button, Card, Empty, ErrorBox, Field, Input, Modal, Select, Stat, Textarea } from '@/components/ui/primitives';
 import { Segmented } from '@/components/ui/widgets';
 import { DataTable } from '@/components/ui/table';
+import { PickedInput } from '@/components/PickedInput';
 
 interface Cfg { emailConfigured: boolean; from: string | null; smsConfigured: boolean; smsSender: string | null; segments: { key: string; label: string }[] }
 type Ch = 'EMAIL' | 'SMS' | 'WHATSAPP' | 'VIBER' | 'MESSENGER';
@@ -46,7 +47,7 @@ export function CampaignsPage() {
       <div className="mt-3 grid gap-3 md:grid-cols-4">
         <Field label="Send to"><Select value={source} onChange={(e) => { setSource(e.target.value as 'MEMBERS' | 'ALL_CONTACTS'); if (e.target.value === 'ALL_CONTACTS') setSegment(''); }}><option value="MEMBERS">Wheysted members</option><option value="ALL_CONTACTS" disabled={manual}>Everyone in our database</option></Select></Field>
         <Field label="Only members who are"><Select value={segment} disabled={source === 'ALL_CONTACTS'} onChange={(e) => setSegment(e.target.value)}><option value="">All</option>{cfg.data?.segments.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}</Select></Field>
-        <Field label="Who bought this item (optional)" className="md:col-span-2"><div className="relative">{productId ? <div className="flex items-center gap-2 rounded-xl bg-slate-100 px-3 py-2 text-sm">{productName || productId}<button className="ml-auto text-red-600" onClick={() => { setProductId(''); setProductName(''); setText(''); }}>✕</button></div> : <><Input value={text} onChange={(e) => setText(e.target.value)} placeholder="Search an item…" />{(prods.data?.length ?? 0) > 0 && <ul className="absolute z-20 mt-1 max-h-56 w-full divide-y overflow-auto rounded-xl border bg-white text-sm shadow-lg">{prods.data!.map((p) => <li key={p.id}><button type="button" className="w-full px-3 py-2 text-left hover:bg-slate-50" onClick={() => { setProductId(p.id); setProductName(`${p.sku} · ${p.name}`); }}>{p.sku} · {p.name}</button></li>)}</ul>}</>}</div></Field>
+        <Field label="Who bought this item (optional)" className="md:col-span-2"><PickedInput picked={productId ? productName || productId : null} placeholder="Search an item…" search={text} onSearch={setText} onClear={() => { setProductId(''); setProductName(''); setText(''); }}>{(prods.data?.length ?? 0) > 0 && <ul className="absolute z-20 mt-1 max-h-56 w-full divide-y overflow-auto rounded-xl border bg-white text-sm shadow-lg">{prods.data!.map((p) => <li key={p.id}><button type="button" className="w-full px-3 py-2 text-left hover:bg-slate-50" onClick={() => { setProductId(p.id); setProductName(`${p.sku} · ${p.name}`); setText(''); }}>{p.sku} · {p.name}</button></li>)}</ul>}</PickedInput></Field>
       </div>
       <div className="mt-3 grid gap-3 md:grid-cols-4">
         <Field label="Goal"><Select value={goal} disabled={source === 'ALL_CONTACTS'} onChange={(e) => setGoal(e.target.value)}><option value="">Any</option>{[['MUSCLE_GAIN', 'Build muscle'], ['WEIGHT_LOSS', 'Lose weight'], ['ENDURANCE', 'Endurance / sports'], ['GENERAL_HEALTH', 'General health'], ['STRENGTH', 'Strength'], ['OTHER', 'Other']].map(([k, l]) => <option key={k} value={k}>{l}</option>)}</Select></Field>

@@ -69,7 +69,7 @@ async function resetTransactionalData() {
   await prisma.$executeRawUnsafe(`TRUNCATE replacement_receipts, replacement_tickets, franchise_shipping_charges, form_numbers_released, ecom_waybills, ecom_waybill_hints, franchise_payments, franchise_ar_adjustments, franchise_ar_extensions, franchise_invoices, memo_recipients, memos, six_pack_stickers, six_pack_redemptions CASCADE`);
   await prisma.$executeRawUnsafe(`TRUNCATE outlet_changes, outlet_shares, itinerary_claims, itinerary_stops, itineraries, agent_consignment_limits, outlets, sales_areas CASCADE`);
   await prisma.$executeRawUnsafe(`TRUNCATE campaign_recipients, campaigns, message_opt_outs, members CASCADE`);
-  await prisma.$executeRawUnsafe(`TRUNCATE promo_items, promos, customer_contacts, customer_follow_ups CASCADE`);
+  await prisma.$executeRawUnsafe(`TRUNCATE promo_items, promos, customer_contacts, customer_follow_ups, replacement_payments CASCADE`);
   await prisma.$executeRawUnsafe(`TRUNCATE member_vouchers, member_points_entries, member_notes, member_offers, survey_items, survey_responses, survey_invites, lost_sales, reservations, stock_alert_requests, member_auto_messages CASCADE`);
   await prisma.$executeRawUnsafe(`UPDATE consignment_agreements SET agent_key = NULL, agent_name = NULL, outlet_id = NULL`);
   await prisma.$executeRawUnsafe(`UPDATE locations SET credit_hold = false, credit_hold_note = NULL`);
@@ -2305,7 +2305,8 @@ describe('Replacement tickets: customer returns and returns to suppliers (owner 
     expect(ok(await as('head.auditor').get(`/api/replacements/${t.id}`)).body.status).toBe('CLOSED');
     // the cost of the 2 replacements (B at ₱600) is expensed against Dasmariñas' inventory
     let j = await lines('ReplacementTicket', t.id); expect(bal(j)).toBe(true); expect(j.find((x) => /Replacement Cost/.test(x.title))?.dr).toBe(1200); expect(j.some((x) => /Inventory/.test(x.title) && x.cr === 1200)).toBe(true);
-    ok(await as('sales.dasma').post(`/api/replacements/${t.id}/settle`).send({ note: 'paid in cash' }));
+    await as('sales.dasma').post(`/api/replacements/${t.id}/settle`).send({ note: 'no mode' }).expect(400); // how it was paid is required
+    ok(await as('sales.dasma').post(`/api/replacements/${t.id}/settle`).send({ note: 'paid in cash', mode: 'CASH' }));
     // the ₱400 the customer paid: Dr Cash on Hand / Cr Sales
     j = await lines('ReplacementTicket', t.id); expect(bal(j)).toBe(true); expect(j.some((x) => /Cash on Hand/i.test(x.title) && x.dr === 400)).toBe(true); expect(j.some((x) => /^Sales/.test(x.title) && x.cr === 400)).toBe(true);
     ok(await as('admin').put('/api/settings').send({ 'gl.auto_posting_enabled': false }));
@@ -2952,6 +2953,9 @@ describe('Promos for the branches or the franchises, and the Customer Service to
     // New Sale: promo price by itself, no special-price approval, a typed price wins
     const a = await sale('1', [{ productId: pid, qty: 2 }]); expect(Number(a.productTotal)).toBe(1600); expect(a.specialPriceStatus ?? null).toBeNull();
     const b = await sale('2', [{ productId: pid, qty: 1, unitPrice: 1000 }]); expect(Number(b.productTotal)).toBe(1000);
+    // New Sale fills the price box by itself (and the line is sent without a typed price so no approval is asked)
+    const hint = ok(await as('sales.westave').post('/api/sales/auto-prices').send({ locationId: west, tier: 'RETAIL', productIds: [pid] })).body; expect(hint[pid]).toMatchObject({ price: 800, listPrice: 1000, source: 'PROMO' });
+    expect(ok(await as('sales.westave').post('/api/sales/auto-prices').send({ locationId: west, tier: 'CC', productIds: [pid] })).body[pid]).toBeUndefined(); // card sales keep the card price
     // the memo is real and printable
     const memo = ok(await as('sales.westave').get(`/api/memos/${pr.memoId ?? (await prisma.promo.findUniqueOrThrow({ where: { id: pr.id } })).memoId}`)).body; expect(memo.subject).toContain('PROMO'); expect(memo.table.rows[0][2]).toContain('800');
     ok(await as('head.auditor').post(`/api/promos/${pr.id}/cancel`).send({ reason: 'Stock is low' }));
@@ -3019,5 +3023,89 @@ describe('Promos for the branches or the franchises, and the Customer Service to
     const log = ok(await as('sales.westave').get('/api/customer-service/contacts')).body as { reasonLabel: string }[]; expect(log.some((x) => /cheaper/i.test(x.reasonLabel))).toBe(true);
     expect(ok(await as('sales.westave').get('/api/customer-service/options')).body.reasons.length).toBeGreaterThan(10);
     await as('hr.staff').get('/api/customer-service/board').expect(403);
+  });
+});
+
+
+describe('Replacement payments: how the customer settled the difference and on which day, in the Daily Sales Report apart from sales; a closed day needs the Head Auditor (owner request 2026-10-08)', () => {
+  const day = (n: number) => new Date(Date.now() + 8 * 3600e3 + n * 86400e3).toISOString().slice(0, 10);
+  let west = ''; let a = ''; let b = ''; let acct = ''; let n = 0;
+  const give = async (loc: string, p: string, qty: number) => { const bt = await prisma.batch.create({ data: { productId: p, batchNo: `RP-${run}-${++n}`, receivedRef: 'TEST', unitCost: '400' } }); await prisma.stockLedger.create({ data: { locationId: loc, productId: p, batchId: bt.id, qtyDelta: qty, movementType: 'RECEIVE', documentType: 'Opening', documentId: bt.batchNo, unitCost: '400', businessDate: new Date(`${day(0)}T00:00:00Z`) } }); await prisma.stockBalance.create({ data: { locationId: loc, productId: p, batchId: bt.id, qty } }); };
+  const report = async (date: string) => ok(await as('sales.westave').get(`/api/reports/daily-sales?locationId=${west}&date=${date}`)).body;
+  /** a sale of 2 × A, a ticket for it, the replacement (2 × B: the customer owes 1,000) given on `givenOn` and approved */
+  const ticket = async (tag: string, saleDay: string | null, givenOn?: string) => {
+    ok(await as('sales.westave').post('/api/sales').send({ channel: 'WALK_IN', paymentMode: 'CASH', drSiNo: `RP-${run}-${tag}`, customerName: 'Rina Replace', lines: [{ productId: a, qty: 2 }] }));
+    const dr = `RP-${run}-${tag}`;
+    if (saleDay) await prisma.salesDoc.updateMany({ where: { drSiNo: dr }, data: { docDate: new Date(`${saleDay}T00:00:00Z`) } });
+    const found = ok(await as('sales.csr').get(`/api/replacements/find-dr?q=${dr}`)).body as { lines: { lineId: string }[] }[];
+    const t = ok(await as('sales.csr').post('/api/replacements/customer').send({ salesLineId: found[0].lines[0].lineId, qty: 2, reason: 'WRONG_ITEM' }).expect(201)).body;
+    const done = ok(await as('sales.westave').post(`/api/replacements/${t.id}/replace`).send({ productId: b, ...(givenOn ? { givenOn } : {}) }).expect(201)).body;
+    expect(Number(done.priceDifference)).toBe(1000);
+    return { id: t.id as string, ticketNo: t.ticketNo as string, dr };
+  };
+  const approve = async (type: string, id: string, who = 'head.auditor') => { const req = await prisma.approvalRequest.findFirstOrThrow({ where: { type, documentId: id, status: 'PENDING' } }); return ok(await as(who).post(`/api/approvals/${req.id}/decide`).send({ decision: 'APPROVE' })); };
+
+  it('setup', async () => {
+    await prisma.salesReportSubmission.deleteMany({});
+    west = (await prisma.location.findUniqueOrThrow({ where: { code: 'WESTAVE' } })).id;
+    const cats = ok(await as('admin').get('/api/categories')).body as { id: string; accountingClass: string }[]; const cat = cats.find((c) => c.accountingClass === 'SUPPLEMENT')!.id;
+    a = ok(await as('admin').post('/api/products').send({ name: `RP A ${run}`, brand: 'X', categoryId: cat, prices: { RETAIL: 1000 }, cost: 500 })).body.id; b = ok(await as('admin').post('/api/products').send({ name: `RP B ${run}`, brand: 'X', categoryId: cat, prices: { RETAIL: 1500 }, cost: 600 })).body.id;
+    await give(west, a, 40); await give(west, b, 40);
+    const accts = ok(await as('sales.westave').get(`/api/accounts/payment?locationId=${west}`)).body as { id: string; title: string }[]; expect(accts.length).toBeGreaterThan(0); acct = accts[0].id;
+  });
+
+  it('the branch states how the customer paid and the day; online needs the account; it shows in that day\'s Daily Sales Report as a replacement payment, apart from sales', async () => {
+    const before = await report(day(0));
+    const t = await ticket('1', null);
+    await approve('REPLACEMENT_TICKET', t.id);
+    await as('sales.westave').post(`/api/replacements/${t.id}/settle`).send({ mode: 'ONLINE', date: day(0) }).expect(400); // an account is needed for online
+    await as('sales.westave').post(`/api/replacements/${t.id}/settle`).send({ mode: 'CASH', date: day(1) }).expect(400); // not in the future
+    const ok1 = ok(await as('sales.westave').post(`/api/replacements/${t.id}/settle`).send({ mode: 'ONLINE', paymentAccountId: acct, date: day(0), note: 'GCash' })).body;
+    expect(ok1.payments[0]).toMatchObject({ mode: 'ONLINE', direction: 'IN', amount: 1000, status: 'APPLIED' }); expect(ok1.differenceSettledAt).toBeTruthy();
+    const r = await report(day(0));
+    expect(r.replacements.rows.some((x: { ticketNo: string; mode: string }) => x.ticketNo === t.ticketNo && x.mode === 'ONLINE')).toBe(true);
+    expect(Number(r.replacements.online) - Number(before.replacements.online)).toBe(1000); expect(Number(r.replacements.cash)).toBe(Number(before.replacements.cash));
+    // apart from sales: the sales totals did not move because of it
+    expect(Number(r.overallSales)).toBe(Number(before.overallSales) + 2000);
+    await as('sales.westave').post(`/api/replacements/${t.id}/settle`).send({ mode: 'CASH' }).expect(400); // already settled
+    // cash replacement payments join the cash deposit, and the expected cash of the day
+    const t2 = await ticket('2', null); await approve('REPLACEMENT_TICKET', t2.id);
+    const s0 = ok(await as('sales.westave').get(`/api/closing/summary?locationId=${west}&date=${day(0)}`)).body; const rb = await report(day(0));
+    ok(await as('sales.westave').post(`/api/replacements/${t2.id}/settle`).send({ mode: 'CASH' }));
+    const s1 = ok(await as('sales.westave').get(`/api/closing/summary?locationId=${west}&date=${day(0)}`)).body;
+    expect(Number(s1.replacementCash)).toBe(1000); expect(Number(s1.expectedCash) - Number(s0.expectedCash)).toBe(1000);
+    const r2 = await report(day(0)); expect(Number(r2.replacements.cash)).toBe(1000); expect(Number(r2.totalCashDeposit) - Number(rb.totalCashDeposit)).toBe(1000);
+    expect(Number(r2.bankDeposit.replacementCash)).toBe(1000);
+    // the printed / Excel report carries the section
+    const x = await as('sales.westave').get(`/api/reports/daily-sales.xlsx?locationId=${west}&date=${day(0)}`).buffer(true).parse((res, cb) => { const ch: Buffer[] = []; res.on('data', (c: Buffer) => ch.push(c)); res.on('end', () => cb(null, Buffer.concat(ch))); }).expect(200);
+    { const wb = new ExcelJS.Workbook(); await wb.xlsx.load(x.body as never); const sh = wb.getWorksheet('REPLACEMENT PAYMENTS'); expect(sh).toBeTruthy(); const txt = JSON.stringify(sh!.getSheetValues()); expect(txt).toContain('Replacement cash'); expect(txt).toContain('ONLINE'.toLowerCase()); }
+  });
+
+  it('a closed day: the stock and the money are dated on the day the replacement was given; the Head Auditor approves the payment before it joins that day\'s report', async () => {
+    const t = await ticket('3', day(-3), day(-1)); // given yesterday (a closed day)
+    const req = await prisma.approvalRequest.findFirstOrThrow({ where: { type: 'REPLACEMENT_TICKET', documentId: t.id, status: 'PENDING' } }); expect(JSON.stringify(req.summary)).toMatch(/closedDay":true/);
+    const led = await prisma.stockLedger.findFirstOrThrow({ where: { documentType: 'ReplacementTicket', documentId: t.id, movementType: 'REPLACEMENT_OUT' } }); expect(led.businessDate.toISOString().slice(0, 10)).toBe(day(-1));
+    await as('sales.westave').post(`/api/replacements/${t.id}/replace`).send({ givenOn: day(-9) }).expect(400);
+    await approve('REPLACEMENT_TICKET', t.id);
+    await as('sales.westave').post(`/api/replacements/${t.id}/settle`).send({ mode: 'CASH', date: day(-2) }).expect(400); // not before it was given
+    const before = await report(day(-1));
+    const pend = ok(await as('sales.westave').post(`/api/replacements/${t.id}/settle`).send({ mode: 'CASH', date: day(-1) })).body;
+    expect(pend.payments[0].status).toBe('PENDING_APPROVAL'); expect(pend.differenceSettledAt).toBeFalsy();
+    expect(Number((await report(day(-1))).replacements.cash)).toBe(Number(before.replacements.cash)); // not yet in the report
+    await as('sales.westave').post(`/api/replacements/${t.id}/settle`).send({ mode: 'CASH', date: day(-1) }).expect(400); // already waiting
+    await approve('REPLACEMENT_PAYMENT', t.id, 'sales.westave').then(() => { throw new Error('a branch cannot approve its own payment'); }, () => undefined);
+    await approve('REPLACEMENT_PAYMENT', t.id);
+    const done = ok(await as('head.auditor').get(`/api/replacements/${t.id}`)).body; expect(done.payments[0].status).toBe('APPLIED'); expect(done.differenceSettledAt).toBeTruthy();
+    expect(Number((await report(day(-1))).replacements.cash) - Number(before.replacements.cash)).toBe(1000);
+    // refused: the branch can record it again with the right day
+    const t4 = await ticket('4', day(-3), day(-1)); await approve('REPLACEMENT_TICKET', t4.id);
+    ok(await as('sales.westave').post(`/api/replacements/${t4.id}/settle`).send({ mode: 'CASH', date: day(-1) }));
+    const rq = await prisma.approvalRequest.findFirstOrThrow({ where: { type: 'REPLACEMENT_PAYMENT', documentId: t4.id, status: 'PENDING' } });
+    ok(await as('head.auditor').post(`/api/approvals/${rq.id}/decide`).send({ decision: 'REJECT', note: 'wrong day' }));
+    expect((await prisma.replacementPayment.findFirstOrThrow({ where: { ticketId: t4.id } })).status).toBe('REJECTED');
+    ok(await as('sales.westave').post(`/api/replacements/${t4.id}/settle`).send({ mode: 'CASH', date: day(-1) }));
+    // the Head Auditor recording a closed day himself needs no second approval
+    const t5 = await ticket('5', day(-3), day(-1)); await approve('REPLACEMENT_TICKET', t5.id);
+    const self = ok(await as('head.auditor').post(`/api/replacements/${t5.id}/settle`).send({ mode: 'CASH', date: day(-1) })).body; expect(self.payments[0].status).toBe('APPLIED');
   });
 });

@@ -3,11 +3,13 @@ import { useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api, fmtDate, peso } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
+import { PickedInput } from '@/components/PickedInput';
 import { Attachments } from '@/components/Attachments';
 import { Badge, Button, Card, Empty, ErrorBox, Field, Input, Modal, Select, Stat, Textarea, statusTone } from '@/components/ui/primitives';
 import { Searchable } from '@/components/Searchable';
 
 interface Ticket {
+  payments?: { id: string; date: string; direction: string; mode: string; account: string | null; amount: number; status: string; note: string | null }[]; replacedOn?: string | null; replacedLocationId?: string | null; saleOnCredit?: boolean; priceTier?: string; suggestedPrice?: number | null;
   id: string; ticketNo: string; kind: 'CUSTOMER' | 'SUPPLIER'; status: string; reason: string; notes: string | null; qty: number; product: { id: string; sku: string; name: string } | null; location: string; createdBy: string; createdAt: string; ageDays: number;
   drSiNo: string | null; salesDocId: string | null; saleControlNo: string | null; saleBranch: string | null; customerName: string | null; customerPhone: string | null; unitPaid?: string;
   replaced: { at: string; by: string; branch: string; product: { id: string; name: string } | null; qty: number | null; unitPrice: string | null } | null;
@@ -87,8 +89,10 @@ function NewSupplierTicket({ onClose, onDone }: { onClose: () => void; onDone: (
   return <Modal wide title="Return items to a supplier" onClose={onClose}>
     <div className="space-y-3 text-sm">
       {!me!.locationScoped && <Field label="From (branch / warehouse)"><Select value={f.locationId} onChange={(e) => setF({ ...f, locationId: e.target.value })}><option value="">—</option>{locations.data?.filter((l) => l.type !== 'FRANCHISE' && l.type !== 'VIRTUAL' && l.type !== 'CONSIGNEE').map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</Select></Field>}
-      {!p ? <div><Input placeholder="Find the product (what the location has in stock)…" value={search} onChange={(e) => setSearch(e.target.value)} />{search.length >= 2 && <ul className="mt-1 max-h-48 divide-y overflow-auto rounded border bg-white">{prods.data?.map((x) => <li key={x.id}><button className="flex w-full justify-between px-3 py-2 text-left hover:bg-slate-50" onClick={() => { setP(x); setF((y) => ({ ...y, supplierId: x.supplier?.id ?? '' })); }}><span>{x.name}</span><span className="text-xs text-slate-500">{x.onHand} on hand</span></button></li>)}</ul>}</div>
-        : <div className="space-y-3 rounded-xl border border-amber-200 bg-amber-50/60 p-3"><div><b>{p.name}</b> <button className="ml-2 text-xs text-brand underline" onClick={() => setP(null)}>change</button></div>
+      <Field label="Product to return"><PickedInput picked={p ? p.name : null} placeholder="Find the product (what the location has in stock)…" search={search} onSearch={setSearch} onClear={() => { setP(null); setSearch(''); }}>
+        {search.length >= 2 && <ul className="absolute z-20 mt-1 max-h-48 w-full divide-y overflow-auto rounded-xl border bg-white text-sm shadow-lg">{prods.data?.map((x) => <li key={x.id}><button type="button" className="flex w-full justify-between px-3 py-2 text-left hover:bg-slate-50" onClick={() => { setP(x); setSearch(''); setF((y) => ({ ...y, supplierId: x.supplier?.id ?? '' })); }}><span>{x.name}</span><span className="text-xs text-slate-500">{x.onHand} on hand</span></button></li>)}</ul>}
+      </PickedInput></Field>
+      {p && <div className="space-y-3 rounded-xl border border-amber-200 bg-amber-50/60 p-3">
           <div className="grid gap-3 md:grid-cols-3"><Field label="Quantity"><Input type="number" min={1} value={f.qty} onChange={(e) => setF({ ...f, qty: e.target.value })} /></Field>
             <Field label="Supplier that must replace it"><Select value={f.supplierId} onChange={(e) => setF({ ...f, supplierId: e.target.value })}><option value="">— the product's supplier —</option>{suppliers.data?.map((s) => <option key={s.id} value={s.id}>{s.code}{s.supplierName ? ` · ${s.supplierName}` : ''}</option>)}</Select></Field>
             <Field label="Why"><Select value={f.reason} onChange={(e) => setF({ ...f, reason: e.target.value })}>{REASONS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</Select></Field></div>
@@ -104,13 +108,12 @@ export function ReplacementDetailPage() {
   const { id } = useParams(); const { me, can } = useAuth(); const qc = useQueryClient();
   const q = useQuery({ queryKey: ['replacement', id], queryFn: () => api.get<Ticket>(`/api/replacements/${id}`) });
   const refresh = () => { void qc.invalidateQueries({ queryKey: ['replacement', id] }); void qc.invalidateQueries({ queryKey: ['replacements'] }); };
-  const [rep, setRep] = useState(false); const [f, setF] = useState({ productId: '', name: '', qty: '', unitPrice: '', note: '', locationId: '' }); const [search, setSearch] = useState('');
+  const [rep, setRep] = useState(false); const [f, setF] = useState({ productId: '', name: '', qty: '', unitPrice: '', note: '', locationId: '', givenOn: '' }); const [search, setSearch] = useState('');
   const t = q.data;
   const locations = useQuery({ queryKey: ['locations'], queryFn: () => api.get<{ id: string; name: string; type: string; isSelling: boolean }[]>('/api/locations'), enabled: !me!.locationScoped && rep });
   const where = me!.locationScoped ? me!.locations[0]?.id : f.locationId;
   const prods = useQuery({ queryKey: ['rt-rep-products', search, where], queryFn: () => api.get<{ id: string; name: string; onHand?: number; tierPrices: Record<string, string> }[]>(`/api/products?search=${encodeURIComponent(search)}&take=8&inStockAt=${where}`), enabled: search.length >= 2 && !!where });
-  const replace = useMutation({ mutationFn: () => api.post(`/api/replacements/${id}/replace`, { productId: f.productId || undefined, qty: f.qty ? Number(f.qty) : undefined, unitPrice: f.unitPrice ? Number(f.unitPrice) : undefined, note: f.note || undefined, locationId: f.locationId || undefined }), onSuccess: () => { setRep(false); refresh(); } });
-  const settle = useMutation({ mutationFn: () => api.post(`/api/replacements/${id}/settle`, {}), onSuccess: refresh });
+  const replace = useMutation({ mutationFn: () => api.post(`/api/replacements/${id}/replace`, { productId: f.productId || undefined, qty: f.qty ? Number(f.qty) : undefined, unitPrice: f.unitPrice ? Number(f.unitPrice) : undefined, note: f.note || undefined, locationId: f.locationId || undefined, givenOn: f.givenOn || undefined }), onSuccess: () => { setRep(false); refresh(); } });
   const cancel = useMutation({ mutationFn: (reason: string) => api.post(`/api/replacements/${id}/cancel`, { reason }), onSuccess: refresh });
   if (!t) return null;
   const franchiseUser = me!.roleKey.startsWith('FRANCHISE');
@@ -123,24 +126,54 @@ export function ReplacementDetailPage() {
       {t.salesDocId && <p className="mt-2 text-sm"><Link className="font-semibold text-brand underline" to={`/sales/${t.salesDocId}`}>Open the DR / SI {t.drSiNo}</Link></p>}{t.notes && <p className="mt-2 text-sm text-slate-600">Notes: {t.notes}</p>}</Card>
     {t.replaced && <Card title="Replacement given"><p className="text-sm"><b>{t.replaced.qty} × {t.replaced.product?.name}</b> at {t.replaced.unitPrice != null ? peso(t.replaced.unitPrice) : ''} each, by {t.replaced.by} at {t.replaced.branch} on {fmtDate(t.replaced.at)}.</p>
       <p className="mt-2 text-sm">Price difference against the DR: <b className={diff != null && diff !== 0 ? 'text-brand' : ''}>{diffText(t.priceDifference)}</b> {t.differenceSettledAt ? <Badge tone="green">settled {fmtDate(t.differenceSettledAt)}</Badge> : diff ? <Badge tone="amber">not yet settled</Badge> : null}</p>
-      {diff != null && diff !== 0 && !t.differenceSettledAt && ['REPLACED', 'CLOSED'].includes(t.status) && <Button className="mt-2" size="sm" variant="outline" disabled={settle.isPending} onClick={() => settle.mutate()} data-testid="settle">{diff > 0 ? 'The customer paid the difference' : 'The refund / credit was given'}</Button>}
-      <ErrorBox error={settle.error} /></Card>}
+      {t.replacedOn && <p className="mt-1 text-sm text-slate-600">Given on <b>{fmtDate(t.replacedOn)}</b>: the stock left on that day.</p>}
+      {t.payments && t.payments.length > 0 && <ul className="mt-2 divide-y text-sm">{t.payments.map((x) => <li key={x.id} className="flex flex-wrap items-center gap-2 py-1"><span>{x.direction === 'IN' ? 'Customer paid' : 'Refunded'} <b>{peso(x.amount)}</b> by {x.mode.toLowerCase().replace('_', ' ')}{x.account ? ` (${x.account})` : ''} on {fmtDate(x.date)}</span><Badge tone={x.status === 'APPLIED' ? 'green' : x.status === 'PENDING_APPROVAL' ? 'amber' : 'red'}>{x.status === 'APPLIED' ? 'in the Daily Sales Report' : x.status === 'PENDING_APPROVAL' ? 'waiting for the Head Auditor (closed day)' : 'not approved'}</Badge></li>)}</ul>}
+      {diff != null && diff !== 0 && !t.differenceSettledAt && ['REPLACED', 'CLOSED'].includes(t.status) && !t.payments?.some((x) => x.status === 'PENDING_APPROVAL') && <SettleForm t={t} id={id!} diff={diff} onDone={refresh} />}
+      </Card>}
     {t.kind === 'SUPPLIER' && t.status !== 'PENDING_RETURN' && t.status !== 'CANCELLED' && <Card title="Replacement from the supplier">
       {t.receipts?.length ? <div className="sticky-head"><table className="w-full text-sm"><tbody>{t.receipts.map((r) => <tr key={r.receivingDocId + r.product} className="border-t"><td className="py-1"><Link className="text-brand underline" to={`/receiving/${r.receivingDocId}`}>{r.controlNo}</Link></td><td>{r.product}</td><td className="num">{r.qty}</td></tr>)}</tbody></table></div> : <p className="text-sm text-slate-600">Nothing has arrived yet.</p>}
       {t.status === 'CLOSED' && t.priceDifference != null && <p className="mt-2 text-sm">Value of what arrived compared with what we sent: <b>{Number(t.priceDifference) === 0 ? 'no difference' : Number(t.priceDifference) > 0 ? `${peso(t.priceDifference)} more (we owe the supplier)` : `${peso(Math.abs(Number(t.priceDifference)))} less (the supplier owes us)`}</b></p>}
       {['AWAITING_REPLACEMENT', 'PARTIAL'].includes(t.status) && can('receiving.create') && <p className="mt-2 text-sm">When the replacement arrives, create the delivery on <Link className="font-semibold text-brand underline" to={`/receiving?ticket=${t.id}`}>Supplier Deliveries</Link> and choose this ticket. Only that arrival closes the ticket.</p>}</Card>}
     {t.closedNote && <p className="rounded-xl bg-slate-50 p-3 text-sm text-slate-600">{t.closedNote}</p>}
-    {canTick && !rep && <Card title="Tick: the replacement was given"><p className="mb-2 text-sm text-slate-600">Any branch except a franchise can give the customer the replacement. Choose the product given (the same one by default); the price difference against the DR is worked out for you.</p><Button onClick={() => setRep(true)} data-testid="tick-replace">We gave the replacement</Button></Card>}
+    {canTick && !rep && <Card title="Tick: the replacement was given"><p className="mb-2 text-sm text-slate-600">Any branch except a franchise can give the customer the replacement. Choose the product given (the same one by default); the price difference against the DR is worked out for you.</p><Button onClick={() => { setF((x) => ({ ...x, productId: '', name: '', givenOn: new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10), unitPrice: t.suggestedPrice != null ? String(t.suggestedPrice) : '' })); setSearch(''); setRep(true); }} data-testid="tick-replace">We gave the replacement</Button></Card>}
     {canTick && rep && <Card title="The replacement given">
       <div className="grid gap-3 md:grid-cols-3">{!me!.locationScoped && <Field label="Given at (branch)"><Select value={f.locationId} onChange={(e) => setF({ ...f, locationId: e.target.value })}><option value="">—</option>{locations.data?.filter((l) => l.isSelling && l.type !== 'FRANCHISE').map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</Select></Field>}
-        <Field label={`Product (${f.productId ? f.name : `same: ${t.product?.name}`})`}><Input placeholder="Another product? search…" value={search} onChange={(e) => setSearch(e.target.value)} /></Field>
+        <Field label="Product given"><PickedInput picked={f.productId ? f.name : null} fallback={`${t.product?.name ?? 'the same product'} (same as returned)`} search={search} onSearch={setSearch}
+          onClear={() => { setF({ ...f, productId: '', name: '', unitPrice: t.suggestedPrice != null ? String(t.suggestedPrice) : '' }); setSearch(''); }}>
+          {search.length >= 2 && <ul className="absolute z-20 mt-1 max-h-48 w-full divide-y overflow-auto rounded-xl border bg-white text-sm shadow-lg">{prods.data?.map((x) => <li key={x.id}><button type="button" className="flex w-full justify-between gap-2 px-3 py-2 text-left hover:bg-slate-50" onClick={() => { const pr = x.tierPrices?.[t.priceTier ?? 'RETAIL']; setF({ ...f, productId: x.id, name: x.name, unitPrice: pr != null ? String(pr) : '' }); setSearch(''); }}><span>{x.name}</span><span className="text-xs text-slate-500">{x.onHand} on hand{x.tierPrices?.[t.priceTier ?? 'RETAIL'] ? ` · ${peso(x.tierPrices[t.priceTier ?? 'RETAIL'])}` : ''}</span></button></li>)}{!prods.data?.length && <li className="px-3 py-2 text-slate-500">Nothing found in stock here.</li>}</ul>}
+        </PickedInput></Field>
         <Field label={`Quantity (default ${t.qty})`}><Input type="number" min={1} value={f.qty} onChange={(e) => setF({ ...f, qty: e.target.value })} /></Field>
-        <Field label="Price each (blank = the price list)"><Input type="number" step="0.01" value={f.unitPrice} onChange={(e) => setF({ ...f, unitPrice: e.target.value })} /></Field></div>
-      {search.length >= 2 && <ul className="mt-1 max-h-40 divide-y overflow-auto rounded border bg-white text-sm">{prods.data?.map((x) => <li key={x.id}><button className="flex w-full justify-between px-3 py-2 text-left hover:bg-slate-50" onClick={() => { setF({ ...f, productId: x.id, name: x.name }); setSearch(''); }}><span>{x.name}</span><span className="text-xs text-slate-500">{x.onHand} on hand · {x.tierPrices.RETAIL ? peso(x.tierPrices.RETAIL) : ''}</span></button></li>)}</ul>}
-      {f.productId && <button className="mt-1 text-xs text-brand underline" onClick={() => setF({ ...f, productId: '', name: '' })}>use the same product</button>}
+        <Field label="Price each" hint="Filled in from the price list. You may change it."><Input type="number" step="0.01" value={f.unitPrice} onChange={(e) => setF({ ...f, unitPrice: e.target.value })} /></Field>
+        <Field label="Day the replacement was given" hint="The stock leaves on this day, so the day's inventory changes. A day that is already closed is approved by the Head Auditor."><Input type="date" max={new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10)} value={f.givenOn} onChange={(e) => setF({ ...f, givenOn: e.target.value })} /></Field></div>
       <Field label="Note (optional)" className="mt-3"><Input value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} /></Field>
       <ErrorBox error={replace.error} /><div className="mt-3 flex gap-2"><Button disabled={replace.isPending} onClick={() => replace.mutate()} data-testid="save-replace">Save: replacement given</Button><Button variant="outline" onClick={() => setRep(false)}>Cancel</Button></div></Card>}
     {['OPEN', 'PENDING_RETURN'].includes(t.status) && can('replacement.create') && <div><Button variant="danger" size="sm" disabled={cancel.isPending} onClick={() => { const r = window.prompt('Why is this ticket cancelled?'); if (r && r.trim().length >= 3) cancel.mutate(r.trim()); }}>Cancel this ticket</Button><ErrorBox error={cancel.error} /></div>}
     <Attachments type="ReplacementTicket" id={t.id} title="Photos and papers (the returned item, the DR, the supplier's note)" uploadLabel="Attach a photo" />
+  </div>;
+}
+
+/** How the customer settled the price difference (or how it was refunded), and the day: it goes into that day's Daily Sales Report as a replacement payment. */
+function SettleForm({ t, id, diff, onDone }: { t: Ticket; id: string; diff: number; onDone: () => void }) {
+  const today = new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);
+  const [open, setOpen] = useState(false); const [f, setF] = useState({ mode: 'CASH', accountId: '', date: t.replacedOn ?? today, note: '' }); const [info, setInfo] = useState('');
+  const accts = useQuery({ queryKey: ['payment-accounts', t.replacedLocationId], queryFn: () => api.get<{ id: string; title: string }[]>(`/api/accounts/payment?locationId=${t.replacedLocationId}`), enabled: open && f.mode !== 'CASH' && !!t.replacedLocationId });
+  const save = useMutation({ mutationFn: () => api.post<Ticket>(`/api/replacements/${id}/settle`, t.saleOnCredit ? { date: f.date, note: f.note || undefined } : { mode: f.mode, paymentAccountId: f.mode === 'CASH' ? null : f.accountId, date: f.date, note: f.note || undefined }), onSuccess: (r) => { setInfo(r.payments?.some((x) => x.status === 'PENDING_APPROVAL') ? 'That day is already closed, so the Head Auditor must approve it first. It joins that day\'s report once approved.' : 'Saved. It shows in the Daily Sales Report of that day as a replacement payment.'); setOpen(false); onDone(); } });
+  const back = diff < 0; const late = f.date < today;
+  return <div className="mt-2">
+    {info && <p className="mb-2 rounded-xl bg-emerald-50 p-2 text-sm text-emerald-800">{info}</p>}
+    {!open ? <Button size="sm" variant="outline" onClick={() => setOpen(true)} data-testid="settle">{back ? 'Record the refund given to the customer' : 'Record the payment of the difference'}</Button>
+      : <div className="space-y-3 rounded-xl border border-amber-200 bg-amber-50/60 p-3">
+        <div className="text-sm font-semibold">{back ? 'How was the refund given?' : 'How did the customer pay the difference?'} <span className="font-normal text-slate-600">({peso(Math.abs(diff))})</span></div>
+        <div className="grid gap-3 md:grid-cols-3">
+          {!t.saleOnCredit && <Field label={back ? 'Refunded by' : 'Paid by'}><Select value={f.mode} onChange={(e) => setF({ ...f, mode: e.target.value, accountId: '' })}><option value="CASH">Cash</option><option value="ONLINE">Online (bank / GCash)</option><option value="CREDIT_CARD">Credit card</option></Select></Field>}
+          {!t.saleOnCredit && f.mode !== 'CASH' && <Field label="Bank / GCash / card account"><Select value={f.accountId} onChange={(e) => setF({ ...f, accountId: e.target.value })}><option value="">— choose the account —</option>{accts.data?.map((a) => <option key={a.id} value={a.id}>{a.title}</option>)}</Select></Field>}
+          <Field label="Day it was paid" hint="The Daily Sales Report and the books of this day show it, apart from normal sales."><Input type="date" min={t.replacedOn ?? undefined} max={today} value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} /></Field>
+        </div>
+        {late && <p className="rounded-lg bg-amber-100 p-2 text-xs text-amber-900">This is a past day. If that day is already closed, the Head Auditor must approve it before it joins the report.</p>}
+        {t.saleOnCredit && <p className="text-xs text-slate-600">The sale was on credit, so the difference goes to the customer's receivable instead of cash.</p>}
+        <Field label="Note (optional)"><Input value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} /></Field>
+        <ErrorBox error={save.error} />
+        <div className="flex gap-2"><Button disabled={save.isPending || (!t.saleOnCredit && f.mode !== 'CASH' && !f.accountId)} onClick={() => save.mutate()}>Save</Button><Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button></div>
+      </div>}
   </div>;
 }

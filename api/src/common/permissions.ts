@@ -52,6 +52,7 @@ export const APPROVAL_TYPES = [
   'MARKETING_PULLOUT',
   'PULLOUT_EXPENSE',
   'REPLACEMENT_TICKET',
+  'REPLACEMENT_PAYMENT',
   'SUPPLIER_RETURN',
   'AGENT_CONSIGNMENT_LIMIT',
   'OUTLET_DELETE',
@@ -191,7 +192,7 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
     key: 'HEAD_AUDITOR',
     name: 'Head Auditor',
     description: 'Edits/inputs anything; master data with Admin approval; enters/approves costs; approves internal transfers, post-close edits, write-offs.',
-    permissions: ['promo.issue', 'member.view', 'outlet.view.all', 'approval.act.REPLACEMENT_TICKET', 'approval.act.SUPPLIER_RETURN', 'replacement.create', 'replacement.view', 'approval.act.MARKETING_PULLOUT', 'marketing.summary', 'sixpack.override', 'ecom.waybill', 'approval.act.CASH_DEPOSIT_AUDIT', 'franchise.ar.view', 'memo.create', 'sixpack.view.all', 'stock.flavor.set', 
+    permissions: ['promo.issue', 'member.view', 'outlet.view.all', 'approval.act.REPLACEMENT_TICKET', 'approval.act.REPLACEMENT_PAYMENT', 'approval.act.SUPPLIER_RETURN', 'replacement.create', 'replacement.view', 'approval.act.MARKETING_PULLOUT', 'marketing.summary', 'sixpack.override', 'ecom.waybill', 'approval.act.CASH_DEPOSIT_AUDIT', 'franchise.ar.view', 'memo.create', 'sixpack.view.all', 'stock.flavor.set', 
       ...READ_ALL, ...COST_BUNDLE, 'product.edit', 'product.create', 'price.edit', 'cost.edit', 'supplier.edit',
       'receiving.create', 'receiving.approve_cost', 'transfer.create', 'transfer.confirm', 'transfer.approve.internal', 'transfer.resolve_discrepancy',
       'sale.create', 'sale.edit.sameday', 'sale.edit.postclose', 'sale.void', 'ar.collect', 'expense.create.branch',
@@ -410,6 +411,7 @@ export const APPROVAL_ROUTING: Record<ApprovalType, { roles: RoleKey[]; anyOf?: 
   PULLOUT_EXPENSE: { roles: ['ACCOUNTING_ASSOCIATE', 'ACCOUNTING_HEAD', 'ADMIN'], anyOf: true },
   // replacement tickets: the Head Auditor approves a replacement handed to a customer, and the return of items to a supplier
   REPLACEMENT_TICKET: { roles: ['HEAD_AUDITOR', 'ADMIN'], anyOf: true },
+  REPLACEMENT_PAYMENT: { roles: ['HEAD_AUDITOR', 'ADMIN'], anyOf: true },
   SUPPLIER_RETURN: { roles: ['HEAD_AUDITOR', 'ADMIN'], anyOf: true },
   // maximum consignment per agent: the Sales Manager proposes, the Owner approves
   AGENT_CONSIGNMENT_LIMIT: { roles: ['ADMIN'] },

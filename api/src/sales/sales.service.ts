@@ -24,6 +24,7 @@ import { MonitorService } from '../agents/monitor.service';
 import { CustomerFollowUpsService } from './customer-followups.service';
 import { FranchiseShippingService } from '../franchise/franchise-shipping.service';
 import { LoyaltyService } from '../members/loyalty.service';
+import { PromosService } from '../promos/promos.service';
 
 export interface SalesLineInput { productId: string; qty: number; unitPrice?: number | null; batchId?: string | null; exactBatch?: boolean; isFreebie?: boolean; lineRemarks?: string; priceTier?: string }
 export interface SalesInput {
@@ -39,7 +40,7 @@ export const TIER_BY_CHANNEL: Record<SalesChannel, string> = { WALK_IN: 'RETAIL'
 /** §8 Sales module: entry (all channels/modes), agents, AR/PDC, payments, credit notes. Stock is deducted on save (FEFO). */
 @Injectable()
 export class SalesService implements OnModuleInit {
-  constructor(private prisma: PrismaService, private seq: SequenceService, private stock: StockService, private approvals: ApprovalsService, private master: MasterService, private notify: NotificationsService, private audit: AuditService, private settings: SettingsService, private attachments: AttachmentsService, private posting: PostingService, private closing: ClosingService, private scope: ScopeService, private expenses: ExpensesService, private followUps: CustomerFollowUpsService, private outlets: OutletsService, private agentMonitor: MonitorService, private sixPack: SixPackService, private franchiseShipping: FranchiseShippingService, private loyalty: LoyaltyService) {}
+  constructor(private prisma: PrismaService, private seq: SequenceService, private stock: StockService, private approvals: ApprovalsService, private master: MasterService, private notify: NotificationsService, private audit: AuditService, private settings: SettingsService, private attachments: AttachmentsService, private posting: PostingService, private closing: ClosingService, private scope: ScopeService, private expenses: ExpensesService, private followUps: CustomerFollowUpsService, private outlets: OutletsService, private agentMonitor: MonitorService, private sixPack: SixPackService, private franchiseShipping: FranchiseShippingService, private loyalty: LoyaltyService, private promos: PromosService) {}
 
   onModuleInit() {
     this.approvals.register('SPECIAL_PRICE', (req, outcome) => this.onSpecialPriceDecision(req.documentId, outcome));
@@ -113,6 +114,9 @@ export class SalesService implements OnModuleInit {
     if (input.voucherCode?.trim()) { if (!input.memberId) throw new BadRequestException('Tag the member first, then use their voucher'); voucher = await this.loyalty.validate(input.voucherCode, input.memberId, docDate); }
     // member prices running today (owner request 2026-10-06): applied when no price is typed and a member is tagged
     const offers = input.memberId && !franchiseUserOf(user) ? await this.loyalty.offerPrices(docDate) : new Map<string, Prisma.Decimal>();
+    // promos the Owner or Head Auditor issued (owner request 2026-10-07): a promo price applies by itself while it runs
+    const branchPromo = franchiseUserOf(user) ? new Map<string, Prisma.Decimal>() : await this.promos.activePrices(docDate, 'BRANCHES');
+    const franchisePromo = franchiseUserOf(user) ? new Map<string, Prisma.Decimal>() : await this.promos.activePrices(docDate, 'FRANCHISES');
     const voucherLines: Prisma.SalesLineUncheckedCreateWithoutDocInput[] = [];
     let voucherDiscount = ZERO;
 
@@ -133,6 +137,10 @@ export class SalesService implements OnModuleInit {
         let unitPrice = classFree ? ZERO : l.unitPrice != null ? D(l.unitPrice) : tierPrice;
         let memberBacked = false;
         if (!classFree && l.unitPrice == null && (tier === 'RETAIL' || tier === 'CC') && offers.has(product.id) && D(offers.get(product.id)!).lt(tierPrice)) { unitPrice = D(offers.get(product.id)!); memberBacked = true; }
+        if (!classFree && l.unitPrice == null && !franchiseUser) {
+          const promo = tier === 'RETAIL' && loc.type !== 'FRANCHISE' ? branchPromo.get(product.id) : tier === 'FRANCHISE' ? franchisePromo.get(product.id) : undefined;
+          if (promo && D(promo).lt(unitPrice)) { unitPrice = D(promo); memberBacked = true; }
+        }
         const isFreebie = classFree || (isPlastic && unitPrice.isZero());
         if (!isFreebie && product.category.accountingClass === 'SUPPLEMENT') supplementUnits += l.qty;
         if (franchiseUser && l.unitPrice != null && !unitPrice.equals(tierPrice)) {

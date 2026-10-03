@@ -69,6 +69,7 @@ async function resetTransactionalData() {
   await prisma.$executeRawUnsafe(`TRUNCATE replacement_receipts, replacement_tickets, franchise_shipping_charges, form_numbers_released, ecom_waybills, ecom_waybill_hints, franchise_payments, franchise_ar_adjustments, franchise_ar_extensions, franchise_invoices, memo_recipients, memos, six_pack_stickers, six_pack_redemptions CASCADE`);
   await prisma.$executeRawUnsafe(`TRUNCATE outlet_changes, outlet_shares, itinerary_claims, itinerary_stops, itineraries, agent_consignment_limits, outlets, sales_areas CASCADE`);
   await prisma.$executeRawUnsafe(`TRUNCATE campaign_recipients, campaigns, message_opt_outs, members CASCADE`);
+  await prisma.$executeRawUnsafe(`TRUNCATE promo_items, promos, customer_contacts, customer_follow_ups CASCADE`);
   await prisma.$executeRawUnsafe(`TRUNCATE member_vouchers, member_points_entries, member_notes, member_offers, survey_items, survey_responses, survey_invites, lost_sales, reservations, stock_alert_requests, member_auto_messages CASCADE`);
   await prisma.$executeRawUnsafe(`UPDATE consignment_agreements SET agent_key = NULL, agent_name = NULL, outlet_id = NULL`);
   await prisma.$executeRawUnsafe(`UPDATE locations SET credit_hold = false, credit_hold_note = NULL`);
@@ -2916,5 +2917,107 @@ describe('Wheysted member program: points and tiers, vouchers, member prices, re
     await sale('20', a.id, [{ productId: pid, qty: 1 }], { voucherCode: mk.voucher });
     g = ok(await as('sales.manager').get(`/api/campaigns/${c.id}`)).body; expect(g.results).toMatchObject({ buyers: 1, vouchersUsed: 1 });
     await as('sales.westave').post(`/api/member-program/campaign-recipients/${g.recipients[0].id}/mark`).send({ status: 'SENT' }).expect(403);
+  });
+});
+
+
+describe('Promos for the branches or the franchises, and the Customer Service to-do list with results and reasons (owner request 2026-10-07)', () => {
+  const today = () => new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);
+  const plus = (n: number) => new Date(Date.now() + 8 * 3600e3 + n * 86400e3).toISOString().slice(0, 10);
+  let west = ''; let pid = ''; let mid = '';
+  const sale = async (n: string, lines: { productId: string; qty: number; unitPrice?: number }[], extra: Record<string, unknown> = {}, who = 'sales.westave') => ok(await as(who).post('/api/sales').send({ channel: 'WALK_IN', paymentMode: 'CASH', drSiNo: `CS-${run}-${n}`, lines, ...extra })).body;
+
+  it('setup: a product with stock that lasts one day per unit', async () => {
+    await prisma.salesReportSubmission.deleteMany({});
+    west = (await prisma.location.findUniqueOrThrow({ where: { code: 'WESTAVE' } })).id;
+    const cats = ok(await as('admin').get('/api/categories')).body as { id: string; accountingClass: string }[];
+    pid = ok(await as('admin').post('/api/products').send({ name: `CS Whey ${run}`, brand: 'Prothin', categoryId: cats.find((c) => c.accountingClass === 'SUPPLEMENT')!.id, prices: { RETAIL: 1000, FRANCHISE: 800 }, cost: 400 })).body.id as string;
+    const bt = await prisma.batch.create({ data: { productId: pid, batchNo: `CS-${run}`, receivedRef: 'TEST', unitCost: '400' } });
+    await prisma.stockLedger.create({ data: { locationId: west, productId: pid, batchId: bt.id, qtyDelta: 80, movementType: 'RECEIVE', documentType: 'Opening', documentId: `CS-${run}`, unitCost: '400', businessDate: new Date(`${today()}T00:00:00Z`) } });
+    await prisma.stockBalance.create({ data: { locationId: west, productId: pid, batchId: bt.id, qty: 80 } });
+    await prisma.product.update({ where: { id: pid }, data: { consumptionDays: 1 } });
+  });
+
+  it('promos: the Head Auditor issues one to the branches (memo + highlighted notice, not to franchises); the promo price applies at New Sale by itself; cancelling ends it', async () => {
+    await as('sales.westave').post('/api/promos').send({ title: 'Nope', details: 'x y z', audience: 'BRANCHES', startsOn: today(), endsOn: plus(5) }).expect(403);
+    await as('head.auditor').post('/api/promos').send({ title: 'Back', details: 'x y z', audience: 'BRANCHES', startsOn: plus(5), endsOn: plus(1) }).expect(400);
+    const pr = ok(await as('head.auditor').post('/api/promos').send({ title: `Whey week ${run}`, details: 'Whey at a special price for one week.', audience: 'BRANCHES', startsOn: today(), endsOn: plus(6), items: [{ productId: pid, promoPrice: 800 }] })).body;
+    expect(pr.memoNo).toMatch(/^\d{4}-Q\d-\d{3}$/); expect(pr.notified).toBeGreaterThan(0); expect(pr.state).toBe('RUNNING'); expect(pr.items[0]).toMatchObject({ promoPrice: 800 });
+    const note = async (u: string) => (await prisma.notification.findMany({ where: { userId: (await prisma.user.findFirstOrThrow({ where: { email: { startsWith: `${u}@` } } })).id, type: 'PROMO', title: { contains: `Whey week ${run}` } } })).length;
+    // who gets the notice: branch staff yes, franchise people no
+    expect(await note('sales.westave')).toBe(1); expect(await note('sales.manager')).toBe(1); expect(await note('fr.mayon.owner')).toBe(0);
+    expect((ok(await as('sales.westave').get('/api/promos/active')).body as { title: string }[]).map((x) => x.title)).toContain(`Whey week ${run}`);
+    expect((ok(await as('fr.mayon.owner').get('/api/promos/active')).body as unknown[]).length).toBe(0);
+    expect((ok(await as('fr.mayon.owner').get('/api/promos')).body as unknown[]).length).toBe(0);
+    // New Sale: promo price by itself, no special-price approval, a typed price wins
+    const a = await sale('1', [{ productId: pid, qty: 2 }]); expect(Number(a.productTotal)).toBe(1600); expect(a.specialPriceStatus ?? null).toBeNull();
+    const b = await sale('2', [{ productId: pid, qty: 1, unitPrice: 1000 }]); expect(Number(b.productTotal)).toBe(1000);
+    // the memo is real and printable
+    const memo = ok(await as('sales.westave').get(`/api/memos/${pr.memoId ?? (await prisma.promo.findUniqueOrThrow({ where: { id: pr.id } })).memoId}`)).body; expect(memo.subject).toContain('PROMO'); expect(memo.table.rows[0][2]).toContain('800');
+    ok(await as('head.auditor').post(`/api/promos/${pr.id}/cancel`).send({ reason: 'Stock is low' }));
+    expect(Number((await sale('3', [{ productId: pid, qty: 1 }])).productTotal)).toBe(1000);
+    expect((ok(await as('sales.westave').get('/api/promos/active')).body as unknown[]).length).toBe(0);
+    await as('head.auditor').post(`/api/promos/${pr.id}/cancel`).send({ reason: 'again again' }).expect(400);
+  });
+
+  it('a franchise promo is separate: franchise people see it, branches do not; the Owner can issue it', async () => {
+    const pr = ok(await as('admin').post('/api/promos').send({ title: `Franchise deal ${run}`, details: 'Franchise price break on whey.', audience: 'FRANCHISES', startsOn: today(), endsOn: plus(3), items: [{ productId: pid, promoPrice: 700 }] })).body;
+    expect((ok(await as('fr.mayon.owner').get('/api/promos/active')).body as { title: string }[]).map((x) => x.title)).toContain(`Franchise deal ${run}`);
+    expect((ok(await as('sales.westave').get('/api/promos/active')).body as unknown[]).length).toBe(0);
+    expect((await prisma.notification.count({ where: { type: 'PROMO', title: { contains: `Franchise deal ${run}` }, user: { email: { startsWith: 'sales.westave@' } } } }))).toBe(0);
+    expect((await prisma.notification.count({ where: { type: 'PROMO', title: { contains: `Franchise deal ${run}` }, user: { email: { startsWith: 'fr.mayon.owner@' } } } }))).toBe(1);
+    ok(await as('admin').post(`/api/promos/${pr.id}/cancel`).send({ reason: 'Test over' }));
+  });
+
+  it('birthdays: the store where the member usually buys is told on the day, once; the Customer Service list shows it to that branch only; greeting is recorded', async () => {
+    const m = ok(await as('sales.westave').post('/api/members').send({ fullName: 'Bea Birthday', phone: '0917 777 0001', email: `bea${run}@x.test`, birthday: `1996-${today().slice(5)}` })).body; mid = m.id;
+    await sale('10', [{ productId: pid, qty: 1 }], { memberId: mid });
+    const r1 = ok(await as('sales.manager').post('/api/member-program/run-automation')).body; expect(r1.storeBirthdays).toBe(1);
+    expect(await prisma.notification.count({ where: { type: 'MEMBER_BIRTHDAY', title: { contains: 'Bea Birthday' }, user: { email: { startsWith: 'sales.westave@' } } } })).toBe(1);
+    expect(await prisma.notification.count({ where: { type: 'MEMBER_BIRTHDAY', title: { contains: 'Bea Birthday' }, user: { email: { startsWith: 'sales.dasma@' } } } })).toBe(0);
+    expect(ok(await as('sales.manager').post('/api/member-program/run-automation')).body.storeBirthdays).toBe(0);
+    const board = ok(await as('sales.westave').get('/api/customer-service/board')).body;
+    const b = board.birthdays.find((x: { memberId: string }) => x.memberId === mid); expect(b).toMatchObject({ inDays: 0, greeted: false, store: 'West Ave' });
+    expect((ok(await as('sales.dasma').get('/api/customer-service/board')).body.birthdays as { memberId: string }[]).some((x) => x.memberId === mid)).toBe(false);
+    ok(await as('sales.westave').post('/api/customer-service/contacts').send({ kind: 'BIRTHDAY', memberId: mid, method: 'SMS', outcome: 'GREETED' }));
+    expect((ok(await as('sales.westave').get('/api/customer-service/board')).body.birthdays as { memberId: string; greeted: boolean }[]).find((x) => x.memberId === mid)!.greeted).toBe(true);
+    expect((ok(await as('sales.manager').get(`/api/members/${mid}/notes`)).body as { text: string }[]).some((n) => /Greeted/.test(n.text))).toBe(true);
+  });
+
+  it('restock due: the customer to approach is listed; the staff record how they were approached, whether they bought again and, if not, why; those who came back are not listed; the manager sees the reasons', async () => {
+    await sale('20', [{ productId: pid, qty: 1 }], { customerName: 'Rico Restock', customerPhone: '0918 888 0001' });
+    await sale('21', [{ productId: pid, qty: 1 }], { customerName: 'Cora Comeback', customerPhone: '0918 888 0002' });
+    await sale('22', [{ productId: pid, qty: 1 }], { customerName: 'Nico Notworking', customerPhone: '0918 888 0003' });
+    // Cora bought it again
+    await sale('23', [{ productId: pid, qty: 1 }], { customerName: 'Cora Comeback', customerPhone: '+63 918 888 0002' });
+    let board = ok(await as('sales.westave').get('/api/customer-service/board')).body;
+    const names = (board.restock as { customer: string }[]).map((r) => r.customer);
+    expect(names).toContain('Rico Restock'); expect(names).toContain('Nico Notworking'); expect(names.filter((n) => n === 'Cora Comeback').length).toBe(1); /* the first purchase is done (bought again); only the new purchase waits */ expect(board.stats.cameBackOnTheirOwn).toBeGreaterThanOrEqual(1);
+    const rico = board.restock.find((r: { customer: string }) => r.customer === 'Rico Restock'); const nico = board.restock.find((r: { customer: string }) => r.customer === 'Nico Notworking');
+    // a reason is needed when the customer is not buying again; "Other" needs a note
+    await as('sales.westave').post('/api/customer-service/contacts').send({ kind: 'RESTOCK', followUpId: rico.id, method: 'CALL', outcome: 'NOT_BUYING' }).expect(400);
+    await as('sales.westave').post('/api/customer-service/contacts').send({ kind: 'RESTOCK', followUpId: rico.id, method: 'CALL', outcome: 'NOT_BUYING', reason: 'OTHER' }).expect(400);
+    await as('sales.westave').post('/api/customer-service/contacts').send({ kind: 'RESTOCK', followUpId: rico.id, method: 'CALL', outcome: 'NOT_BUYING', reason: 'MADE_UP' }).expect(400);
+    ok(await as('sales.westave').post('/api/customer-service/contacts').send({ kind: 'RESTOCK', followUpId: rico.id, method: 'CALL', outcome: 'NOT_BUYING', reason: 'CHEAPER_ELSEWHERE', note: 'Found it at 900 at the mall' }));
+    ok(await as('sales.westave').post('/api/customer-service/contacts').send({ kind: 'RESTOCK', followUpId: nico.id, method: 'VIBER', outcome: 'NOT_BUYING', reason: 'NOT_WORKING', note: 'No results after a month' }));
+    expect((await prisma.customerFollowUp.findUniqueOrThrow({ where: { id: rico.id } })).status).toBe('CONTACTED');
+    board = ok(await as('sales.westave').get('/api/customer-service/board')).body; expect((board.restock as { customer: string }[]).map((r) => r.customer)).not.toContain('Rico Restock');
+    // no answer: stays on the list, due again later
+    await sale('24', [{ productId: pid, qty: 1 }], { customerName: 'Nina Noanswer', customerPhone: '0918 888 0004' });
+    board = ok(await as('sales.westave').get('/api/customer-service/board')).body; const nina = board.restock.find((r: { customer: string }) => r.customer === 'Nina Noanswer');
+    ok(await as('sales.westave').post('/api/customer-service/contacts').send({ kind: 'RESTOCK', followUpId: nina.id, method: 'CALL', outcome: 'NO_ANSWER', recontactOn: plus(5) }));
+    expect((await prisma.customerFollowUp.findUniqueOrThrow({ where: { id: nina.id } })).status).not.toBe('CONTACTED');
+    expect((ok(await as('sales.westave').get('/api/customer-service/board')).body.restock as { customer: string }[]).map((r) => r.customer)).not.toContain('Nina Noanswer');
+    // another branch cannot record against this branch's customer
+    await as('sales.dasma').post('/api/customer-service/contacts').send({ kind: 'RESTOCK', followUpId: nina.id, method: 'CALL', outcome: 'GREETED' }).expect(403);
+    // the Sales Manager is told about product trouble, and sees the reasons added up
+    expect(await prisma.notification.count({ where: { type: 'CUSTOMER_FEEDBACK', title: { contains: 'Not working' }, user: { email: { startsWith: 'sales.manager@' } } } })).toBeGreaterThanOrEqual(1);
+    const rs = ok(await as('sales.manager').get('/api/customer-service/reasons?days=30')).body;
+    expect(rs.notBuying).toBeGreaterThanOrEqual(2); expect(rs.reasons.map((x: { key: string }) => x.key)).toEqual(expect.arrayContaining(['CHEAPER_ELSEWHERE', 'NOT_WORKING']));
+    expect(rs.byBranch.find((x: { branch: string }) => x.branch === 'West Ave').approached).toBeGreaterThanOrEqual(3); expect(rs.byProduct[0].product).toContain('CS Whey'); expect(rs.latestNotes.length).toBeGreaterThanOrEqual(2);
+    await as('sales.westave').get('/api/customer-service/reasons').expect(403);
+    const log = ok(await as('sales.westave').get('/api/customer-service/contacts')).body as { reasonLabel: string }[]; expect(log.some((x) => /cheaper/i.test(x.reasonLabel))).toBe(true);
+    expect(ok(await as('sales.westave').get('/api/customer-service/options')).body.reasons.length).toBeGreaterThan(10);
+    await as('hr.staff').get('/api/customer-service/board').expect(403);
   });
 });

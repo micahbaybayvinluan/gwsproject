@@ -276,6 +276,11 @@ Waybill Report → **Choose waybill PDF files** (TikTok or Shopee labels) → pi
 95. **Rating** (phone): `/member` → Purchases → Rate this purchase → 2 stars with a comment. `sales.manager` sees a notification and a complaint note; Wheysted Members → Feedback.
 96. **Insights** (`sales.manager`): Top spenders (Log a call), Insights (heat-map, capture rate), Lost sales; Expiry & Low Stock shows the "Customers asked" column.
 97. **Chat campaign** (`sales.manager`): Campaigns → Win-back voucher quick start → WhatsApp → Prepare → open it → Send → "Open WhatsApp + copy message" on one row. Open the campaign later: Results show who bought and vouchers used.
+98. **Promo to the branches** (`head.auditor`): Promos → Issue it to *All branches* → name, dates, description, add an item with a promo price → Issue promo and send memo. `sales.westave` sees the promo strip on the Dashboard and at New Sale, a highlighted PROMO notice and the memo; `fr.mayon.owner` sees nothing. Sell the item at New Sale without typing a price: it uses the promo price, no approval.
+99. **Promo to the franchises** (`admin`): Promos → *Franchises only*. `fr.mayon.owner` sees it on the Dashboard; `sales.westave` does not. Cancel it (with a reason): everyone concerned is told.
+100. **Birthday and the home store** (`sales.manager`, `sales.westave`): make a member with today's birthday and tag a sale at West Ave. Program rules → *Run the automatic messages now*: `sales.westave` gets a "Birthday today" notice; `sales.dasma` does not. On `sales.westave`'s Dashboard → Customer Service the member shows under Birthdays: press *Greeted* → record.
+101. **Restock due and results** (`sales.westave`): give a product "days one unit lasts" (Products), sell it with a customer name and mobile number. Next day (or the same day for 1 day) the customer is under *Restock due*. *Record result*: Phone call → *Not buying again* → reason *Found it cheaper in another store* (a note: where and how much) → Save. Try *No answer, try again* with a date. A customer who buys it again drops off the list.
+102. **Reasons** (`sales.manager`): Customer Service → *Why they do not buy again*: approached, came back, reasons, by branch, by item, by staff, what customers said. A reason such as *Not working out* also notifies the Sales Manager at once.
 
 ## Where the files come out
 

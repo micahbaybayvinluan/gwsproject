@@ -19,6 +19,8 @@ const NAV: { group: string; items: NavItem[] }[] = [
     { to: '/my-sales', label: 'My Sales', any: ['agent.self'] },
     { to: '/members', label: 'Wheysted Members', any: ['member.view', 'member.manage'] },
     { to: '/campaigns', label: 'Campaigns', any: ['member.blast'] },
+    { to: '/customer-service', label: 'Customer Service', any: ['sale.create', 'sale.create.warehouse', 'member.view', 'report.sales.all'] },
+    { to: '/promos', label: 'Promos' },
     { to: '/reservations', label: 'Member Reservations', any: ['member.view', 'member.manage', 'sale.create', 'sale.create.warehouse'] },
     { to: '/itinerary', label: 'My Itinerary', any: ['agent.self'] },
     { to: '/outlets', label: 'Outlets', any: ['agent.self', 'outlet.view.all', 'outlet.manage'] },

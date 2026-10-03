@@ -11,6 +11,7 @@ import { BatchChooser, batchText, loadBatches, type BatchOpt } from '@/component
 import { DataTable } from '@/components/ui/table';
 import { MemberPicker, type MemberLite } from '@/components/MemberPicker';
 import { LostSaleButton, MemberCounter } from '@/components/MemberCounter';
+import { PromoBanner } from './Promos';
 import { Attachments } from '@/components/Attachments';
 
 type Product = { id: string; sku: string; name: string; tierPrices: Record<string, string>; category: { accountingClass: string }; onHand?: number; isBundle?: boolean };
@@ -82,6 +83,7 @@ export function NewSalePage() {
   const needsProof = paymentMode === 'ONLINE' || paymentMode === 'CREDIT_CARD';
   return <div className="mx-auto max-w-3xl space-y-4">
     <h1 className="text-2xl font-bold tracking-tight text-navy">New Sale</h1>
+    <PromoBanner compact />
     <Card>
       <div className="grid gap-3 md:grid-cols-3">
         {!me!.locationScoped && <Field label="Branch"><Select value={locationId} onChange={(e) => setLocationId(e.target.value)}><option value="">—</option>{locations.data?.filter((l) => l.isSelling && (!warehouseOnly || l.type === 'WAREHOUSE')).map((l) => <option key={l.id} value={l.id}>{locLabel(l)}</option>)}</Select></Field>}

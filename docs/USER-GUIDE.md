@@ -547,6 +547,31 @@ In **New Sale**, under **Agent's outlet / gym (optional)**, pick the **agent** f
 
 **Campaigns now also reach chat apps.** *WhatsApp, Viber and Messenger* have no free way for the system to send by itself, so the campaign becomes a **list for the staff**: **Open WhatsApp + copy message** opens the chat with the message ready (Viber / Messenger: paste it). Add filters for goal, tier and preferred contact method, and **Give each person a voucher** (each gets their own code, in the message through `{voucher}`). Quick-start buttons: win-back, birthday month, VIP thank-you, welcome. Open a sent campaign to see **who bought within 7 days**, orders, sales, and vouchers given / used.
 
+## Customer Service: the branch to-do list, and what customers tell us
+<!-- for: sale.create, sale.create.warehouse, member.view, report.sales.all -->
+**Where.** On the **Dashboard** of every sales associate (card *Customer Service*) and in the menu **Customer Service** for the full list.
+
+**What is on it.**
+- **Restock due:** customers who bought a supplement that should be finished by now (the days one unit lasts are set per product). Customers who already bought it again are not listed.
+- **Birthdays of our regulars:** the members who usually buy at your branch (the branch where they buy most), from 2 days ago to 7 days ahead. On the day itself the branch also gets a **notification**. A member whose birthday is today also gets the birthday voucher if the Owner switched that on.
+- **Regulars we have not seen for a while:** members of your branch who last bought 46–180 days ago, best customers first.
+- **Reservations to prepare** and the running **promos**.
+
+**After you approach a customer, press *Record result*** (for a birthday: *Greeted*) and answer: *how* you approached them (phone call, SMS, WhatsApp, Viber, Messenger, in person) and *what came of it*:
+- **Bought again**, **Will buy** (it reminds you on a date you choose), **No answer, try again** (stays on the list, due again on the date you choose), **Wrong or dead number**.
+- **Not buying again** needs the **reason**: found it cheaper in another store, bought online, not working out / no results, did not agree with them, did not like the taste, switched brand, still has stock, we did not have it, no budget, stopped training, coach / doctor advised something else, worried about authenticity, unhappy with our service, store too far, waiting for a promo, or Other (write it in the note). For *cheaper elsewhere* write where and at what price.
+The result also goes into the member's contact log. Product or service trouble (not working out, side effects, authenticity, service) is sent to the Sales Manager at once.
+
+**Results recorded** lists everything recorded at your branch. **Why they do not buy again** (Sales Manager, Owner, auditors) adds it all up: how many were approached and came back, the reasons, by branch, by item, by staff member, and what customers said.
+
+## Promos: for all branches, or separately for the franchises
+<!-- for: promo.issue, sale.create, sale.create.warehouse, franchise.ar.own -->
+**Who issues.** The **Owner** and the **Head Auditor**, under **Promos**: choose **All branches (not franchises)** or **Franchises only** (these are separate promos), the promo name, the dates, what the customer gets, and optionally **promo prices** for items.
+
+**What happens.** A numbered **memo** goes to everyone concerned (branch staff, in-charges, the Sales Manager and agents; or franchise owners, franchise associates and the Franchise Coordinators) and a **highlighted PROMO notice** (a coloured row in Notifications). While the promo runs it shows as a coloured strip on the **dashboard** and at the top of **New Sale** for the people it is meant for. Franchise staff never see a branch promo and branches never see a franchise promo.
+
+**Prices.** An item with a promo price is sold at that price **by itself at New Sale** (no special-price approval), for branch sales on the retail price list (cash / online; credit-card sales keep the card price), and for franchise promos when the Franchise Coordinator records a franchise sale. A price typed by hand wins, and a member price is used when it is lower. When the promo ends or is cancelled the normal price returns. The Owner or the Head Auditor can **Cancel promo** with a reason: everyone concerned is told and the memo is withdrawn.
+
 ## Email and SMS campaigns
 <!-- for: member.blast -->
 1. Open **Email & SMS**. The two boxes at the top say whether email and SMS are ready. Setup (once, in `api/.env`, then restart): **email** = `SMTP_URL` (your mail server) and `MAIL_FROM` (the one company email all blasts come from), **SMS** = `SEMAPHORE_API_KEY` (and `SEMAPHORE_SENDER`), and `PUBLIC_URL` (the web address customers use, so the unsubscribe link works).

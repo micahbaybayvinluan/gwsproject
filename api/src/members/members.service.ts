@@ -150,6 +150,16 @@ export class MembersService {
     return out;
   }
 
+  /** Each member's home store: the branch where they buy most (ties: the most recent), with their last purchase, orders and spending. Members who never bought are not in it. */
+  async homeBoard(): Promise<Map<string, { locationId: string; lastDate: Date; orders: number; spent: number }>> {
+    const rows = await requestContext.runSystem(async () => await this.prisma.db.$queryRaw<{ member_id: string; location_id: string; last: Date; orders: number; spent: Prisma.Decimal }[]>(Prisma.sql`
+      WITH per AS (SELECT d.member_id, d.location_id, COUNT(*)::int AS n, MAX(d.doc_date) AS last, SUM(d.grand_total) AS spent FROM sales_docs d WHERE d.member_id IS NOT NULL AND d.voided_at IS NULL GROUP BY d.member_id, d.location_id),
+      home AS (SELECT DISTINCT ON (member_id) member_id, location_id FROM per ORDER BY member_id, n DESC, last DESC),
+      tot AS (SELECT member_id, MAX(last) AS last, SUM(n)::int AS orders, SUM(spent) AS spent FROM per GROUP BY member_id)
+      SELECT h.member_id, h.location_id, t.last, t.orders, t.spent FROM home h JOIN tot t ON t.member_id = h.member_id`));
+    return new Map(rows.map((r) => [r.member_id, { locationId: r.location_id, lastDate: r.last, orders: r.orders, spent: num(r.spent) }]));
+  }
+
   /** Every member with their numbers and segments (the list is sorted and filtered on screen). */
   async list(q: { segment?: string; search?: string } = {}) {
     const members = await this.prisma.db.member.findMany({ orderBy: { createdAt: 'desc' }, take: 20000 });

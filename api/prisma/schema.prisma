@@ -3007,3 +3007,64 @@ model MemberAutoMessage {
   @@unique([kind, key])
   @@map("member_auto_messages")
 }
+
+/// A promo the Owner or the Head Auditor issues (owner request 2026-10-07): to every non-franchise branch, or separately to the franchises. Issuing also makes a memo.
+model Promo {
+  id            String    @id @default(uuid())
+  title         String
+  details       String
+  audience      String // BRANCHES | FRANCHISES
+  startsOn      DateTime  @map("starts_on") @db.Date
+  endsOn        DateTime  @map("ends_on") @db.Date
+  status        String    @default("ACTIVE") // ACTIVE | CANCELLED
+  memoId        String?   @map("memo_id")
+  createdBy     String    @map("created_by")
+  createdByName String?   @map("created_by_name")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  cancelledAt   DateTime? @map("cancelled_at")
+  cancelReason  String?   @map("cancel_reason")
+
+  items PromoItem[]
+
+  @@index([audience, status, endsOn])
+  @@map("promos")
+}
+
+model PromoItem {
+  id         String  @id @default(uuid())
+  promoId    String  @map("promo_id")
+  productId  String  @map("product_id")
+  promoPrice Decimal @map("promo_price") @db.Decimal(14, 2)
+
+  promo Promo @relation(fields: [promoId], references: [id], onDelete: Cascade)
+
+  @@unique([promoId, productId])
+  @@index([productId])
+  @@map("promo_items")
+}
+
+/// What happened when staff approached a customer from the Customer Service list (restock, birthday, win-back): how, whether they bought again, and if not, why (owner request 2026-10-07).
+model CustomerContact {
+  id            String    @id @default(uuid())
+  kind          String // RESTOCK | BIRTHDAY | WINBACK | OTHER
+  followUpId    String?   @map("follow_up_id")
+  memberId      String?   @map("member_id")
+  productId     String?   @map("product_id")
+  locationId    String    @map("location_id")
+  customerName  String?   @map("customer_name")
+  phone         String?
+  method        String // CALL | SMS | WHATSAPP | VIBER | MESSENGER | VISIT
+  outcome       String // BOUGHT_AGAIN | WILL_BUY | NOT_BUYING | NO_ANSWER | WRONG_NUMBER | GREETED
+  reason        String?
+  note          String?
+  recontactOn   DateTime? @map("recontact_on") @db.Date
+  createdBy     String    @map("created_by")
+  createdByName String?   @map("created_by_name")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  @@index([locationId, createdAt])
+  @@index([memberId])
+  @@index([followUpId])
+  @@index([kind, outcome])
+  @@map("customer_contacts")
+}

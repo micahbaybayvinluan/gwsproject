@@ -582,6 +582,10 @@ You follow the sales of every branch, agent and e-commerce platform, and you set
 1. **Wheysted Members:** every member with what they buy, how often, how much and when they last bought. Click a title to sort, use the filter under it, or choose a segment (VIP, Frequent, At risk, Lapsed, New, Never bought, Birthday). **Who bought this item** lists the customers of one item. **Make members from my sales** turns the customers already in your sales into members.
 2. **Email & SMS:** choose the audience (members, or everyone in the database; a segment; those who bought an item), **Count who will receive it**, write the message with {firstName}, send a test to yourself, then **Prepare campaign** and **Send**. Unsubscribed people are left out automatically.
 
+**Customer Service and promos** (menus: Customer Service, Promos)
+1. **Customer Service:** the branches' to-do lists (restock due, birthdays of regulars, regulars who stopped coming) and the results they recorded. **Why they do not buy again** adds up the reasons by branch, item and staff member.
+2. **Promos:** see the promos running for the branches and the franchises. The Owner and the Head Auditor issue and cancel them.
+
 **Member program** (menu: Wheysted Members)
 1. **Top spenders:** call the best customers who have not been contacted for 30 days and press **Log a call**.
 2. **Insights:** when customers buy (heat-map), where members come from, and how many sales carry a member by branch and by associate. **Feedback:** ratings and comments; low ratings arrive as notifications.

@@ -38,9 +38,11 @@ import { DraftsModule } from './drafts/drafts.module';
 import { ReplacementsModule } from './replacements/replacements.module';
 import { AgentsModule } from './agents/agents.module';
 import { MembersModule } from './members/members.module';
+import { PromosModule } from './promos/promos.module';
+import { CustomerServiceModule } from './customer-service/customer-service.module';
 @Module({
   imports: [
-    CommonModule, DraftsModule, ReplacementsModule, AgentsModule, MembersModule, ChargesModule, RevisionsModule, AuthModule, UsersModule, MasterModule, StockModule, NotificationsModule, ApprovalsModule, AttachmentsModule, GlModule,
+    CommonModule, DraftsModule, ReplacementsModule, AgentsModule, MembersModule, PromosModule, CustomerServiceModule, ChargesModule, RevisionsModule, AuthModule, UsersModule, MasterModule, StockModule, NotificationsModule, ApprovalsModule, AttachmentsModule, GlModule,
     ReceivingModule, TransfersModule, PricingModule, ClosingModule, SalesModule, ExpensesModule, AlertsModule, CountsModule, ReportsModule, ImportsModule, PayrollModule, DashboardModule, JobsModule, EditsModule, CashFundModule, InspectionsModule, HelpModule, FranchiseModule, MemosModule, SixPackModule, EcommerceModule, TargetsModule,
   ],
   controllers: [HealthController],

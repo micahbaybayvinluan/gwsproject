@@ -166,10 +166,21 @@ export class EngageService {
 
   // ── the daily automatic messages ──
   async runDaily() {
-    const p = await this.loyalty.program(); const today = todayManila(); const out = { reorder: 0, birthday: 0, anniversary: 0, winback: 0, survey: 0, backInStock: 0, notConfigured: 0 };
+    const p = await this.loyalty.program(); const today = todayManila(); const out = { storeBirthdays: 0, reorder: 0, birthday: 0, anniversary: 0, winback: 0, survey: 0, backInStock: 0, notConfigured: 0 };
     const count = (r: string, k: keyof typeof out) => { if (r === 'SENT') out[k]++; else if (r === 'NOT_CONFIGURED') out.notConfigured++; };
     const all = await this.prisma.db.member.findMany({ where: { status: 'ACTIVE' } });
     const mm = today.getUTCMonth(); const dd = today.getUTCDate();
+    // birthday: the store where the member usually buys is told (always; the Customer Service list shows it too)
+    const home = await this.members.homeBoard();
+    for (const m of all) {
+      if (!m.birthday || m.birthday.getUTCMonth() !== mm || m.birthday.getUTCDate() !== dd) continue;
+      const loc = home.get(m.id)?.locationId; if (!loc) continue;
+      const key = `${m.id}:${today.getUTCFullYear()}`;
+      if (await this.prisma.db.memberAutoMessage.findUnique({ where: { kind_key: { kind: 'birthday-store', key } } })) continue;
+      await this.notify.toLocation(loc, { type: 'MEMBER_BIRTHDAY', title: `Birthday today: ${m.fullName} (${m.memberNo}), a regular at your branch`, body: 'Greet them (call, message or when they visit) and record it under Customer Service on your dashboard.', link: '/customer-service' });
+      await this.prisma.db.memberAutoMessage.create({ data: { kind: 'birthday-store', key, memberId: m.id, channel: 'STORE', status: 'SENT' } });
+      out.storeBirthdays++;
+    }
     // birthday and anniversary: a voucher and a message
     for (const m of all) {
       if (p.birthdayAuto && m.birthday && m.birthday.getUTCMonth() === mm && m.birthday.getUTCDate() === dd) {

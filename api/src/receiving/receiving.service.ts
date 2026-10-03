@@ -21,7 +21,7 @@ import { requestContext } from '../common/request-context';
 
 export interface ReceivingLineInput { productId: string; qty: number; freeQty?: number; expiryDate?: string | null; batchNo?: string | null; flavor?: string | null; unitCost?: number | null; remarks?: string }
 export interface ReceivingEditInput { supplierId?: string; supplierRef?: string | null; docDate?: string; notes?: string | null; lines: ReceivingLineInput[] }
-export interface ReceivingInput { replacementTicketId?: string; locationId?: string; supplierId: string; supplierRef?: string; docDate?: string; isConsignmentIn?: boolean; paidOnReceipt?: boolean; paymentAccountId?: string | null; notes?: string; lines: ReceivingLineInput[] }
+export interface ReceivingInput { purchaseOrderId?: string; replacementTicketId?: string; locationId?: string; supplierId: string; supplierRef?: string; docDate?: string; isConsignmentIn?: boolean; paidOnReceipt?: boolean; paymentAccountId?: string | null; notes?: string; lines: ReceivingLineInput[] }
 
 /** §7.2 Receiving from suppliers (Supplier's Form / PO-Purchases) with COST_ON_RECEIVING approval. */
 @Injectable()
@@ -65,6 +65,13 @@ export class ReceivingService implements OnModuleInit {
       if (t.supplierId !== supplier.id) throw new BadRequestException(`Ticket ${t.ticketNo} is waiting for a replacement from another supplier`);
       if (!['AWAITING_REPLACEMENT', 'PARTIAL'].includes(t.status)) throw new BadRequestException(`Ticket ${t.ticketNo} is not waiting for a replacement`);
     }
+    // a delivery for a purchase order: it must be that supplier's order and already sent
+    if (input.purchaseOrderId) {
+      const po = await this.prisma.db.purchaseOrder.findUnique({ where: { id: input.purchaseOrderId } });
+      if (!po) throw new BadRequestException('Unknown purchase order');
+      if (po.supplierId !== supplier.id) throw new BadRequestException(`${po.poNo} is an order to another supplier`);
+      if (!['SENT', 'PARTIAL'].includes(po.status)) throw new BadRequestException(`${po.poNo} is not waiting for a delivery (it is ${po.status.toLowerCase()})`);
+    }
     const today = todayManila();
     const warnings = await this.validateLines(input.lines, user);
     const doc = await this.prisma.db.$transaction(async (tx) => {
@@ -72,7 +79,7 @@ export class ReceivingService implements OnModuleInit {
       return tx.receivingDoc.create({
         data: {
           controlNo, docDate: input.docDate ? toDateOnly(input.docDate) : today, locationId: wh.id, supplierId: supplier.id, supplierRef: input.supplierRef, isConsignmentIn: input.isConsignmentIn ?? supplier.isConsignor,
-          paidOnReceipt: !!input.paidOnReceipt, paymentAccountId: input.paymentAccountId ?? null, notes: input.notes, replacementTicketId: input.replacementTicketId ?? null, preparedBy: user.id, createdBy: user.id,
+          paidOnReceipt: !!input.paidOnReceipt, paymentAccountId: input.paymentAccountId ?? null, notes: input.notes, replacementTicketId: input.replacementTicketId ?? null, purchaseOrderId: input.purchaseOrderId ?? null, preparedBy: user.id, createdBy: user.id,
           lines: { create: input.lines.map((l) => ({ productId: l.productId, qty: l.qty, freeQty: l.freeQty ?? 0, expiryDate: l.expiryDate ? toDateOnly(l.expiryDate) : null, batchNo: l.batchNo ?? null, flavor: l.flavor?.trim() || null, unitCost: l.unitCost != null ? D(l.unitCost).toFixed(2) : null, remarks: l.remarks })) },
         }, include: this.include,
       });

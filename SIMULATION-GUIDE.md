@@ -284,6 +284,12 @@ Waybill Report → **Choose waybill PDF files** (TikTok or Shopee labels) → pi
 103. **Replacement paid online** (`sales.westave`): Replacement Tickets → open a ticket → We gave the replacement: choose the product (the price fills in), keep today as the day → `head.auditor` approves. Then *Record the payment of the difference* → Online → choose the GCash account → Save. Open Reports → Daily Sales Report: the *Replacement payments* box shows it, apart from sales.
 104. **Replacement paid in cash on a past day** (`sales.westave`): give a replacement dated yesterday (a closed day) → `head.auditor` approves it; record the payment as Cash dated yesterday: it waits for the Head Auditor (My Approvals → Replacement payment on a closed day). After approval it appears in yesterday's report and cash deposit.
 105. **Search boxes** (any user): in Replacement Tickets, Campaigns and Member prices pick an item: the name shows inside the box with ✕ change. At New Sale tag a member with a member price: the price box fills by itself.
+106. **Generate a restock request** (`head.auditor`): Restock & Purchase Orders → Generate a restock request → keep 30 / 30 / 7 days → Generate. Open a PO: each item shows the warehouse stock and, per branch, on hand, per day, days left, needs, suggested transfer and share of the order.
+107. **Edit by hand** (`head.auditor`): change the order quantity of one item, change a branch's transfer quantity and its "from" location, add an item the suggestion did not list → Save changes. The totals update.
+108. **Approve** (`head.auditor` → `admin`): Send to the Owner for approval. As `admin`, open My Approvals → the purchase order → change a number if you wish → Approve. `sales.westave` (and other branches with a part) are notified; Restock Plan shows the branch's part.
+109. **Print the three copies** (`admin`): supplier copy (no branches, no prices), Head Auditor / Owner copy, warehouse copy. Check the supplier copy has no branch name.
+110. **Ask for the transfers** (`admin`): *Ask the Head Auditor to make the transfers* → `head.auditor`, `wh.incharge` and the branches are notified. Then *Mark as sent* with an expected date.
+111. **Receive against the order** (`wh.assoc` / `wh.incharge`): Supplier Deliveries → new delivery for that supplier → *This delivery is for a purchase order* → choose it → post. The PO shows received against ordered (Partly received / Received) and the branches are told.
 
 ## Where the files come out
 

@@ -136,6 +136,8 @@ You run one branch: sales, expenses, stock received and sent, the weekly count, 
 
 **Returns and give-outs:** when a customer brings back an item, open a **Replacement Ticket** (find the DR) and photograph the item; any other branch can tick it once the replacement is given. To give stock to **Prothin Marketing, GWS Marketing or BO**, use Transfers & Pull-outs (To → Stock given out); the Head Auditor approves. An unfinished draft can be deleted with **Delete draft**; the numbers adjust by themselves.
 
+**Restocking:** when the Owner approves a purchase order, you are told what your branch will receive: **stock moved from existing stock** (create the pull-out form now) and **your share of the supplier order** (told again when it arrives). *Restock Plan* shows both for your branch.
+
 ## Warehouse Associate
 <!-- role: WAREHOUSE_ASSOCIATE -->
 You enter what comes into and goes out of the warehouse. You never see supplier cost. Your entries are checked by the Warehouse In-Charge before stock changes.
@@ -226,6 +228,8 @@ You are responsible for the warehouse stock. You check your associates' entries,
 
 **Warehouse expenses** (menu: Expenses): you and the Warehouse Associate record the warehouse's expenses (cash on hand, bank account or owner advance; no cash fund).
 
+**Restocking:** you can open every purchase order (Restock & Purchase Orders, view only) and print the **warehouse copy**: per branch, what to pull out now from existing stock and each branch's share when the supplier's delivery arrives. When you receive a delivery for an order, choose it under *This delivery is for a purchase order*.
+
 ## Head Auditor
 <!-- role: HEAD_AUDITOR -->
 New approvals for you: **stock given out to Prothin Marketing / GWS Marketing / BO** (you may also endorse an approved one to Accounting as an expense), **a replacement given to a customer** (price difference shown), and **items returned to a supplier**. Replacement Tickets lists every ticket; Marketing & BO Pull-outs summarises what was given out. In the Daily Inventory Report press a figure to see the forms behind it.
@@ -276,6 +280,8 @@ You approve costs and most corrections, audit the branches, and watch the cash.
 - Review store inspections and the Revision Log.
 
 **Franchise AR and memos:** **Franchise AR** shows every franchise's invoices; you are told of every payment, change, extension request and two-month flag. You may write memorandums (**Memorandums**).
+
+**Restocking:** Restock & Purchase Orders → *Generate a restock request* makes one PO per supplier from the days of stock of the warehouse and each branch. Check the suggested transfers (from existing stock first) and the suggested order, change any box, add items, then *Send to the Owner for approval*. After approval, tell the branches to create their pull-outs (the Owner may also ask you to make the transfers). Print the supplier copy (no branches), the internal copy and the warehouse copy.
 
 ## Asst Auditor
 <!-- role: ASST_AUDITOR -->
@@ -396,6 +402,8 @@ You keep the books.
 
 **Your password:** press the key icon at the top right (**Change my password**) any time. Your account is personal and you answer for everything done under it, so never tell your password to anyone, not even HR, your supervisor or the Owner. Nobody can see it.
 
+**Purchase orders:** you can view every purchase order (Restock & Purchase Orders); it books nothing. The delivery and its approved cost do.
+
 ## Accounting Associate
 <!-- role: ACCOUNTING_ASSOCIATE -->
 You accept **pull-outs endorsed as an expense** in My Approvals (booked at cost) and are told of every replacement ticket, its price difference and when it is settled (Replacement Tickets, Marketing & BO Pull-outs).
@@ -508,6 +516,8 @@ You see and can do everything. You are the final approver.
 **Franchise AR:** record waivers of penalty / interest, decide extension requests (in **Approvals**) and put a franchise on cash-before-delivery. **Memorandums:** yours always carry AL MARVIN VINLUAN (President) and MICAH VINLUAN (Manager). Adding an employee or a user notifies HR.
 
 **Your password:** press the key icon at the top right (**Change my password**) any time. Your account is personal and you answer for everything done under it, so never tell your password to anyone, not even HR, your supervisor or the Owner. Nobody can see it.
+
+**Restocking:** the Head Auditor sends you purchase orders (My Approvals or Restock & Purchase Orders). Each shows days left per branch, the suggested transfers from existing stock and the suggested order; you may change any number, then Approve or Reject with a note. You may also generate one yourself (approved at once). *Ask the Head Auditor to make the transfers* tells the Head Auditor, the Warehouse In-Charge and the branches. Print the internal copy; the supplier copy shows no branches or prices. Mark as sent with the expected delivery date; a delivery linked to the order shows received against ordered.
 
 ## E-comm Associate
 <!-- role: ECOMM_ASSOCIATE -->

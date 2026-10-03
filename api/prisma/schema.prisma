@@ -467,6 +467,8 @@ model ReceivingDoc {
   supplierId          String    @map("supplier_id")
   /// this delivery replaces items we returned to the supplier (ticket RT-…); its arrival closes the ticket
   replacementTicketId String?   @map("replacement_ticket_id")
+  /// this delivery is for a purchase order (PO-…); its arrival updates the order and tells the branches
+  purchaseOrderId     String?   @map("purchase_order_id")
   supplierRef         String?   @map("supplier_ref")
   isConsignmentIn     Boolean   @default(false) @map("is_consignment_in")
   /// Warehouse Associate's delivery: the In-Charge checked the goods (first step; the Head Auditor then approves the cost)
@@ -3091,4 +3093,77 @@ model ReplacementPayment {
   @@index([locationId, businessDate, status])
   @@index([ticketId])
   @@map("replacement_payments")
+}
+
+/// A purchase order to one supplier (owner request 2026-10-08): the Head Auditor generates it from the days of stock of every branch, the Owner may change it and approves,
+/// the supplier gets a copy without the branches, the Head Auditor / Owner / Warehouse In-Charge get copies with the branches, and the branches are told what to pull out.
+model PurchaseOrder {
+  id                String    @id @default(uuid())
+  poNo              String    @unique @map("po_no")
+  supplierId        String    @map("supplier_id")
+  status            String    @default("DRAFT") // DRAFT | SUBMITTED | APPROVED | SENT | PARTIAL | RECEIVED | CANCELLED
+  basisDays         Int       @default(30) @map("basis_days") // days of sales the averages are taken from
+  coverDays         Int       @default(30) @map("cover_days") // days of stock each branch should have after restocking
+  reserveDays       Int       @default(7) @map("reserve_days") // days of stock the warehouse keeps for itself before giving stock to branches
+  deliverToId       String?   @map("deliver_to_id")
+  expectedOn        DateTime? @map("expected_on") @db.Date
+  notes             String?
+  approvalRequestId String?   @map("approval_request_id")
+  createdBy         String    @map("created_by")
+  createdByName     String?   @map("created_by_name")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  submittedAt       DateTime? @map("submitted_at")
+  approvedBy        String?   @map("approved_by")
+  approvedAt        DateTime? @map("approved_at")
+  sentAt            DateTime? @map("sent_at")
+  sentBy            String?   @map("sent_by")
+  receivedAt        DateTime? @map("received_at")
+  cancelledAt       DateTime? @map("cancelled_at")
+  cancelReason      String?   @map("cancel_reason")
+  rejectNote        String?   @map("reject_note")
+
+  lines PurchaseOrderLine[]
+
+  @@index([supplierId, status])
+  @@map("purchase_orders")
+}
+
+model PurchaseOrderLine {
+  id           String  @id @default(uuid())
+  poId         String  @map("po_id")
+  productId    String  @map("product_id")
+  whOnHand     Int     @default(0) @map("wh_on_hand")
+  whAvgPerDay  Decimal @default(0) @map("wh_avg_per_day") @db.Decimal(10, 3)
+  onOrder      Int     @default(0) @map("on_order") // already ordered and not yet received on other open POs
+  suggestedQty Int     @default(0) @map("suggested_qty")
+  orderQty     Int     @default(0) @map("order_qty")
+  receivedQty  Int     @default(0) @map("received_qty")
+  note         String?
+
+  po   PurchaseOrder      @relation(fields: [poId], references: [id], onDelete: Cascade)
+  rows PurchaseOrderRow[]
+
+  @@unique([poId, productId])
+  @@map("purchase_order_lines")
+}
+
+/// One branch (or the warehouse) for one item: the stock and days left it has, what it needs, what to move to it from existing stock, and its share of the order.
+model PurchaseOrderRow {
+  id                String   @id @default(uuid())
+  lineId            String   @map("line_id")
+  locationId        String   @map("location_id")
+  onHand            Int      @default(0) @map("on_hand")
+  avgPerDay         Decimal  @default(0) @map("avg_per_day") @db.Decimal(10, 3)
+  daysLeft          Decimal? @map("days_left") @db.Decimal(8, 1)
+  need              Int      @default(0)
+  suggestedTransfer Int      @default(0) @map("suggested_transfer")
+  transferFromId    String?  @map("transfer_from_id")
+  transferQty       Int      @default(0) @map("transfer_qty")
+  suggestedAlloc    Int      @default(0) @map("suggested_alloc")
+  allocQty          Int      @default(0) @map("alloc_qty")
+
+  line PurchaseOrderLine @relation(fields: [lineId], references: [id], onDelete: Cascade)
+
+  @@unique([lineId, locationId])
+  @@map("purchase_order_rows")
 }

@@ -7,6 +7,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import ExcelJS from 'exceljs';
+import { RestockService } from '../src/restock/restock.service';
 import { authenticator } from 'otplib';
 import { INestApplication } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
@@ -69,7 +70,7 @@ async function resetTransactionalData() {
   await prisma.$executeRawUnsafe(`TRUNCATE replacement_receipts, replacement_tickets, franchise_shipping_charges, form_numbers_released, ecom_waybills, ecom_waybill_hints, franchise_payments, franchise_ar_adjustments, franchise_ar_extensions, franchise_invoices, memo_recipients, memos, six_pack_stickers, six_pack_redemptions CASCADE`);
   await prisma.$executeRawUnsafe(`TRUNCATE outlet_changes, outlet_shares, itinerary_claims, itinerary_stops, itineraries, agent_consignment_limits, outlets, sales_areas CASCADE`);
   await prisma.$executeRawUnsafe(`TRUNCATE campaign_recipients, campaigns, message_opt_outs, members CASCADE`);
-  await prisma.$executeRawUnsafe(`TRUNCATE promo_items, promos, customer_contacts, customer_follow_ups, replacement_payments CASCADE`);
+  await prisma.$executeRawUnsafe(`TRUNCATE promo_items, promos, customer_contacts, customer_follow_ups, replacement_payments, purchase_order_rows, purchase_order_lines, purchase_orders CASCADE`);
   await prisma.$executeRawUnsafe(`TRUNCATE member_vouchers, member_points_entries, member_notes, member_offers, survey_items, survey_responses, survey_invites, lost_sales, reservations, stock_alert_requests, member_auto_messages CASCADE`);
   await prisma.$executeRawUnsafe(`UPDATE consignment_agreements SET agent_key = NULL, agent_name = NULL, outlet_id = NULL`);
   await prisma.$executeRawUnsafe(`UPDATE locations SET credit_hold = false, credit_hold_note = NULL`);
@@ -3030,7 +3031,7 @@ describe('Promos for the branches or the franchises, and the Customer Service to
 describe('Replacement payments: how the customer settled the difference and on which day, in the Daily Sales Report apart from sales; a closed day needs the Head Auditor (owner request 2026-10-08)', () => {
   const day = (n: number) => new Date(Date.now() + 8 * 3600e3 + n * 86400e3).toISOString().slice(0, 10);
   let west = ''; let a = ''; let b = ''; let acct = ''; let n = 0;
-  const give = async (loc: string, p: string, qty: number) => { const bt = await prisma.batch.create({ data: { productId: p, batchNo: `RP-${run}-${++n}`, receivedRef: 'TEST', unitCost: '400' } }); await prisma.stockLedger.create({ data: { locationId: loc, productId: p, batchId: bt.id, qtyDelta: qty, movementType: 'RECEIVE', documentType: 'Opening', documentId: bt.batchNo, unitCost: '400', businessDate: new Date(`${day(0)}T00:00:00Z`) } }); await prisma.stockBalance.create({ data: { locationId: loc, productId: p, batchId: bt.id, qty } }); };
+  const give = async (loc: string, p: string, qty: number) => { const bt = await prisma.batch.create({ data: { productId: p, batchNo: `RP-${run}-${++n}`, receivedRef: 'TEST', unitCost: '400' } }); await prisma.stockLedger.create({ data: { locationId: loc, productId: p, batchId: bt.id, qtyDelta: qty, movementType: 'RECEIVE', documentType: 'Opening', documentId: bt.batchNo ?? '', unitCost: '400', businessDate: new Date(`${day(0)}T00:00:00Z`) } }); await prisma.stockBalance.create({ data: { locationId: loc, productId: p, batchId: bt.id, qty } }); };
   const report = async (date: string) => ok(await as('sales.westave').get(`/api/reports/daily-sales?locationId=${west}&date=${date}`)).body;
   /** a sale of 2 × A, a ticket for it, the replacement (2 × B: the customer owes 1,000) given on `givenOn` and approved */
   const ticket = async (tag: string, saleDay: string | null, givenOn?: string) => {
@@ -3107,5 +3108,90 @@ describe('Replacement payments: how the customer settled the difference and on w
     // the Head Auditor recording a closed day himself needs no second approval
     const t5 = await ticket('5', day(-3), day(-1)); await approve('REPLACEMENT_TICKET', t5.id);
     const self = ok(await as('head.auditor').post(`/api/replacements/${t5.id}/settle`).send({ mode: 'CASH', date: day(-1) })).body; expect(self.payments[0].status).toBe('APPLIED');
+  });
+});
+
+describe('Restocking and purchase orders: suggested per supplier from the days of stock, the Owner changes and approves, three print copies, the branches are told, a delivery updates the order (owner request 2026-10-08)', () => {
+  const day = (n: number) => new Date(Date.now() + 8 * 3600e3 + n * 86400e3).toISOString().slice(0, 10);
+  let wh = ''; let west = ''; let sup = ''; let p1 = ''; let p2 = ''; let po = ''; let n = 0;
+  const give = async (loc: string, p: string, qty: number) => { const bt = await prisma.batch.create({ data: { productId: p, batchNo: `PO-${run}-${++n}`, receivedRef: 'TEST', unitCost: '400' } }); await prisma.stockLedger.create({ data: { locationId: loc, productId: p, batchId: bt.id, qtyDelta: qty, movementType: 'RECEIVE', documentType: 'Opening', documentId: bt.batchNo ?? '', unitCost: '400', businessDate: new Date(`${day(0)}T00:00:00Z`) } }); await prisma.stockBalance.create({ data: { locationId: loc, productId: p, batchId: bt.id, qty } }); };
+  const notes = async (u: string, type: string, contains?: string) => prisma.notification.count({ where: { type, user: { email: { startsWith: `${u}@` } }, ...(contains ? { title: { contains } } : {}) } });
+  const gen = async (who = 'head.auditor') => ok(await as(who).post('/api/purchase-orders/generate').send({ supplierIds: [sup], basisDays: 30, coverDays: 30, reserveDays: 0 })).body as { created: { id: string; poNo: string }[] };
+
+  it('setup: a supplier with two items; West Ave sells both fast; the warehouse has plenty of the first and none of the second', async () => {
+    await prisma.salesReportSubmission.deleteMany({});
+    wh = (await prisma.location.findFirstOrThrow({ where: { type: 'WAREHOUSE' } })).id; west = (await prisma.location.findUniqueOrThrow({ where: { code: 'WESTAVE' } })).id;
+    sup = (await prisma.supplier.create({ data: { code: `SUP-PO${run}`.slice(0, 20), name: `PO Supplier ${run}` } })).id;
+    const cats = ok(await as('admin').get('/api/categories')).body as { id: string; accountingClass: string }[]; const cat = cats.find((c) => c.accountingClass === 'SUPPLEMENT')!.id;
+    p1 = ok(await as('admin').post('/api/products').send({ name: `PO A ${run}`, brand: 'X', categoryId: cat, prices: { RETAIL: 1000 }, cost: 500 })).body.id; p2 = ok(await as('admin').post('/api/products').send({ name: `PO B ${run}`, brand: 'X', categoryId: cat, prices: { RETAIL: 800 }, cost: 400 })).body.id;
+    await prisma.product.updateMany({ where: { id: { in: [p1, p2] } }, data: { supplierId: sup } });
+    await give(west, p1, 22); await give(west, p2, 22); await give(wh, p1, 200);
+    for (const [i, p] of [p1, p2].entries()) ok(await as('sales.westave').post('/api/sales').send({ channel: 'WALK_IN', paymentMode: 'CASH', drSiNo: `POS-${run}-${i}`, lines: [{ productId: p, qty: 20 }] }));
+  });
+
+  it('the Head Auditor generates one order per supplier: days left per branch, transfers from existing stock first, then what to order', async () => {
+    await as('sales.westave').post('/api/purchase-orders/generate').send({}).expect(403); await as('wh.incharge').post('/api/purchase-orders/generate').send({}).expect(403);
+    const g = await gen(); expect(g.created.length).toBe(1); po = g.created[0].id;
+    const d = ok(await as('head.auditor').get(`/api/purchase-orders/${po}`)).body;
+    expect(d.status).toBe('DRAFT'); expect(d.poNo).toMatch(/^PO-\d{4}-\d{4}$/); expect(d.supplier.code).toContain('SUP-PO');
+    const a = d.lines.find((l: { productId: string }) => l.productId === p1); const b = d.lines.find((l: { productId: string }) => l.productId === p2);
+    const ar = a.rows.find((r: { locationId: string }) => r.locationId === west); const br = b.rows.find((r: { locationId: string }) => r.locationId === west);
+    expect(ar).toMatchObject({ onHand: 2, need: 19, transferQty: 19, transferFromId: wh, allocQty: 0 }); expect(ar.daysLeft).toBeCloseTo(3, 0);
+    expect(a.orderQty).toBe(0); // the warehouse covers it from existing stock
+    expect(br).toMatchObject({ need: 19, transferQty: 0, allocQty: 19 }); expect(b.orderQty).toBe(19); expect(b.suggestedQty).toBe(19);
+    expect(d.totals.transferQty).toBe(19); expect(has(d, /unitCost|"cost"/)).toBe(false);
+    // who sees it
+    expect((ok(await as('wh.incharge').get('/api/purchase-orders')).body as unknown[]).length).toBeGreaterThan(0); await as('sales.westave').get('/api/purchase-orders').expect(403);
+  });
+
+  it('the Head Auditor changes the numbers and submits; after that only the Owner changes them; the Owner can ask for the transfers and approves', async () => {
+    const d0 = ok(await as('head.auditor').get(`/api/purchase-orders/${po}`)).body; const bl = d0.lines.find((l: { productId: string }) => l.productId === p2);
+    await as('head.auditor').put(`/api/purchase-orders/${po}`).send({ lines: [{ lineId: bl.id, orderQty: -3 }] }).expect(400);
+    ok(await as('head.auditor').put(`/api/purchase-orders/${po}`).send({ notes: 'Deliver to the warehouse', expectedOn: day(7), lines: [{ lineId: bl.id, orderQty: 25, note: 'rounded up to a case' }] }));
+    const open = ok(await as('head.auditor').post(`/api/purchase-orders/${po}/submit`)).body; expect(open.status).toBe('SUBMITTED');
+    await as('head.auditor').put(`/api/purchase-orders/${po}`).send({ notes: 'again' }).expect(400); // waiting for the Owner
+    const al = d0.lines.find((l: { productId: string }) => l.productId === p1); const row = al.rows.find((r: { locationId: string }) => r.locationId === west);
+    ok(await as('admin').put(`/api/purchase-orders/${po}`).send({ lines: [{ lineId: bl.id, orderQty: 30 }, { lineId: al.id, orderQty: 0, rows: [{ rowId: row.id, transferQty: 20, transferFromId: wh }] }] }));
+    await as('admin').put(`/api/purchase-orders/${po}`).send({ lines: [{ lineId: al.id, rows: [{ rowId: row.id, transferQty: 5, transferFromId: west }] }] }).expect(400); // not to itself
+    const inf = ok(await as('admin').post(`/api/purchase-orders/${po}/inform-transfers`)).body; expect(inf.moves).toBe(1);
+    expect(await notes('head.auditor', 'PO_TRANSFERS')).toBeGreaterThanOrEqual(1); expect(await notes('wh.incharge', 'PO_TRANSFERS')).toBeGreaterThanOrEqual(1); expect(await notes('sales.westave', 'PO_BRANCH_PLAN')).toBeGreaterThanOrEqual(1);
+    const req = await prisma.approvalRequest.findFirstOrThrow({ where: { type: 'PURCHASE_ORDER', documentId: po, status: 'PENDING' } });
+    await as('head.auditor').post(`/api/approvals/${req.id}/decide`).send({ decision: 'APPROVE' }).expect(403); // only the Owner approves
+    ok(await as('admin').post(`/api/approvals/${req.id}/decide`).send({ decision: 'APPROVE' }));
+    const ap = ok(await as('head.auditor').get(`/api/purchase-orders/${po}`)).body; expect(ap.status).toBe('APPROVED'); expect(ap.lines.find((l: { productId: string }) => l.productId === p2).orderQty).toBe(30); expect(ap.totals.transferQty).toBe(20);
+    expect(await notes('head.auditor', 'PO_APPROVED')).toBeGreaterThanOrEqual(1); expect(await notes('wh.incharge', 'PO_APPROVED')).toBeGreaterThanOrEqual(1);
+    // the branch sees what it will get
+    const bp = ok(await as('sales.westave').get('/api/purchase-orders/branch-plan')).body as { poNo: string; transfers: { qty: number }[]; share: { qty: number }[] }[]; const mine = bp.find((x) => x.poNo === ap.poNo)!; expect(mine.transfers[0].qty).toBe(20); expect(mine.share.some((s) => s.qty === 19)).toBe(true);
+    expect((ok(await as('sales.dasma').get('/api/purchase-orders/branch-plan')).body as { poNo: string }[]).some((x) => x.poNo === ap.poNo)).toBe(false);
+    await as('head.auditor').post(`/api/purchase-orders/${po}/submit`).expect(400);
+  });
+
+  it('three print copies: the supplier\'s has no branches; the Head Auditor / Owner copy has them; the warehouse copy lists each branch\'s pull-outs', async () => {
+    const html = async (who: string, copy: string) => (await as(who).get(`/api/purchase-orders/${po}/pdf?copy=${copy}`).buffer(true).parse((res, cb) => { const c: Buffer[] = []; res.on('data', (x: Buffer) => c.push(x)); res.on('end', () => cb(null, Buffer.concat(c))); }).expect(200)).body.toString('latin1');
+    const sup1 = await html('head.auditor', 'SUPPLIER'); const internal = await html('admin', 'INTERNAL'); const warehouse = await html('wh.incharge', 'WAREHOUSE');
+    if (sup1.startsWith('%PDF')) return; // no browser here: the PDF is checked on the HTML path only
+    expect(sup1).toContain(`PO B ${run}`); expect(sup1).not.toContain('West Ave'); expect(sup1).not.toMatch(/On hand|Days left/);
+    expect(internal).toContain('West Ave'); expect(internal).toContain('Days left'); expect(warehouse).toContain('West Ave'); expect(warehouse).toContain('Pull out now');
+    await as('wh.incharge').get(`/api/purchase-orders/${po}/pdf?copy=SUPPLIER`).expect(403); await as('wh.incharge').get(`/api/purchase-orders/${po}/pdf?copy=INTERNAL`).expect(403);
+  });
+
+  it('sent to the supplier; a delivery linked to the order updates it; complete tells the branches; what is on order is not suggested again', async () => {
+    ok(await as('head.auditor').post(`/api/purchase-orders/${po}/sent`).send({ expectedOn: day(5) }));
+    expect((ok(await as('wh.incharge').get(`/api/purchase-orders/open?supplierId=${sup}`)).body as { id: string }[]).map((x) => x.id)).toContain(po);
+    const rc = async (qty: number, orderId = po) => ok(await as('wh.incharge').post('/api/receiving').send({ supplierId: sup, purchaseOrderId: orderId, lines: [{ productId: p2, qty, expiryDate: day(400), batchNo: `RB-${run}-${++n}` }] })).body.id as string;
+    const svc = app.get(RestockService) as unknown as { onReceivingPosted: (id: string) => Promise<void> };
+    await svc.onReceivingPosted(await rc(12));
+    let d = ok(await as('head.auditor').get(`/api/purchase-orders/${po}`)).body; expect(d.status).toBe('PARTIAL'); expect(d.lines.find((l: { productId: string }) => l.productId === p2).receivedQty).toBe(12);
+    const before = await notes('sales.westave', 'PO_BRANCH_PLAN', 'arrived');
+    await svc.onReceivingPosted(await rc(18));
+    d = ok(await as('head.auditor').get(`/api/purchase-orders/${po}`)).body; expect(d.status).toBe('RECEIVED');
+    expect(await notes('sales.westave', 'PO_BRANCH_PLAN', 'arrived')).toBe(before + 1);
+    await as('wh.incharge').post('/api/receiving').send({ supplierId: sup, purchaseOrderId: po, lines: [{ productId: p2, qty: 1, expiryDate: day(400), batchNo: 'x' }] }).expect(400); // closed
+    // a new request: B is already covered by what arrived? stock now includes it, and a second order's on-order is accounted for
+    const g2 = await gen(); const again = g2.created.length ? ok(await as('head.auditor').get(`/api/purchase-orders/${g2.created[0].id}`)).body : null;
+    if (again) { const b2 = again.lines.find((l: { productId: string }) => l.productId === p2); if (b2) expect(b2.onOrder).toBe(0); }
+    // the Owner's own order needs no second approval; a cancelled order is closed
+    const g3 = await gen('admin'); if (g3.created.length) { const id3 = g3.created[0].id; const lines = ok(await as('admin').get(`/api/purchase-orders/${id3}`)).body.lines as { orderQty: number }[]; if (lines.some((l) => l.orderQty > 0)) { expect(ok(await as('admin').post(`/api/purchase-orders/${id3}/submit`)).body.status).toBe('APPROVED'); } ok(await as('admin').post(`/api/purchase-orders/${id3}/cancel`).send({ reason: 'test over' })); await as('admin').post(`/api/purchase-orders/${id3}/cancel`).send({ reason: 'again' }).expect(400); }
+    if (g2.created.length) ok(await as('head.auditor').post(`/api/purchase-orders/${g2.created[0].id}/cancel`).send({ reason: 'test over' }));
   });
 });

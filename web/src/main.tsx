@@ -32,6 +32,7 @@ import { PortalPage } from './pages/Portal';
 import { SurveyPage } from './pages/Survey';
 import { CustomerServicePage } from './pages/CustomerService';
 import { PromosPage } from './pages/Promos';
+import { PurchaseOrderPage, PurchaseOrdersPage, RestockPlanPage } from './pages/PurchaseOrders';
 import { ReservationsPage } from './pages/MemberProgram';
 import { EcomPricesPage } from '@/pages/EcomPrices';
 import { FranchiseArPage } from '@/pages/FranchiseAr';
@@ -110,6 +111,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
               <Route path="/reservations" element={<ReservationsPage />} />
               <Route path="/customer-service" element={<CustomerServicePage />} />
               <Route path="/promos" element={<PromosPage />} />
+              <Route path="/purchase-orders" element={<PurchaseOrdersPage />} />
+              <Route path="/purchase-orders/:id" element={<PurchaseOrderPage />} />
+              <Route path="/restock-plan" element={<RestockPlanPage />} />
               <Route path="/outlets" element={<OutletsPage />} />
               <Route path="/itinerary" element={<ItineraryPage />} />
               <Route path="/field" element={<FieldMonitorPage />} />

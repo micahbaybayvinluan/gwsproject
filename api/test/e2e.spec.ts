@@ -58,6 +58,9 @@ async function inChargeApproves(documentType: string, id: string) {
 }
 const USERS = ['admin', 'ext.auditor', 'head.auditor', 'asst.auditor', 'audit.assoc', 'wh.incharge', 'wh.assoc', 'sales.westave', 'fr.mayon.assoc', 'fr.mayon.owner', 'custom.user', 'acct.head', 'acct.assoc', 'hr.staff', 'field.auditor', 'sales.dasma', 'sales.csr', 'exec.assistant', 'ecomm.assoc', 'sales.manager', 'agent.jerick', 'franchise.coord', 'asst.franchise.coord', 'sales.wh'];
 const as = (u: string) => ({ get: (p: string) => http.get(p).set('Authorization', `Bearer ${tokens[u]}`), post: (p: string) => http.post(p).set('Authorization', `Bearer ${tokens[u]}`), put: (p: string) => http.put(p).set('Authorization', `Bearer ${tokens[u]}`), patch: (p: string) => http.patch(p).set('Authorization', `Bearer ${tokens[u]}`), delete: (p: string) => http.delete(p).set('Authorization', `Bearer ${tokens[u]}`) });
+/** uploads a small picture as a proof of payment and returns its id */
+const proofPng = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(64)]);
+const uploadProof = async (u: string, type = 'Proof') => ((await as(u).post(`/api/attachments/${type}/${crypto.randomUUID()}`).attach('file', proofPng, { filename: 'proof.png', contentType: 'image/png' }).expect(201)).body.id as string);
 const has = (o: unknown, re: RegExp): boolean => JSON.stringify(o).match(re) !== null;
 const ok = (r: request.Response) => { if (r.status >= 400) throw new Error(`${r.request?.method} ${r.request?.url} → ${r.status} ${JSON.stringify(r.body)}`); return r; };
 
@@ -1423,7 +1426,8 @@ describe('AR entry and reminders; dashboard sales by payment (owner requests 202
     const dealer = (ok(await as('sales.westave').get('/api/customers')).body as { id: string; type: string }[]).find((c) => c.type === 'DEALER')!;
     const day = (n: number) => new Date(Date.now() + 8 * 3600e3 + n * 86400000).toISOString().slice(0, 10);
     ok(await as('sales.westave').post('/api/sales').send({ channel: 'DEALER', paymentMode: 'AR_PDC', drSiNo: `AR-${run}-1`, customerId: dealer.id, dueDate: day(5), lines: [{ productId: p, qty: 1 }] }));
-    ok(await as('sales.westave').post('/api/sales').send({ channel: 'DEALER', paymentMode: 'AR_PDC', drSiNo: `AR-${run}-2`, customerId: dealer.id, dueDate: day(2), pdcBank: 'BDO', pdcChequeNo: '000123', pdcDate: day(2), lines: [{ productId: p, qty: 1 }] }));
+    const pf1428 = await uploadProof('sales.westave', 'SalesDoc');
+    ok(await as('sales.westave').post('/api/sales').send({ channel: 'DEALER', paymentMode: 'AR_PDC', drSiNo: `AR-${run}-2`, customerId: dealer.id, dueDate: day(2), pdcBank: 'BDO', pdcChequeNo: '000123', pdcDate: day(2), proofOfPaymentAttachmentId: pf1428, lines: [{ productId: p, qty: 1 }] }));
     await as('sales.westave').post('/api/sales').send({ channel: 'DEALER', paymentMode: 'AR_PDC', drSiNo: `AR-${run}-3`, customerId: dealer.id, dueDate: day(3), pdcBank: 'BDO', lines: [{ productId: p, qty: 1 }] }).expect(400);
     const dash = ok(await as('sales.westave').get('/api/dashboard')).body;
     const mine = (dash.arDue as { drSiNo: string; daysToDue: number }[]).filter((a) => a.drSiNo.startsWith(`AR-${run}`));
@@ -1846,7 +1850,8 @@ describe('Owner requests 2026-09-30 (pricing, 6-Pack Card, franchise receivables
     const w = ok(await as('admin').post(`/api/franchise-ar/${id}/waive`).send({ amount: 20, reason: 'goodwill for the extension' })).body;
     expect(Number(w.chargesDue)).toBe(34);
     // a payment settles the penalty first, then the interest, then the goods
-    const p2 = ok(await as('acct.assoc').post(`/api/franchise-ar/${id}/payments`).send({ amount: 34, mode: 'BANK_TRANSFER', reference: 'BT-1' })).body;
+    const pf1852 = await uploadProof('acct.assoc', 'FranchisePayment');
+    const p2 = ok(await as('acct.assoc').post(`/api/franchise-ar/${id}/payments`).send({ amount: 34, mode: 'BANK_TRANSFER', reference: 'BT-1', proofAttachmentId: pf1852 })).body;
     expect(Number(p2.chargesDue)).toBe(0); expect(Number(p2.principalPaid)).toBe(1000); expect(p2.payments.at(-1).toPrincipal).toBe('0');
     // cash before delivery: the Owner only
     await as('acct.head').put(`/api/franchise-ar/locations/${mayon}/credit-hold`).send({ hold: true, note: 'unpaid accounts' }).expect(403);
@@ -3060,8 +3065,10 @@ describe('Replacement payments: how the customer settled the difference and on w
     const t = await ticket('1', null);
     await approve('REPLACEMENT_TICKET', t.id);
     await as('sales.westave').post(`/api/replacements/${t.id}/settle`).send({ mode: 'ONLINE', date: day(0) }).expect(400); // an account is needed for online
+    await as('sales.westave').post(`/api/replacements/${t.id}/settle`).send({ mode: 'ONLINE', paymentAccountId: acct, date: day(0) }).expect(400); // and the proof of payment
     await as('sales.westave').post(`/api/replacements/${t.id}/settle`).send({ mode: 'CASH', date: day(1) }).expect(400); // not in the future
-    const ok1 = ok(await as('sales.westave').post(`/api/replacements/${t.id}/settle`).send({ mode: 'ONLINE', paymentAccountId: acct, date: day(0), note: 'GCash' })).body;
+    const pf3069 = await uploadProof('sales.westave', 'ReplacementPayment');
+    const ok1 = ok(await as('sales.westave').post(`/api/replacements/${t.id}/settle`).send({ mode: 'ONLINE', paymentAccountId: acct, date: day(0), note: 'GCash', reference: 'GC-12345', proofAttachmentId: pf3069 })).body;
     expect(ok1.payments[0]).toMatchObject({ mode: 'ONLINE', direction: 'IN', amount: 1000, status: 'APPLIED' }); expect(ok1.differenceSettledAt).toBeTruthy();
     const r = await report(day(0));
     expect(r.replacements.rows.some((x: { ticketNo: string; mode: string }) => x.ticketNo === t.ticketNo && x.mode === 'ONLINE')).toBe(true);
@@ -3108,6 +3115,74 @@ describe('Replacement payments: how the customer settled the difference and on w
     // the Head Auditor recording a closed day himself needs no second approval
     const t5 = await ticket('5', day(-3), day(-1)); await approve('REPLACEMENT_TICKET', t5.id);
     const self = ok(await as('head.auditor').post(`/api/replacements/${t5.id}/settle`).send({ mode: 'CASH', date: day(-1) })).body; expect(self.payments[0].status).toBe('APPLIED');
+  });
+});
+
+describe('Proofs of payment: required for online, card and cheque; the reports print them with a legend (owner request 2026-10-09)', () => {
+  const day = (n: number) => new Date(Date.now() + 8 * 3600e3 + n * 86400e3).toISOString().slice(0, 10);
+  let west = ''; let a = ''; let b = ''; let acct = ''; let n = 0;
+  const give = async (loc: string, p: string, qty: number) => { const bt = await prisma.batch.create({ data: { productId: p, batchNo: `PF-${run}-${++n}`, receivedRef: 'TEST', unitCost: '400' } }); await prisma.stockLedger.create({ data: { locationId: loc, productId: p, batchId: bt.id, qtyDelta: qty, movementType: 'RECEIVE', documentType: 'Opening', documentId: bt.batchNo ?? '', unitCost: '400', businessDate: new Date(`${day(0)}T00:00:00Z`) } }); await prisma.stockBalance.create({ data: { locationId: loc, productId: p, batchId: bt.id, qty } }); };
+  const report = async (date: string) => ok(await as('sales.westave').get(`/api/reports/daily-sales?locationId=${west}&date=${date}`)).body;
+
+  it('setup', async () => {
+    west = (await prisma.location.findUniqueOrThrow({ where: { code: 'WESTAVE' } })).id;
+    const cats = ok(await as('admin').get('/api/categories')).body as { id: string; accountingClass: string }[]; const cat = cats.find((c) => c.accountingClass === 'SUPPLEMENT')!.id;
+    a = ok(await as('admin').post('/api/products').send({ name: `PF A ${run}`, brand: 'X', categoryId: cat, prices: { RETAIL: 1000, DEALER: 900 }, cost: 500 })).body.id; b = ok(await as('admin').post('/api/products').send({ name: `PF B ${run}`, brand: 'X', categoryId: cat, prices: { RETAIL: 1500 }, cost: 600 })).body.id;
+    await give(west, a, 40); await give(west, b, 40);
+    acct = ((ok(await as('sales.westave').get(`/api/accounts/payment?locationId=${west}`)).body as { id: string }[])[0]).id;
+  });
+
+  it('a replacement paid in two ways: each part has its amount, account, reference and proof; the parts must add up; online and card cannot be saved without proof', async () => {
+    ok(await as('sales.westave').post('/api/sales').send({ channel: 'WALK_IN', paymentMode: 'CASH', drSiNo: `PF-${run}-1`, customerName: 'Pia Proof', lines: [{ productId: a, qty: 2 }] }));
+    const found = ok(await as('sales.csr').get(`/api/replacements/find-dr?q=PF-${run}-1`)).body as { lines: { lineId: string }[] }[];
+    const t = ok(await as('sales.csr').post('/api/replacements/customer').send({ salesLineId: found[0].lines[0].lineId, qty: 2, reason: 'WRONG_ITEM' }).expect(201)).body;
+    ok(await as('sales.westave').post(`/api/replacements/${t.id}/replace`).send({ productId: b }).expect(201));
+    const rq = await prisma.approvalRequest.findFirstOrThrow({ where: { type: 'REPLACEMENT_TICKET', documentId: t.id, status: 'PENDING' } }); ok(await as('head.auditor').post(`/api/approvals/${rq.id}/decide`).send({ decision: 'APPROVE' }));
+    const proof = await uploadProof('sales.westave', 'ReplacementPayment');
+    // the difference is 1,000: part cash 400 + part online 600
+    await as('sales.westave').post(`/api/replacements/${t.id}/settle`).send({ date: day(0), parts: [{ mode: 'CASH', amount: 400 }, { mode: 'ONLINE', amount: 600, paymentAccountId: acct }] }).expect(400); // online part without proof
+    await as('sales.westave').post(`/api/replacements/${t.id}/settle`).send({ date: day(0), parts: [{ mode: 'CASH', amount: 300 }, { mode: 'ONLINE', amount: 600, paymentAccountId: acct, proofAttachmentId: proof }] }).expect(400); // 900 is not 1,000
+    const done = ok(await as('sales.westave').post(`/api/replacements/${t.id}/settle`).send({ date: day(0), note: 'half cash half GCash', parts: [{ mode: 'CASH', amount: 400 }, { mode: 'ONLINE', amount: 600, paymentAccountId: acct, reference: 'GC-777', proofAttachmentId: proof }] })).body;
+    expect(done.differenceSettledAt).toBeTruthy(); expect(done.payments.map((p: { mode: string; amount: number }) => `${p.mode}:${p.amount}`).sort()).toEqual(['CASH:400', 'ONLINE:600']);
+    const r = await report(day(0));
+    expect(Number(r.replacements.cash)).toBeGreaterThanOrEqual(400); expect(Number(r.replacements.online)).toBeGreaterThanOrEqual(600);
+    const rp = (r.proofs as { kind: string; ref: string; docNo: string; missing: boolean; amount: number }[]).find((p) => p.kind === 'REPLACEMENT' && p.docNo === t.ticketNo)!;
+    expect(rp).toMatchObject({ ref: expect.stringMatching(/^RP-\d+$/), missing: false, amount: 600 });
+  });
+
+  it('cheques need a photo, on a sale and on a collection; franchise payments by transfer need proof; the Payment Proofs report lists everything with missing ones flagged', async () => {
+    const dealer = (ok(await as('sales.westave').get('/api/customers')).body as { id: string; type: string }[]).find((c) => c.type === 'DEALER')!;
+    const sale = { channel: 'DEALER', paymentMode: 'AR_PDC', customerId: dealer.id, dueDate: day(10), pdcBank: 'BDO', pdcChequeNo: `CQ${run}`, pdcDate: day(10), lines: [{ productId: a, qty: 1 }] };
+    await as('sales.westave').post('/api/sales').send({ ...sale, drSiNo: `PF-${run}-CQ1` }).expect(400); // no photo of the cheque
+    const photo = await uploadProof('sales.westave', 'SalesDoc');
+    const cq = ok(await as('sales.westave').post('/api/sales').send({ ...sale, drSiNo: `PF-${run}-CQ1`, proofOfPaymentAttachmentId: photo })).body;
+    // a credit-card sale and an online sale with proofs; an online collection without proof is refused
+    const pf3159 = await uploadProof('sales.westave', 'SalesDoc');
+    ok(await as('sales.westave').post('/api/sales').send({ channel: 'WALK_IN', paymentMode: 'ONLINE', drSiNo: `PF-${run}-ON1`, customerName: 'Olga Online', paymentAccountId: acct, proofOfPaymentAttachmentId: pf3159, lines: [{ productId: a, qty: 1 }] }));
+    await as('sales.westave').post('/api/ar/payments').send({ salesDocIds: [cq.id], amount: 100, paymentMode: 'ONLINE', paymentAccountId: acct }).expect(400);
+    await as('sales.westave').post('/api/ar/payments').send({ salesDocIds: [cq.id], amount: 100, paymentMode: 'AR_PDC', paymentAccountId: acct }).expect(400);
+    const pf3163 = await uploadProof('sales.westave', 'Payment');
+    ok(await as('sales.westave').post('/api/ar/payments').send({ salesDocIds: [cq.id], amount: 100, paymentMode: 'AR_PDC', paymentAccountId: acct, proofAttachmentId: pf3163 }));
+    // a proof that was lost shows as missing (older entries)
+    await prisma.salesDoc.updateMany({ where: { drSiNo: `PF-${run}-ON1` }, data: { proofOfPaymentAttachmentId: null } });
+    const rep = ok(await as('accounting.head' in tokens ? 'acct.head' : 'acct.head').get(`/api/reports/payment-proofs?locationId=${west}&from=${day(0)}&to=${day(0)}`)).body;
+    const kinds = new Set((rep.items as { kind: string }[]).map((i) => i.kind));
+    expect([...kinds]).toEqual(expect.arrayContaining(['CHEQUE', 'ONLINE', 'REPLACEMENT']));
+    const missing = (rep.items as { docNo: string; missing: boolean }[]).find((i) => i.docNo === `PF-${run}-ON1`)!; expect(missing.missing).toBe(true); expect(rep.missing).toBeGreaterThanOrEqual(1);
+    // the report only lists the chosen types
+    const only = ok(await as('acct.head').get(`/api/reports/payment-proofs?locationId=${west}&from=${day(0)}&to=${day(0)}&kinds=CHEQUE`)).body; expect((only.items as { kind: string }[]).every((i) => i.kind === 'CHEQUE')).toBe(true);
+    // printed: the daily report carries the legend, the reference beside each transaction and the proof section; the Excel has a PROOFS sheet
+    const pdf = await as('sales.westave').get(`/api/reports/daily-sales.pdf?locationId=${west}&date=${day(0)}`).expect(200);
+    const html = pdf.text ?? pdf.body.toString();
+    expect(html).toContain('Proof of payments'); expect(html).toContain('Legend'); expect(html).toMatch(/CQ-\d+/); expect(html).toContain('NO PROOF UPLOADED'); expect(html).toContain(`PF-${run}-CQ1`);
+    const x = await as('sales.westave').get(`/api/reports/daily-sales.xlsx?locationId=${west}&date=${day(0)}`).buffer(true).parse((res, cb) => { const ch: Buffer[] = []; res.on('data', (c: Buffer) => ch.push(c)); res.on('end', () => cb(null, Buffer.concat(ch))); }).expect(200);
+    { const wb = new ExcelJS.Workbook(); await wb.xlsx.load(x.body as never); const sh = wb.getWorksheet('PROOFS'); expect(sh).toBeTruthy(); const txt = JSON.stringify(sh!.getSheetValues()); expect(txt).toContain('MISSING'); expect(txt).toContain(`PF-${run}-CQ1`); }
+    // the standalone report in PDF and Excel
+    await as('acct.head').get(`/api/reports/payment-proofs.pdf?locationId=${west}&from=${day(0)}&to=${day(0)}`).expect(200);
+    await as('acct.head').get(`/api/reports/payment-proofs.xlsx?locationId=${west}&from=${day(0)}&to=${day(0)}`).expect(200);
+    // franchise payments by transfer need proof
+    const fp = await prisma.franchiseInvoice.findFirst({ where: { status: { in: ['OPEN', 'PARTIAL'] } } });
+    if (fp) { await as('acct.head').post(`/api/franchise-ar/${fp.id}/payments`).send({ amount: 1, mode: 'GCASH', reference: 'G1' }).expect(400); }
   });
 });
 

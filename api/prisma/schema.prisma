@@ -3084,6 +3084,9 @@ model ReplacementPayment {
   paymentAccountId  String?   @map("payment_account_id")
   amount            Decimal   @db.Decimal(14, 2)
   note              String?
+  /// reference / approval number of the online or card payment, and the screenshot or slip (required for online and card; owner request 2026-10-09)
+  reference         String?
+  proofAttachmentId String?   @map("proof_attachment_id")
   status            String    @default("APPLIED") // APPLIED | PENDING_APPROVAL | REJECTED
   approvalRequestId String?   @map("approval_request_id")
   createdBy         String    @map("created_by")

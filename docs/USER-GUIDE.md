@@ -743,6 +743,21 @@ This is how stock is reordered. The **Head Auditor** starts it, the **Owner** de
 
 **Orders and money.** A PO is a plan and a request to the supplier; it books nothing. The supplier's delivery (and its cost, approved by the Head Auditor) is what adds stock and what is owed.
 
+## Proof of payment: upload it once, it prints with the report
+<!-- for: sale.create, ar.collect, replacement.create, report.sales.own, report.sales.all -->
+No paper copies are needed any more. Whenever money arrives other than as cash, the branch **uploads the proof** where it records the payment, and the system will not save it without the proof:
+- **Online sale** (bank / GCash): a screenshot of the payment. **Card sale**: a photo of the card terminal slip.
+- **A sale paid by a post-dated cheque** (With PDC ticked): a photo of the cheque.
+- **AR collection** by online, card or cheque (AR & Collections): the screenshot, slip or photo of the cheque, and the account it was deposited to.
+- **Replacement: price difference paid or refunded** (Replacement Tickets): the **amount**, how (cash, online, card), the **account**, an optional **reference / approval number**, the **proof** and the **day**. If the customer paid in more than one way (for example ₱300 cash and ₱150 GCash), press **Paid in another way too (split)**: each way has its own amount and proof, and the amounts must add up to the price difference.
+- **Franchise payment** by transfer, GCash or cheque (Franchise AR): the screenshot or the photo of the cheque.
+- **Bank deposit slip** (Daily Close & Deposit): already required.
+Cash needs no proof. A payment of money the customer paid online affects that day's inventory and sales, so it is recorded on the day it was received.
+
+**The printed report carries the proofs by itself.** The **Daily Sales Report** (PDF or Excel) ends with a **Proof of payments** section: a **legend** (ON online, CC card, CQ cheque, AR collection, RP replacement payment, DS deposit slip), a **checklist** (reference, document, customer, how and account, amount, date, whether the proof is there) and then **every picture** under its reference. Beside each sale in the report there is a **Proof** column with the same reference (for example ON-3), so Accounting looks at a line and finds its proof at once. A payment without a proof is shown in **red** as MISSING. In Excel the same appears on a **PROOFS** sheet with the pictures beside each row. Files that are not pictures (for example a PDF) are listed by name and stay in the system.
+
+**Payment Proofs** (Reports) lets Accounting and the auditors see the proofs of any branch (or all) for a day or a period, choose the types, show only the missing ones, switch between **Pictures** and a **Checklist**, and press **Print with the pictures (PDF)** or **Excel**. Branches see their own only.
+
 ## Page names and what each page is for
 <!-- for: all -->
 - Every menu item has a descriptive name (for example **Supplier Deliveries** or **Transfers & Pull-outs**).

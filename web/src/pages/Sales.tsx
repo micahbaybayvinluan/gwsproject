@@ -13,6 +13,7 @@ import { MemberPicker, type MemberLite } from '@/components/MemberPicker';
 import { LostSaleButton, MemberCounter } from '@/components/MemberCounter';
 import { PromoBanner } from './Promos';
 import { Attachments } from '@/components/Attachments';
+import { ProofUpload } from '@/components/ProofUpload';
 
 type Product = { id: string; sku: string; name: string; tierPrices: Record<string, string>; category: { accountingClass: string }; onHand?: number; isBundle?: boolean };
 type Line = { productId: string; name: string; qty: number; unitPrice: number | null; tierPrice: number | null; isFreebie: boolean; plastic?: boolean; batchId?: string | null; batchLabel?: string; maxQty?: number; tierPrices?: Record<string, string>; supplement?: boolean; auto?: { price: number; listPrice: number; source: string }; touched?: boolean };
@@ -34,7 +35,7 @@ export function NewSalePage() {
   // AR: which kind of customer is picked (a Dealer sale lists dealers only, a Franchise sale franchisees only); a PDC only when ticked
   const [sixPack, setSixPack] = useState(false); const [custType, setCustType] = useState(''); const [withPdc, setWithPdc] = useState(false);
   const [hdr, setHdr] = useState<Record<string, string>>({ deliveryFee: '', riderIncentive: '', shippingFee: '', shippingExpense: '', marketplaceCharges: '', dueDate: '', notes: '' });
-  const [draftId] = useState(() => crypto.randomUUID()); const [proofId, setProofId] = useState<string | null>(null);
+  const [proofId, setProofId] = useState<string | null>(null);
   const locations = useQuery({ queryKey: ['locations'], queryFn: () => api.get<{ id: string; name: string; isSelling: boolean; type?: string }[]>('/api/locations'), enabled: !me!.locationScoped });
   // the Franchise Coordinator sells from the warehouse
   useEffect(() => { if (warehouseOnly && !locationId && locations.data) { const w = locations.data.find((l) => l.isSelling && l.type === 'WAREHOUSE'); if (w) setLocationId(w.id); } }, [warehouseOnly, locationId, locations.data]);
@@ -91,6 +92,7 @@ export function NewSalePage() {
   });
   const set = (k: string, v: string) => setHdr((h) => ({ ...h, [k]: v }));
   const needsProof = paymentMode === 'ONLINE' || paymentMode === 'CREDIT_CARD';
+  const needsCheque = paymentMode === 'AR_PDC' && withPdc; // a sale paid by a post-dated cheque: photo of the cheque
   return <div className="mx-auto max-w-3xl space-y-4">
     <h1 className="text-2xl font-bold tracking-tight text-navy">New Sale</h1>
     <PromoBanner compact />
@@ -148,8 +150,7 @@ export function NewSalePage() {
       </div>)}</div>
       {!lines.length && <Empty>Add at least one item.</Empty>}
     </Card>
-    {needsProof && <Attachments type="SalesDoc" id={draftId} onUploaded={(a) => setProofId(a.id)} />}
-    {needsProof && <p className="text-xs text-slate-500">Proof of payment is mandatory for online / card sales. {proofId ? '✔ uploaded' : 'Upload the screenshot / slip above.'}</p>}
+    {(needsProof || needsCheque) && <ProofUpload key={paymentMode} type="SalesDoc" label={paymentMode === 'ONLINE' ? 'Proof of payment (bank / GCash screenshot)' : paymentMode === 'CREDIT_CARD' ? 'Proof of payment (card terminal slip)' : 'Photo of the cheque'} onChange={setProofId} />}
     {can('sale.incentive') && (!inc.open
       ? <Button type="button" variant="outline" onClick={() => setInc({ ...inc, open: true, kind: channel === 'DELIVERY' ? 'RIDER' : 'SALES', payee: channel === 'DELIVERY' ? riders.data?.find((r) => r.id === hdr.riderId)?.name ?? '' : inc.payee })}>+ Add incentive expense</Button>
       : <Card title="Incentive expense" actions={<Button size="sm" variant="ghost" onClick={() => setInc({ open: false, amount: '', payee: '', kind: 'SALES' })}>Remove</Button>}>
@@ -165,12 +166,12 @@ export function NewSalePage() {
     {review && <SaleReview onClose={() => setReview(false)} onConfirm={() => { setReview(false); create.mutate(); }} pending={create.isPending} data={{
       branch: me!.locationScoped ? loc?.name ?? '' : locations.data?.find((l) => l.id === locationId)?.name ?? '', drSiNo, channel: channel.replace(/_/g, ' ').toLowerCase() + (channelSub ? ` · ${channelSub}` : ''), tier,
       paymentMode: paymentMode === 'AR_PDC' ? 'AR / PDC (credit)' : paymentMode === 'CREDIT_CARD' ? 'Credit card' : paymentMode === 'ONLINE' ? 'Online' : 'Cash',
-      account: payAccts.data?.find((a) => a.id === hdr.paymentAccountId)?.title ?? null, proof: needsProof ? !!proofId : null,
+      account: payAccts.data?.find((a) => a.id === hdr.paymentAccountId)?.title ?? null, proof: needsProof || needsCheque ? !!proofId : null,
       customer: customers.data?.find((c) => c.id === hdr.customerId)?.name ?? (hdr.customerName || null), agent: [agents.data?.find((a) => a.id === hdr.agentId)?.name, outletName ? `Outlet: ${outletName}` : null, member ? `Member: ${member.memberNo} ${member.fullName}` : null, voucherCode ? `Voucher ${voucherCode}` : null].filter(Boolean).join(' · ') || null, rider: riders.data?.find((r) => r.id === hdr.riderId)?.name ?? null,
       dueDate: paymentMode === 'AR_PDC' ? hdr.dueDate || null : null, pdc: paymentMode === 'AR_PDC' && withPdc ? [hdr.pdcBank, hdr.pdcChequeNo, hdr.pdcDate].filter(Boolean).join(' · ') : null,
       lines, fees: Number(hdr.deliveryFee || 0) + Number(hdr.shippingFee || 0), shipping: channel === 'FRANCHISE' && hdr.customerId ? (ship.mode === 'TO_FOLLOW' ? 'To follow: the Franchise Coordinator fills it in within 2 days (separate invoice)' : ship.mode === 'AMOUNT' ? `${peso(Number(ship.amount || 0))} (separate invoice)` : 'No shipping charge') : null, total, incentive: inc.open && Number(inc.amount) > 0 ? { amount: Number(inc.amount), payee: inc.payee } : null, sixPack: sixPack ? `${stickerCount} sticker${stickerCount === 1 ? '' : 's'} for ${hdr.customerName} (${hdr.customerPhone})` : null, notes: hdr.notes,
     }} />}
-    <div className="sticky bottom-0 flex items-center justify-between gap-3 rounded-lg border bg-white p-3 shadow-lg"><div><div className="text-xs text-slate-500">Total</div><div className="text-2xl font-semibold">{peso(total)}</div>{inc.open && Number(inc.amount) > 0 && <div className="text-xs text-slate-500">Less incentive {peso(Number(inc.amount))} · cash to remit {peso(total - Number(inc.amount))}</div>}</div><Button size="lg" disabled={!lines.length || !drSiNo || create.isPending || lines.some((l) => l.qty < 1 || (l.maxQty != null && l.qty > l.maxQty)) || (inc.open && Number(inc.amount) > 0 && !inc.payee.trim()) || (sixPack && !sixPackReady)} onClick={() => setReview(true)} data-testid="save-sale">Review sale</Button></div>
+    <div className="sticky bottom-0 flex items-center justify-between gap-3 rounded-lg border bg-white p-3 shadow-lg"><div><div className="text-xs text-slate-500">Total</div><div className="text-2xl font-semibold">{peso(total)}</div>{inc.open && Number(inc.amount) > 0 && <div className="text-xs text-slate-500">Less incentive {peso(Number(inc.amount))} · cash to remit {peso(total - Number(inc.amount))}</div>}</div><Button size="lg" disabled={!lines.length || !drSiNo || create.isPending || lines.some((l) => l.qty < 1 || (l.maxQty != null && l.qty > l.maxQty)) || (inc.open && Number(inc.amount) > 0 && !inc.payee.trim()) || (sixPack && !sixPackReady) || ((needsProof || needsCheque) && !proofId)} onClick={() => setReview(true)} data-testid="save-sale">Review sale</Button></div>
   </div>;
 }
 

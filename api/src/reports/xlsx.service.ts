@@ -3,6 +3,8 @@ import ExcelJS from 'exceljs';
 import { DailySalesReport, asNum } from './daily-sales-report';
 import { loadWorkbook } from '../imports/workbook-readers';
 import { fillDailySalesTemplate, templatePath } from './daily-sales-template';
+import { addProofsSheet } from './proofs-xlsx';
+import type { ProofItem } from './proofs';
 
 export type Col = { header: string; key: string; width?: number; numFmt?: string };
 export type SheetOpts = { title?: string; subtitle?: string[]; totals?: string[] };
@@ -34,12 +36,12 @@ export class XlsxService {
   }
 
   /** §8.5 Daily Branch Sales Report. Uses the owner's sample workbook as the template when present (exact layout); otherwise the generated layout below. */
-  async dailySalesReport(rep: DailySalesReport): Promise<Buffer> {
+  async dailySalesReport(rep: DailySalesReport & { proofs?: ProofItem[] }, proofImages: Map<string, { buffer: Buffer; ext: 'png' | 'jpeg' }> = new Map()): Promise<Buffer> {
     const tpl = templatePath();
-    if (tpl) return fillDailySalesTemplate(rep, tpl);
-    return this.dailySalesReportGenerated(rep);
+    if (tpl) return fillDailySalesTemplate(rep, tpl, proofImages);
+    return this.dailySalesReportGenerated(rep, proofImages);
   }
-  async dailySalesReportGenerated(rep: DailySalesReport): Promise<Buffer> {
+  async dailySalesReportGenerated(rep: DailySalesReport & { proofs?: ProofItem[] }, proofImages: Map<string, { buffer: Buffer; ext: 'png' | 'jpeg' }> = new Map()): Promise<Buffer> {
     const wb = new ExcelJS.Workbook();
     const f = wb.addWorksheet('FRONT'); f.getColumn(1).width = 34; f.getColumn(2).width = 16; f.getColumn(4).width = 30; f.getColumn(5).width = 16; f.getColumn(6).width = 14; f.getColumn(7).width = 14;
     const money = '#,##0.00;(#,##0.00);-';
@@ -103,6 +105,7 @@ export class XlsxService {
     for (const a of rep.byPaymentAccount) pa.addRow({ account: a.account, mode: a.mode, count: a.count, amount: asNum(a.amount) });
     const rt = wb.addWorksheet('RECEIPT TRACKER'); rt.columns = [{ header: 'DR#/SI#', key: 'drSiNo', width: 14 }, { header: 'Customer', key: 'customer', width: 24 }, { header: 'Channel', key: 'channel', width: 20 }, { header: 'Payment', key: 'paymentMode', width: 14 }, { header: 'Amount', key: 'amount', width: 14 }]; rt.getRow(1).font = { bold: true };
     for (const x of rep.sheets.receiptTracker) rt.addRow({ ...x, amount: asNum(x.amount as never) });
+    if (rep.proofs?.length) addProofsSheet(wb, rep.proofs, proofImages);
     return Buffer.from(await wb.xlsx.writeBuffer());
   }
 

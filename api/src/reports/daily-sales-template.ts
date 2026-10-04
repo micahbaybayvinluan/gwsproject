@@ -6,6 +6,8 @@
  * Block capacities are those of the sample. When a block overflows, the last row aggregates the remainder
  * ("+N more lines, see RECEIPT TRACKER") so the FRONT totals stay exact.
  */
+import { addProofsSheet } from './proofs-xlsx';
+import type { ProofItem } from './proofs';
 import ExcelJS from 'exceljs';
 import JSZip from 'jszip';
 import * as fs from 'node:fs';
@@ -113,7 +115,7 @@ export async function restorePalette(templateFile: string, out: Buffer): Promise
   return Buffer.from(await dst.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }));
 }
 
-export async function fillDailySalesTemplate(rep: DailySalesReport, file: string): Promise<Buffer> {
+export async function fillDailySalesTemplate(rep: DailySalesReport & { proofs?: ProofItem[] }, file: string, proofImages: Map<string, { buffer: Buffer; ext: 'png' | 'jpeg' }> = new Map()): Promise<Buffer> {
   const wb = new ExcelJS.Workbook(); await wb.xlsx.readFile(file);
   const date = new Date(`${rep.header.date}T00:00:00`); const branch = rep.header.branch;
   const hdr = { date, branch };
@@ -181,6 +183,7 @@ export async function fillDailySalesTemplate(rep: DailySalesReport, file: string
   for (const [label, v] of [['Replacement cash (joins the cash deposit)', rep.replacements.cash], ['Replacement online', rep.replacements.online], ['Replacement card', rep.replacements.card], ['Total replacement payments', rep.replacements.total]] as const) rpw.addRow({ item: label, amount: asNum(v) }).font = { bold: true };
   void rl;
   rpw.addRow({ item: 'Total cash deposit incl. replacement cash', amount: asNum(rep.totalCashDeposit) }).font = { bold: true };
+  if (rep.proofs?.length) addProofsSheet(wb, rep.proofs, proofImages);
   return restorePalette(file, Buffer.from(await wb.xlsx.writeBuffer()));
 }
 function compactExp<T extends { accountTitle: string; payee: string | null; amount: unknown }>(rows: T[], cap: number): T[] {

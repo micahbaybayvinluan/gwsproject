@@ -5,11 +5,12 @@ import { api, fmtDate, peso } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { PickedInput } from '@/components/PickedInput';
 import { Attachments } from '@/components/Attachments';
+import { ProofUpload } from '@/components/ProofUpload';
 import { Badge, Button, Card, Empty, ErrorBox, Field, Input, Modal, Select, Stat, Textarea, statusTone } from '@/components/ui/primitives';
 import { Searchable } from '@/components/Searchable';
 
 interface Ticket {
-  payments?: { id: string; date: string; direction: string; mode: string; account: string | null; amount: number; status: string; note: string | null }[]; replacedOn?: string | null; replacedLocationId?: string | null; saleOnCredit?: boolean; priceTier?: string; suggestedPrice?: number | null;
+  payments?: { id: string; date: string; direction: string; mode: string; account: string | null; amount: number; status: string; note: string | null; reference?: string | null; proofAttachmentId?: string | null }[]; replacedOn?: string | null; replacedLocationId?: string | null; saleOnCredit?: boolean; priceTier?: string; suggestedPrice?: number | null;
   id: string; ticketNo: string; kind: 'CUSTOMER' | 'SUPPLIER'; status: string; reason: string; notes: string | null; qty: number; product: { id: string; sku: string; name: string } | null; location: string; createdBy: string; createdAt: string; ageDays: number;
   drSiNo: string | null; salesDocId: string | null; saleControlNo: string | null; saleBranch: string | null; customerName: string | null; customerPhone: string | null; unitPaid?: string;
   replaced: { at: string; by: string; branch: string; product: { id: string; name: string } | null; qty: number | null; unitPrice: string | null } | null;
@@ -127,7 +128,7 @@ export function ReplacementDetailPage() {
     {t.replaced && <Card title="Replacement given"><p className="text-sm"><b>{t.replaced.qty} × {t.replaced.product?.name}</b> at {t.replaced.unitPrice != null ? peso(t.replaced.unitPrice) : ''} each, by {t.replaced.by} at {t.replaced.branch} on {fmtDate(t.replaced.at)}.</p>
       <p className="mt-2 text-sm">Price difference against the DR: <b className={diff != null && diff !== 0 ? 'text-brand' : ''}>{diffText(t.priceDifference)}</b> {t.differenceSettledAt ? <Badge tone="green">settled {fmtDate(t.differenceSettledAt)}</Badge> : diff ? <Badge tone="amber">not yet settled</Badge> : null}</p>
       {t.replacedOn && <p className="mt-1 text-sm text-slate-600">Given on <b>{fmtDate(t.replacedOn)}</b>: the stock left on that day.</p>}
-      {t.payments && t.payments.length > 0 && <ul className="mt-2 divide-y text-sm">{t.payments.map((x) => <li key={x.id} className="flex flex-wrap items-center gap-2 py-1"><span>{x.direction === 'IN' ? 'Customer paid' : 'Refunded'} <b>{peso(x.amount)}</b> by {x.mode.toLowerCase().replace('_', ' ')}{x.account ? ` (${x.account})` : ''} on {fmtDate(x.date)}</span><Badge tone={x.status === 'APPLIED' ? 'green' : x.status === 'PENDING_APPROVAL' ? 'amber' : 'red'}>{x.status === 'APPLIED' ? 'in the Daily Sales Report' : x.status === 'PENDING_APPROVAL' ? 'waiting for the Head Auditor (closed day)' : 'not approved'}</Badge></li>)}</ul>}
+      {t.payments && t.payments.length > 0 && <ul className="mt-2 divide-y text-sm">{t.payments.map((x) => <li key={x.id} className="flex flex-wrap items-center gap-2 py-1"><span>{x.direction === 'IN' ? 'Customer paid' : 'Refunded'} <b>{peso(x.amount)}</b> by {x.mode.toLowerCase().replace('_', ' ')}{x.account ? ` (${x.account})` : ''} on {fmtDate(x.date)}{x.reference ? ` · ref ${x.reference}` : ''}</span>{x.proofAttachmentId && <button className="text-xs font-semibold text-brand underline" onClick={() => api.download(`/api/attachments/file/${x.proofAttachmentId}`, 'proof')}>view proof</button>}<Badge tone={x.status === 'APPLIED' ? 'green' : x.status === 'PENDING_APPROVAL' ? 'amber' : 'red'}>{x.status === 'APPLIED' ? 'in the Daily Sales Report' : x.status === 'PENDING_APPROVAL' ? 'waiting for the Head Auditor (closed day)' : 'not approved'}</Badge></li>)}</ul>}
       {diff != null && diff !== 0 && !t.differenceSettledAt && ['REPLACED', 'CLOSED'].includes(t.status) && !t.payments?.some((x) => x.status === 'PENDING_APPROVAL') && <SettleForm t={t} id={id!} diff={diff} onDone={refresh} />}
       </Card>}
     {t.kind === 'SUPPLIER' && t.status !== 'PENDING_RETURN' && t.status !== 'CANCELLED' && <Card title="Replacement from the supplier">
@@ -152,28 +153,50 @@ export function ReplacementDetailPage() {
   </div>;
 }
 
-/** How the customer settled the price difference (or how it was refunded), and the day: it goes into that day's Daily Sales Report as a replacement payment. */
+/** How the customer settled the price difference (or how it was refunded): each way has its own amount, account, reference and proof, and the day. It goes into that day's Daily Sales Report as a replacement payment. */
+interface Part { mode: string; amount: string; accountId: string; reference: string; proofId: string | null }
+const blankPart = (amount = ''): Part => ({ mode: 'CASH', amount, accountId: '', reference: '', proofId: null });
 function SettleForm({ t, id, diff, onDone }: { t: Ticket; id: string; diff: number; onDone: () => void }) {
   const today = new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);
-  const [open, setOpen] = useState(false); const [f, setF] = useState({ mode: 'CASH', accountId: '', date: t.replacedOn ?? today, note: '' }); const [info, setInfo] = useState('');
-  const accts = useQuery({ queryKey: ['payment-accounts', t.replacedLocationId], queryFn: () => api.get<{ id: string; title: string }[]>(`/api/accounts/payment?locationId=${t.replacedLocationId}`), enabled: open && f.mode !== 'CASH' && !!t.replacedLocationId });
-  const save = useMutation({ mutationFn: () => api.post<Ticket>(`/api/replacements/${id}/settle`, t.saleOnCredit ? { date: f.date, note: f.note || undefined } : { mode: f.mode, paymentAccountId: f.mode === 'CASH' ? null : f.accountId, date: f.date, note: f.note || undefined }), onSuccess: (r) => { setInfo(r.payments?.some((x) => x.status === 'PENDING_APPROVAL') ? 'That day is already closed, so the Head Auditor must approve it first. It joins that day\'s report once approved.' : 'Saved. It shows in the Daily Sales Report of that day as a replacement payment.'); setOpen(false); onDone(); } });
-  const back = diff < 0; const late = f.date < today;
+  const total = Math.abs(diff);
+  const [open, setOpen] = useState(false); const [date, setDate] = useState(t.replacedOn ?? today); const [note, setNote] = useState(''); const [info, setInfo] = useState('');
+  const [parts, setParts] = useState<Part[]>([blankPart(String(total))]);
+  const accts = useQuery({ queryKey: ['payment-accounts', t.replacedLocationId], queryFn: () => api.get<{ id: string; title: string }[]>(`/api/accounts/payment?locationId=${t.replacedLocationId}`), enabled: open && parts.some((p) => p.mode !== 'CASH') && !!t.replacedLocationId });
+  const set = (i: number, patch: Partial<Part>) => setParts((ps) => ps.map((p, j) => (j === i ? { ...p, ...patch } : p)));
+  const sum = Math.round(parts.reduce((n, p) => n + (Number(p.amount) || 0), 0) * 100) / 100;
+  const rest = Math.round((total - sum) * 100) / 100;
+  const incomplete = !t.saleOnCredit && (rest !== 0 || parts.some((p) => !(Number(p.amount) > 0) || (p.mode !== 'CASH' && (!p.accountId || !p.proofId))));
+  const save = useMutation({ mutationFn: () => api.post<Ticket>(`/api/replacements/${id}/settle`, t.saleOnCredit ? { date, note: note || undefined } : { date, note: note || undefined, parts: parts.map((p) => ({ mode: p.mode, amount: Number(p.amount), paymentAccountId: p.mode === 'CASH' ? null : p.accountId, reference: p.mode === 'CASH' ? null : p.reference || null, proofAttachmentId: p.mode === 'CASH' ? null : p.proofId })) }), onSuccess: (r) => { setInfo(r.payments?.some((x) => x.status === 'PENDING_APPROVAL') ? 'That day is already closed, so the Head Auditor must approve it first. It joins that day\'s report once approved.' : 'Saved. It shows in the Daily Sales Report of that day as a replacement payment, with its proof.'); setOpen(false); onDone(); } });
+  const back = diff < 0; const late = date < today;
   return <div className="mt-2">
     {info && <p className="mb-2 rounded-xl bg-emerald-50 p-2 text-sm text-emerald-800">{info}</p>}
     {!open ? <Button size="sm" variant="outline" onClick={() => setOpen(true)} data-testid="settle">{back ? 'Record the refund given to the customer' : 'Record the payment of the difference'}</Button>
       : <div className="space-y-3 rounded-xl border border-amber-200 bg-amber-50/60 p-3">
-        <div className="text-sm font-semibold">{back ? 'How was the refund given?' : 'How did the customer pay the difference?'} <span className="font-normal text-slate-600">({peso(Math.abs(diff))})</span></div>
-        <div className="grid gap-3 md:grid-cols-3">
-          {!t.saleOnCredit && <Field label={back ? 'Refunded by' : 'Paid by'}><Select value={f.mode} onChange={(e) => setF({ ...f, mode: e.target.value, accountId: '' })}><option value="CASH">Cash</option><option value="ONLINE">Online (bank / GCash)</option><option value="CREDIT_CARD">Credit card</option></Select></Field>}
-          {!t.saleOnCredit && f.mode !== 'CASH' && <Field label="Bank / GCash / card account"><Select value={f.accountId} onChange={(e) => setF({ ...f, accountId: e.target.value })}><option value="">— choose the account —</option>{accts.data?.map((a) => <option key={a.id} value={a.id}>{a.title}</option>)}</Select></Field>}
-          <Field label="Day it was paid" hint="The Daily Sales Report and the books of this day show it, apart from normal sales."><Input type="date" min={t.replacedOn ?? undefined} max={today} value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} /></Field>
+        <div className="text-sm font-semibold">{back ? 'How was the refund given?' : 'How did the customer pay the difference?'} <span className="font-normal text-slate-600">Total to {back ? 'refund' : 'collect'}: <b>{peso(total)}</b></span></div>
+        {t.saleOnCredit
+          ? <p className="text-xs text-slate-600">The sale was on credit, so the difference goes to the customer's receivable instead of cash. No proof is needed.</p>
+          : <>
+            {parts.map((p, i) => <div key={i} className="space-y-2 rounded-xl border border-slate-200 bg-white p-3">
+              <div className="grid gap-3 md:grid-cols-4">
+                <Field label={parts.length > 1 ? `Payment ${i + 1}: ${back ? 'refunded by' : 'paid by'}` : back ? 'Refunded by' : 'Paid by'}><Select value={p.mode} onChange={(e) => set(i, { mode: e.target.value, accountId: '', proofId: null })}><option value="CASH">Cash</option><option value="ONLINE">Online (bank / GCash)</option><option value="CREDIT_CARD">Credit card</option></Select></Field>
+                <Field label="Amount (₱)"><Input type="number" min="0" step="0.01" value={p.amount} onChange={(e) => set(i, { amount: e.target.value })} /></Field>
+                {p.mode !== 'CASH' && <Field label="Bank / GCash / card account"><Select value={p.accountId} onChange={(e) => set(i, { accountId: e.target.value })}><option value="">— choose the account —</option>{accts.data?.map((a) => <option key={a.id} value={a.id}>{a.title}</option>)}</Select></Field>}
+                {p.mode !== 'CASH' && <Field label="Reference / approval no. (optional)"><Input value={p.reference} onChange={(e) => set(i, { reference: e.target.value })} /></Field>}
+              </div>
+              {p.mode !== 'CASH' && <ProofUpload key={`${i}-${p.mode}`} type="ReplacementPayment" label={`Proof of the ${p.mode === 'ONLINE' ? 'online payment (screenshot)' : 'card payment (terminal slip)'}`} onChange={(pid) => set(i, { proofId: pid })} />}
+              {parts.length > 1 && <button className="text-xs text-red-700 underline" onClick={() => setParts((ps) => ps.filter((_, j) => j !== i))}>remove this payment</button>}
+            </div>)}
+            <div className="flex flex-wrap items-center gap-3 text-sm">
+              <Button size="sm" variant="outline" onClick={() => setParts((ps) => [...ps, blankPart(rest > 0 ? String(rest) : '')])}>+ Paid in another way too (split)</Button>
+              <span className={rest === 0 ? 'text-emerald-700' : 'font-semibold text-red-700'}>{rest === 0 ? `✔ ${peso(sum)} adds up to the difference` : rest > 0 ? `${peso(rest)} still to be entered` : `${peso(-rest)} too much`}</span>
+            </div></>}
+        <div className="grid gap-3 md:grid-cols-2">
+          <Field label="Day it was paid" hint="The Daily Sales Report and the books of this day show it, apart from normal sales."><Input type="date" min={t.replacedOn ?? undefined} max={today} value={date} onChange={(e) => setDate(e.target.value)} /></Field>
+          <Field label="Note (optional)"><Input value={note} onChange={(e) => setNote(e.target.value)} /></Field>
         </div>
         {late && <p className="rounded-lg bg-amber-100 p-2 text-xs text-amber-900">This is a past day. If that day is already closed, the Head Auditor must approve it before it joins the report.</p>}
-        {t.saleOnCredit && <p className="text-xs text-slate-600">The sale was on credit, so the difference goes to the customer's receivable instead of cash.</p>}
-        <Field label="Note (optional)"><Input value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} /></Field>
         <ErrorBox error={save.error} />
-        <div className="flex gap-2"><Button disabled={save.isPending || (!t.saleOnCredit && f.mode !== 'CASH' && !f.accountId)} onClick={() => save.mutate()}>Save</Button><Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button></div>
+        <div className="flex gap-2"><Button disabled={save.isPending || incomplete} onClick={() => save.mutate()}>Save</Button><Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button></div>
       </div>}
   </div>;
 }

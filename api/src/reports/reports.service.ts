@@ -8,6 +8,10 @@ import { PayrollService } from '../payroll/payroll.service';
 import { AccountsService } from '../gl/accounts.service';
 import { directCostTemplateFor } from '../gl/account-templates';
 import { PdfService } from './pdf.service';
+import { ProofsService } from './proofs.service';
+import { addProofsSheet } from './proofs-xlsx';
+import ExcelJS from 'exceljs';
+import { PROOF_KINDS, ProofKind } from './proofs';
 import { AuditService } from '../common/audit.service';
 import { StockService } from '../stock/stock.service';
 import { hasMovement } from '../stock/daily-inventory';
@@ -29,7 +33,7 @@ const CHECKER_FORMS = ['pull-out', 'transfer-in', 'dr-sales', 'supplier-form', '
 
 @Injectable()
 export class ReportsService {
-  constructor(private prisma: PrismaService, private xlsx: XlsxService, private pdf: PdfService, private audit: AuditService, private stock: StockService, private fin: FinReportsService, private payroll: PayrollService, private accounts: AccountsService) {}
+  constructor(private prisma: PrismaService, private xlsx: XlsxService, private pdf: PdfService, private audit: AuditService, private stock: StockService, private fin: FinReportsService, private payroll: PayrollService, private accounts: AccountsService, private proofs: ProofsService) {}
 
   private async logExport(user: SessionUser, report: string, params: unknown) { await this.audit.log({ action: 'EXPORT', entityType: 'Report', entityId: report, after: params, userId: user.id }); }
 
@@ -54,14 +58,41 @@ export class ReportsService {
     const racc = new Map((await this.prisma.db.account.findMany({ where: { id: { in: rpay.map((x) => x.paymentAccountId).filter(Boolean) as string[] } }, select: { id: true, title: true } })).map((x) => [x.id, x.title]));
     const replacementPayments = rpay.map((x) => { const t = rtix.find((y) => y.id === x.ticketId); return { ticketNo: t?.ticketNo ?? '', drSiNo: t?.drSiNo ?? null, customer: t?.customerName ?? null, item: rprods.find((p) => p.id === (t?.replacementProductId ?? t?.productId))?.name ?? null, direction: x.direction as 'IN' | 'OUT', mode: x.mode as 'CASH' | 'ONLINE' | 'CREDIT_CARD', account: x.paymentAccountId ? racc.get(x.paymentAccountId) ?? null : null, amount: x.amount, givenOn: t?.replacedOn ? dateStr(t.replacedOn) : null }; });
     const rep = buildDailySalesReport({ replacementPayments, branch: loc.name, date, sales: rs, expenses: [...expenses.filter((e) => e.paidFrom !== 'PETTY_CASH').map((e) => ({ accountTitle: e.account.title, payee: e.payee, amount: e.amount, paidFrom: e.paidFrom, inRiderSummary: saleIncentiveIds.has(e.id) && riderIncentiveOf.has(e.id) })), ...fundRep.map((t) => ({ accountTitle: 'Cash Fund Replenishment', payee: t.controlNo, amount: t.amount, paidFrom: 'CASH_DRAWER' }))], close: close ? { moneyBreakdown: close.moneyBreakdown as Record<string, number> | null, countedCash: close.countedCash, expectedCash: close.expectedCash, cashVariance: close.cashVariance } : null, preparedBy: user.fullName });
-    if (!withMargin) return rep;
+    // the proofs of payment of the day (online, card, cheque, collections, replacement payments, deposit slip): printed with the report
+    const proofItems = await this.proofs.collect(user, { locationId, from: date, to: date });
+    const withProofs = { ...rep, proofs: proofItems, proofSummary: this.proofs.summary(proofItems) };
+    if (!withMargin) return withProofs;
     if (!user.permissions.has('cost.view')) throw new ForbiddenException('Audit summary requires cost.view');
     const cost = sales.flatMap((s) => s.lines).reduce((t, l) => t.plus(l.unitCost.mul(l.qty)), ZERO);
     const revenue = sales.reduce((t, s) => t.plus(s.productTotal), ZERO);
-    return { ...rep, audit: { costOfSales: cost, grossProfit: revenue.minus(cost), grossMarginPct: revenue.isZero() ? 0 : revenue.minus(cost).div(revenue).mul(100).toDecimalPlaces(1).toNumber() } };
+    return { ...withProofs, audit: { costOfSales: cost, grossProfit: revenue.minus(cost), grossMarginPct: revenue.isZero() ? 0 : revenue.minus(cost).div(revenue).mul(100).toDecimalPlaces(1).toNumber() } };
   }
-  async dailySalesXlsx(locationId: string, date: string, user: SessionUser): Promise<Out> { const rep = await this.dailySalesData(locationId, date, user); await this.logExport(user, 'DailyBranchSalesReport.xlsx', { locationId, date }); return { buffer: await this.xlsx.dailySalesReport(rep), contentType: XLSX, fileName: `DailySalesReport_${rep.header.branch}_${date}.xlsx` }; }
-  async dailySalesPdf(locationId: string, date: string, user: SessionUser): Promise<Out> { const rep = await this.dailySalesData(locationId, date, user); await this.logExport(user, 'DailyBranchSalesReport.pdf', { locationId, date }); const r = await this.pdf.render(this.pdf.dailySalesReportHtml(rep)); return { buffer: r.buffer, contentType: r.contentType, fileName: `DailySalesReport_${rep.header.branch}_${date}.${r.ext}` }; }
+  async dailySalesXlsx(locationId: string, date: string, user: SessionUser): Promise<Out> { const rep = await this.dailySalesData(locationId, date, user); await this.logExport(user, 'DailyBranchSalesReport.xlsx', { locationId, date }); return { buffer: await this.xlsx.dailySalesReport(rep, await this.proofs.imageBuffers(rep.proofs)), contentType: XLSX, fileName: `DailySalesReport_${rep.header.branch}_${date}.xlsx` }; }
+  async dailySalesPdf(locationId: string, date: string, user: SessionUser): Promise<Out> { const rep = await this.dailySalesData(locationId, date, user); await this.logExport(user, 'DailyBranchSalesReport.pdf', { locationId, date }); const r = await this.pdf.render(this.pdf.dailySalesReportHtml(rep, await this.proofs.images(rep.proofs))); return { buffer: r.buffer, contentType: r.contentType, fileName: `DailySalesReport_${rep.header.branch}_${date}.${r.ext}` }; }
+
+  // ── Payment Proofs report (any branch, any period, chosen types) ──
+  private proofParams(q: { from?: string; to?: string; kinds?: string }) {
+    const today = dateStr(new Date()); const from = q.from || today; const to = q.to || from;
+    const kinds = (q.kinds ?? '').split(',').map((k) => k.trim().toUpperCase()).filter((k) => PROOF_KINDS.some((p) => p.kind === k)) as ProofKind[];
+    return { from, to, kinds };
+  }
+  async paymentProofs(user: SessionUser, q: { locationId?: string; from?: string; to?: string; kinds?: string }) {
+    const p = this.proofParams(q); const items = await this.proofs.collect(user, { locationId: q.locationId, ...p });
+    return { from: p.from, to: p.to, items, summary: this.proofs.summary(items), missing: items.filter((i) => i.missing).length };
+  }
+  async paymentProofsPdf(user: SessionUser, q: { locationId?: string; from?: string; to?: string; kinds?: string }): Promise<Out> {
+    const p = this.proofParams(q); const items = await this.proofs.collect(user, { locationId: q.locationId, ...p });
+    const branch = q.locationId ? (await this.prisma.db.location.findUnique({ where: { id: q.locationId }, select: { name: true } }))?.name ?? '' : 'All my branches';
+    await this.logExport(user, 'PaymentProofs.pdf', q);
+    const r = await this.pdf.render(this.pdf.proofsReportHtml(items, await this.proofs.images(items), { branch, ...p }));
+    return { buffer: r.buffer, contentType: r.contentType, fileName: `PaymentProofs_${p.from}_${p.to}.${r.ext}` };
+  }
+  async paymentProofsXlsx(user: SessionUser, q: { locationId?: string; from?: string; to?: string; kinds?: string }): Promise<Out> {
+    const p = this.proofParams(q); const items = await this.proofs.collect(user, { locationId: q.locationId, ...p });
+    const wb = new ExcelJS.Workbook(); addProofsSheet(wb, items, await this.proofs.imageBuffers(items), 'PROOFS');
+    await this.logExport(user, 'PaymentProofs.xlsx', q);
+    return { buffer: Buffer.from(await wb.xlsx.writeBuffer()), contentType: XLSX, fileName: `PaymentProofs_${p.from}_${p.to}.xlsx` };
+  }
 
   async stockOnHandXlsx(user: SessionUser, locationId?: string): Promise<Out> {
     const rows = await this.stock.stockOnHand(user, locationId);

@@ -258,7 +258,7 @@ export class SalesService implements OnModuleInit {
     if ((input.paymentMode === 'ONLINE' || input.paymentMode === 'CREDIT_CARD') && !input.paymentAccountId) throw new BadRequestException('payment account is required for ONLINE / CREDIT_CARD');
     if ((input.paymentMode === 'ONLINE' || input.paymentMode === 'CREDIT_CARD') && !input.proofOfPaymentAttachmentId) throw new BadRequestException({ message: 'Proof of payment upload is required for ONLINE / CREDIT_CARD', code: 'PROOF_REQUIRED' });
     if (input.paymentMode === 'CREDIT_CARD' && !(input.cardMid && input.cardSlipNo && input.cardApprovalCode && input.cardBatchNo)) throw new BadRequestException('Credit card sales need MID, slip no., approval code and batch no.');
-    if (input.paymentMode === 'AR_PDC') { if (!input.customerId && !input.agentId) throw new BadRequestException('AR/PDC requires a customer or agent'); if ((input.pdcBank || input.pdcChequeNo || input.pdcDate) && !(input.pdcChequeNo && input.pdcDate)) throw new BadRequestException('With a PDC, type the cheque number and the cheque date'); if (!input.dueDate) throw new BadRequestException('AR/PDC requires a due date'); }
+    if (input.paymentMode === 'AR_PDC') { if (!input.customerId && !input.agentId) throw new BadRequestException('AR/PDC requires a customer or agent'); if ((input.pdcBank || input.pdcChequeNo || input.pdcDate) && !(input.pdcChequeNo && input.pdcDate)) throw new BadRequestException('With a PDC, type the cheque number and the cheque date'); if (!input.dueDate) throw new BadRequestException('AR/PDC requires a due date'); if (input.pdcChequeNo && !input.proofOfPaymentAttachmentId) throw new BadRequestException({ message: 'Upload a photo of the cheque: a sale with a post-dated cheque cannot be saved without it', code: 'PROOF_REQUIRED' }); }
     if (input.channel === 'DELIVERY' && !input.riderId) throw new BadRequestException('Delivery sales need a rider');
   }
 
@@ -327,7 +327,8 @@ export class SalesService implements OnModuleInit {
    */
   async recordPayment(input: { salesDocIds: string[]; amount: number; discount?: number; paymentMode: PaymentMode; paymentAccountId?: string | null; proofAttachmentId?: string | null; receivedAt?: string; notes?: string }, user: SessionUser) {
     if (!input.salesDocIds.length) throw new BadRequestException('Pick at least one invoice');
-    if ((input.paymentMode === 'ONLINE' || input.paymentMode === 'CREDIT_CARD') && (!input.paymentAccountId || !input.proofAttachmentId)) throw new BadRequestException('Online/card collections need a payment account and proof upload');
+    if (input.paymentMode !== 'CASH' && !input.paymentAccountId) throw new BadRequestException(input.paymentMode === 'AR_PDC' ? 'Cheque collections need the bank account the cheque is deposited to' : 'Online/card collections need a payment account');
+    if (input.paymentMode !== 'CASH' && !input.proofAttachmentId) throw new BadRequestException({ message: input.paymentMode === 'AR_PDC' ? 'Upload a photo of the cheque (and its deposit slip when you have it): a cheque collection cannot be saved without it' : 'Upload the proof of payment (screenshot or slip): online and card collections cannot be saved without it', code: 'PROOF_REQUIRED' });
     const docs = await this.openInvoices(input.salesDocIds, user);
     const total = D(input.amount).plus(input.discount ?? 0);
     const pending = await this.pendingFor(input.salesDocIds);

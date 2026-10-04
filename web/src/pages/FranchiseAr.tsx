@@ -4,6 +4,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { api, peso, today } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { Badge, Button, Card, Empty, ErrorBox, Field, Input, Modal, Select, Stat } from '@/components/ui/primitives';
+import { ProofUpload } from '@/components/ProofUpload';
 import { Searchable } from '@/components/Searchable';
 
 interface Inv { id: string; controlNo: string; source: string; transferId: string | null; issueDate: string; dueDate: string; originalDueDate: string; extended: boolean; status: string; amount: string; principalPaid: string; unpaid: string; penalty: string; penaltyPaid: string; interest: string; interestPaid: string; chargesDue: string; totalDue: string; daysOverdue: number; twoMonthsOverdue: boolean; pendingExtension: { requestedDueDate: string } | null }
@@ -107,9 +108,9 @@ function InvoiceDetail({ id }: { id: string }) {
 }
 
 function PayModal({ inv, onClose, onDone }: { inv: Inv; onClose: () => void; onDone: () => void }) {
-  const [f, setF] = useState({ amount: String(inv.totalDue), mode: 'BANK_TRANSFER', accountId: '', reference: '', date: today(), notes: '' });
+  const [f, setF] = useState({ amount: String(inv.totalDue), mode: 'BANK_TRANSFER', accountId: '', reference: '', date: today(), notes: '' }); const [proofId, setProofId] = useState<string | null>(null);
   const accts = useQuery({ queryKey: ['payment-accounts'], queryFn: () => api.get<{ id: string; title: string }[]>('/api/accounts/payment') });
-  const m = useMutation({ mutationFn: () => api.post(`/api/franchise-ar/${inv.id}/payments`, { amount: Number(f.amount), mode: f.mode, paymentAccountId: f.accountId || null, reference: f.reference || null, paidOn: f.date, notes: f.notes || null }), onSuccess: onDone });
+  const m = useMutation({ mutationFn: () => api.post(`/api/franchise-ar/${inv.id}/payments`, { amount: Number(f.amount), mode: f.mode, paymentAccountId: f.accountId || null, reference: f.reference || null, paidOn: f.date, notes: f.notes || null, proofAttachmentId: f.mode === 'CASH' ? null : proofId }), onSuccess: onDone });
   return <Modal title={`Record payment · ${inv.controlNo}`} onClose={onClose}>
     <div className="space-y-3">
       <p className="text-sm text-slate-600">Total due today <b>{peso(inv.totalDue)}</b> (goods {peso(inv.unpaid)}, penalty and interest {peso(inv.chargesDue)}). The payment settles the penalty first, then the interest, then the goods.</p>
@@ -121,8 +122,9 @@ function PayModal({ inv, onClose, onDone }: { inv: Inv; onClose: () => void; onD
         <Field label={f.mode === 'CHEQUE' ? 'Cheque no.' : 'Reference no.'}><Input value={f.reference} onChange={(e) => setF({ ...f, reference: e.target.value })} placeholder={f.mode === 'CASH' ? 'optional' : 'required'} /></Field>
         <Field label="Notes"><Input value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} /></Field>
       </div>
+      {f.mode !== 'CASH' && <ProofUpload key={f.mode} type="FranchisePayment" label={f.mode === 'CHEQUE' ? 'Photo of the cheque' : f.mode === 'GCASH' ? 'GCash receipt (screenshot)' : 'Bank transfer screenshot / slip'} onChange={setProofId} />}
       <ErrorBox error={m.error} />
-      <div className="flex justify-end gap-2"><Button variant="outline" onClick={onClose}>Cancel</Button><Button disabled={m.isPending || !(Number(f.amount) > 0) || (f.mode !== 'CASH' && !f.reference.trim())} onClick={() => m.mutate()}>Record payment</Button></div>
+      <div className="flex justify-end gap-2"><Button variant="outline" onClick={onClose}>Cancel</Button><Button disabled={m.isPending || !(Number(f.amount) > 0) || (f.mode !== 'CASH' && (!f.reference.trim() || !proofId))} onClick={() => m.mutate()}>Record payment</Button></div>
     </div></Modal>;
 }
 

@@ -1,3 +1,4 @@
+import { PaymentProofsPage } from './pages/PaymentProofs';
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -135,6 +136,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
               <Route path="/suppliers" element={<SuppliersPage />} />
               <Route path="/imports" element={<ImportsPage />} />
               <Route path="/reports/daily-sales" element={<DailySalesReportPage />} />
+              <Route path="/reports/payment-proofs" element={<PaymentProofsPage />} />
               <Route path="/reports/inventory" element={<InventoryReportsPage />} />
               <Route path="/franchise" element={<FranchisePage />} />
               <Route path="/accounting/accounts" element={<AccountsPage />} />

@@ -290,6 +290,12 @@ Waybill Report → **Choose waybill PDF files** (TikTok or Shopee labels) → pi
 109. **Print the three copies** (`admin`): supplier copy (no branches, no prices), Head Auditor / Owner copy, warehouse copy. Check the supplier copy has no branch name.
 110. **Ask for the transfers** (`admin`): *Ask the Head Auditor to make the transfers* → `head.auditor`, `wh.incharge` and the branches are notified. Then *Mark as sent* with an expected date.
 111. **Receive against the order** (`wh.assoc` / `wh.incharge`): Supplier Deliveries → new delivery for that supplier → *This delivery is for a purchase order* → choose it → post. The PO shows received against ordered (Partly received / Received) and the branches are told.
+112. **Replacement paid in two ways** (`sales.westave`): Replacement Tickets → a replaced ticket → *Record the payment of the difference*. Part 1: Cash ₱300. Press *Paid in another way too*: Part 2: Online, the rest, choose the GCash account, type a reference, upload a screenshot. The message under the parts must say the amounts add up. Save. Try saving Part 2 without the screenshot: the Save button stays off.
+113. **Online sale needs its proof** (`sales.westave`): New Sale → payment Online → choose the account. The big *Proof of payment* box says Required; the sale cannot be reviewed until a screenshot is uploaded and its small picture appears.
+114. **Cheque** (`sales.westave`): New Sale to a dealer on credit with *With PDC* ticked and the cheque number: a *Photo of the cheque* box appears and is required. AR & Collections → choose *Cheque* as the mode: it needs the bank account and the photo.
+115. **Franchise payment** (`acct.head`): Franchise AR → Record payment → GCash or Bank transfer: the reference and the screenshot are both required.
+116. **The printed report carries the proofs** (`sales.westave`, `acct.head`): Reports → Daily Sales Report → PDF. At the end: *Proof of payments* with a legend, a checklist and the pictures; each sale has its reference (ON-1 …) in the Proof column. Open the Excel: the PROOFS sheet shows the same with the pictures.
+117. **Payment Proofs** (`acct.head`): Reports → Payment Proofs → choose a branch and the dates → tick types, tick *Only missing proofs*, switch to *Checklist*, press *Print with the pictures (PDF)* and *Excel*.
 
 ## Where the files come out
 

@@ -184,6 +184,7 @@ export class FranchiseArService implements OnModuleInit {
     if (!PAY_MODES.includes(input.mode as never)) throw new BadRequestException('Choose how it was paid');
     if (!(input.amount > 0)) throw new BadRequestException('The amount must be more than zero');
     if (input.mode !== 'CASH' && !input.reference?.trim()) throw new BadRequestException('Enter the reference / cheque number');
+    if (input.mode !== 'CASH' && !input.proofAttachmentId) throw new BadRequestException({ message: 'Upload the proof of payment (transfer screenshot, GCash receipt or photo of the cheque)', code: 'PROOF_REQUIRED' });
     const paidOn = input.paidOn ? toDateOnly(input.paidOn) : todayManila();
     if (paidOn > todayManila()) throw new BadRequestException('The payment date cannot be in the future');
     const out = await this.prisma.db.$transaction(async (tx) => {

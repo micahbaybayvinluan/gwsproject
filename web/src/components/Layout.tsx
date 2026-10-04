@@ -73,6 +73,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
     { to: '/reports/sales', label: 'Sales Report', any: ['report.sales.own', 'report.sales.all'] },
     { to: '/reports/performance', label: 'Sales Graphs', any: ['report.sales.own', 'report.sales.all'] },
     { to: '/reports/daily-sales', label: 'Daily Sales Report', any: ['report.sales.own', 'report.sales.all'] },
+    { to: '/reports/payment-proofs', label: 'Payment Proofs', any: ['report.sales.own', 'report.sales.all'] },
     { to: '/reports/inventory', label: 'Inventory Reports', any: ['report.inventory.own', 'report.inventory.all'] },
     { to: '/reports/customers', label: 'Customer Contacts', any: ['report.sales.own', 'report.sales.all'] },
     { to: '/franchise', label: 'Franchise Portal', any: ['franchise.portal'] },

@@ -138,6 +138,8 @@ You run one branch: sales, expenses, stock received and sent, the weekly count, 
 
 **Restocking:** when the Owner approves a purchase order, you are told what your branch will receive: **stock moved from existing stock** (create the pull-out form now) and **your share of the supplier order** (told again when it arrives). *Restock Plan* shows both for your branch.
 
+**Proof of payment:** for every online, card or cheque payment (a sale, an AR collection, a replacement price difference) upload the screenshot, the card slip or the photo of the cheque where you record it: it cannot be saved without it. For a replacement paid in two ways, press *Paid in another way too* and give each amount with its proof. The Daily Sales Report prints your proofs at the end with a reference beside each sale, so there is nothing to print and staple. Check *Payment Proofs* for anything shown in red.
+
 ## Warehouse Associate
 <!-- role: WAREHOUSE_ASSOCIATE -->
 You enter what comes into and goes out of the warehouse. You never see supplier cost. Your entries are checked by the Warehouse In-Charge before stock changes.
@@ -283,6 +285,8 @@ You approve costs and most corrections, audit the branches, and watch the cash.
 
 **Restocking:** Restock & Purchase Orders → *Generate a restock request* makes one PO per supplier from the days of stock of the warehouse and each branch. Check the suggested transfers (from existing stock first) and the suggested order, change any box, add items, then *Send to the Owner for approval*. After approval, tell the branches to create their pull-outs (the Owner may also ask you to make the transfers). Print the supplier copy (no branches), the internal copy and the warehouse copy.
 
+**Proofs of payment:** *Payment Proofs* (Reports) shows the proof of every online, card and cheque payment, AR collection, replacement payment and deposit slip of a branch for a day or period, with the missing ones in red. Print it with the pictures, or read the proofs at the end of the printed Daily Sales Report: each sale has a reference (ON-1, CC-2, CQ-1 …) in its Proof column, and the legend tells the type.
+
 ## Asst Auditor
 <!-- role: ASST_AUDITOR -->
 You support the Head Auditor.
@@ -315,6 +319,8 @@ You review branch reports (with supplier cost) and ask for corrections.
    3. The staff member who made it is notified. Only the Head Auditor approves.
 3. The **Revision Log** counts errors per staff member.
 4. You are notified of count discrepancies, cash on hand that is due, and reports not submitted by the cut-off.
+
+**Proofs of payment:** *Payment Proofs* (Reports) shows the proof of every online, card and cheque payment, AR collection, replacement payment and deposit slip of a branch for a day or period, with the missing ones in red. Print it with the pictures, or read the proofs at the end of the printed Daily Sales Report: each sale has a reference (ON-1, CC-2, CQ-1 …) in its Proof column, and the legend tells the type.
 
 ## Field Auditor
 <!-- role: FIELD_AUDITOR -->
@@ -404,6 +410,8 @@ You keep the books.
 
 **Purchase orders:** you can view every purchase order (Restock & Purchase Orders); it books nothing. The delivery and its approved cost do.
 
+**Proofs of payment:** *Payment Proofs* (Reports) shows the proof of every online, card and cheque payment, AR collection, replacement payment and deposit slip of a branch for a day or period, with the missing ones in red. Print it with the pictures, or read the proofs at the end of the printed Daily Sales Report: each sale has a reference (ON-1, CC-2, CQ-1 …) in its Proof column, and the legend tells the type.
+
 ## Accounting Associate
 <!-- role: ACCOUNTING_ASSOCIATE -->
 You accept **pull-outs endorsed as an expense** in My Approvals (booked at cost) and are told of every replacement ticket, its price difference and when it is settled (Replacement Tickets, Marketing & BO Pull-outs).
@@ -418,6 +426,8 @@ You accept **pull-outs endorsed as an expense** in My Approvals (booked at cost)
 **Franchise AR:** open **Franchise AR** to see each franchise's invoices, penalty and interest. Press **Record payment** when a franchise pays: choose how it was paid, the account it went to and the reference. The payment settles the penalty first, then the interest, then the goods. Everyone concerned is notified. Old franchise balances are entered through **AR / Credit → Opening AR** (kind Franchisee); they become franchise invoices.
 
 **Your password:** press the key icon at the top right (**Change my password**) any time. Your account is personal and you answer for everything done under it, so never tell your password to anyone, not even HR, your supervisor or the Owner. Nobody can see it.
+
+**Proofs of payment:** *Payment Proofs* (Reports) shows the proof of every online, card and cheque payment, AR collection, replacement payment and deposit slip of a branch for a day or period, with the missing ones in red. Print it with the pictures, or read the proofs at the end of the printed Daily Sales Report: each sale has a reference (ON-1, CC-2, CQ-1 …) in its Proof column, and the legend tells the type.
 
 ## HR Staff
 <!-- role: HR_STAFF -->

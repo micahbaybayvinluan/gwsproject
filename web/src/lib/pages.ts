@@ -54,6 +54,7 @@ export const PAGES: Record<string, PageInfo> = {
   '/price-changes': { label: 'Price Changes', summary: 'Prepare new prices with an effective date; they apply after the Owner approves and the people concerned are notified.' },
   '/suppliers': { label: 'Suppliers', summary: 'Supplier list (codes for warehouse staff; names for the Owner and auditors). New suppliers wait for the Owner’s approval.' },
   '/imports': { label: 'Excel Imports', summary: 'Load products, prices, minimum stock, opening balances and other lists from Excel templates.' },
+  '/reports/payment-proofs': { label: 'Payment Proofs', summary: 'The proof of every online, card and cheque payment, AR collection, replacement payment and bank deposit slip, with the missing ones in red. Print them with the pictures: no paper copies to staple.' },
   '/reports/daily-sales': { label: 'Daily Sales Report', summary: 'The day’s sales report in the company format. Branch staff review it and submit it as true and correct before 8 PM.' },
   '/reports/sales': { label: 'Sales Report', summary: 'Choose a branch (or all) and a period: total sales, number of sales, how customers paid, channels, per branch, per day and top products. Export to Excel.' },
   '/reports/performance': { label: 'Sales Graphs', summary: 'This month so far per branch and for the whole company, and this year month by month, as graphs (each branch has its own colour). Hover for exact amounts, or show as tables.' },

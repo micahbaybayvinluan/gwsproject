@@ -83,6 +83,8 @@ const BASE_KEYS = [
   'notification.view',
   // branch cash fund (imprest): view all balances, set up / change the fund, spend & replenish at own branch, count & confirm in the store
   'cashfund.view.all', 'cashfund.manage', 'cashfund.use', 'cashfund.check',
+  // pay an expense from the own location's cash fund and see its balance (warehouse staff; they do not replenish it)
+  'cashfund.spend',
   // store inspection report (Field Auditor), HR review
   'inspection.create', 'inspection.view', 'inspection.review',
   // charge a cash shortage to staff; record SSS / PhilHealth / Pag-IBIG remittances
@@ -226,7 +228,7 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
     key: 'WAREHOUSE_IN_CHARGE',
     name: 'Warehouse In-Charge',
     description: 'Inputs warehouse receiving, transfers (to any branch or franchise), counts, write-offs and the warehouse\'s expenses; costs are entered and approved by the Head Auditor. Approves every warehouse associate\'s goods in and out before stock moves (own entries need no second approval). Can edit an associate\'s entry, which takes effect only after that associate accepts it. No cost.',
-    permissions: ['po.view', 'replacement.create', 'expense.create.branch', 'expense.view', 'stock.flavor.set', 
+    permissions: ['po.view', 'replacement.create', 'expense.create.branch', 'expense.view', 'cashfund.spend', 'stock.flavor.set', 
       'product.view', 'supplier.view.code', 'location.view.own', 'receiving.create', 'transfer.create', 'transfer.confirm', 'warehouse.edit_others', 'approval.act.CONSIGNMENT_CHECK_WH', 'consignment.request', 'approval.act.WAREHOUSE_EDIT', 'approval.act.WAREHOUSE_IN', 'approval.act.WAREHOUSE_OUT', 'approval.act.ECOM_PULLOUT', 'ecom.receive', 'approval.act.TRANSFER_DIFF_SENDER',
       'count.create', 'writeoff.create', 'report.inventory.own', 'dashboard.view', 'notification.view', 'price.view.RETAIL', 'discrepancy.explain',
     ],
@@ -235,7 +237,7 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
     key: 'WAREHOUSE_ASSOCIATE',
     name: 'Warehouse Associate',
     description: 'Creates receiving docs (qty, expiry, batch) and transfers from the warehouse to any branch or franchise, and records the warehouse\'s expenses. Accepts or rejects the In-Charge\'s edits to own entries. Cost hidden.',
-    permissions: ['replacement.create', 'expense.create.branch', 'expense.view', 'consignment.request', 'product.view', 'supplier.view.code', 'location.view.own', 'receiving.create', 'transfer.create', 'transfer.confirm', 'report.inventory.own', 'dashboard.view', 'notification.view', 'approval.act.WAREHOUSE_EDIT', 'discrepancy.explain'],
+    permissions: ['replacement.create', 'expense.create.branch', 'expense.view', 'cashfund.spend', 'consignment.request', 'product.view', 'supplier.view.code', 'location.view.own', 'receiving.create', 'transfer.create', 'transfer.confirm', 'report.inventory.own', 'dashboard.view', 'notification.view', 'approval.act.WAREHOUSE_EDIT', 'discrepancy.explain'],
   },
   {
     key: 'SALES_ASSOCIATE',

@@ -12,7 +12,9 @@ import { dateStr, manilaDateStr, todayManila, toDateOnly } from '../common/manil
 import { requestContext, type SessionUser } from '../common/request-context';
 import { planProduct, type PlanLoc } from './restock-plan';
 
-export interface GenerateInput { supplierIds?: string[]; basisDays?: number; coverDays?: number; reserveDays?: number; surplusDays?: number }
+/** SUGGESTED = only what the data says is needed; ALL_ITEMS = every item of the chosen suppliers even with no need; BLANK = an empty order for the chosen suppliers (items added by hand). */
+export type GenerateMode = 'SUGGESTED' | 'ALL_ITEMS' | 'BLANK';
+export interface GenerateInput { mode?: GenerateMode; supplierIds?: string[]; basisDays?: number; coverDays?: number; reserveDays?: number; surplusDays?: number }
 export interface PoUpdate { notes?: string | null; expectedOn?: string | null; lines?: { lineId: string; orderQty?: number; note?: string | null; rows?: { rowId: string; transferQty?: number; transferFromId?: string | null; allocQty?: number }[] }[]; removeLineIds?: string[] }
 const OPEN = ['SUBMITTED', 'APPROVED', 'SENT', 'PARTIAL'];
 const num = (x: unknown) => Number(x ?? 0);
@@ -41,6 +43,8 @@ export class RestockService implements OnModuleInit {
   // ── generate ──
   async generate(user: SessionUser, i: GenerateInput) {
     this.assertManage(user);
+    const mode: GenerateMode = i.mode ?? 'SUGGESTED';
+    if (mode !== 'SUGGESTED' && !i.supplierIds?.length) throw new BadRequestException('Choose the supplier(s) to make the order for');
     const basisDays = Math.min(180, Math.max(7, Math.round(i.basisDays ?? 30))); const coverDays = Math.min(180, Math.max(7, Math.round(i.coverDays ?? 30)));
     const reserveDays = Math.min(60, Math.max(0, Math.round(i.reserveDays ?? 7))); const surplusDays = Math.min(365, Math.max(coverDays, Math.round(i.surplusDays ?? Math.max(60, coverDays * 2))));
     const locs = await this.prisma.db.location.findMany({ where: { active: true, type: { in: ['WAREHOUSE', 'BRANCH'] } }, select: { id: true, name: true, type: true } });
@@ -48,18 +52,20 @@ export class RestockService implements OnModuleInit {
     const days = await this.alerts.daysOfStock(user, { days: basisDays, cover: coverDays });
     const byProduct = new Map<string, PlanLoc[]>();
     for (const r of days.rows) { const t = typeOf.get(r.location.id); if (!t) continue; const a = byProduct.get(r.product.id) ?? []; a.push({ id: r.location.id, type: t, onHand: r.onHand, avgPerDay: r.avgPerDay }); byProduct.set(r.product.id, a); }
-    const products = await this.prisma.db.product.findMany({ where: { id: { in: [...byProduct.keys()] }, active: true, isBundle: false }, select: { id: true, supplierId: true } });
+    const products = await this.prisma.db.product.findMany({ where: { OR: [{ id: { in: [...byProduct.keys()] } }, ...(mode === 'ALL_ITEMS' ? [{ supplierId: { in: i.supplierIds! } }] : [])], active: true, isBundle: false }, select: { id: true, supplierId: true } });
+    if (mode === 'ALL_ITEMS') for (const pr of products) if (!byProduct.has(pr.id)) byProduct.set(pr.id, locs.map((l) => ({ id: l.id, type: l.type as 'WAREHOUSE' | 'BRANCH', onHand: 0, avgPerDay: 0 })));
     const supplierOf = new Map(products.map((p) => [p.id, p.supplierId]));
     const open = await this.prisma.db.purchaseOrderLine.findMany({ where: { po: { status: { in: OPEN } } }, select: { productId: true, orderQty: true, receivedQty: true } });
     const onOrder = new Map<string, number>(); for (const l of open) onOrder.set(l.productId, (onOrder.get(l.productId) ?? 0) + Math.max(0, l.orderQty - l.receivedQty));
     const wh = locs.find((l) => l.type === 'WAREHOUSE');
     type Built = { productId: string; plan: ReturnType<typeof planProduct>; onOrder: number };
     const per = new Map<string, Built[]>(); let unassigned = 0;
-    for (const [productId, ls] of byProduct) {
+    if (mode === 'BLANK') for (const sid of i.supplierIds!) per.set(sid, []);
+    else for (const [productId, ls] of byProduct) {
       if (!supplierOf.has(productId)) continue;
       const plan = planProduct(ls, { coverDays, reserveDays, surplusDays, onOrder: onOrder.get(productId) ?? 0 });
       const moves = plan.rows.some((r) => r.transferQty > 0);
-      if (plan.suggestedOrder <= 0 && !moves) continue;
+      if (mode === 'SUGGESTED' && plan.suggestedOrder <= 0 && !moves) continue;
       const sid = supplierOf.get(productId);
       if (!sid) { unassigned++; continue; }
       if (i.supplierIds?.length && !i.supplierIds.includes(sid)) continue;
@@ -73,12 +79,12 @@ export class RestockService implements OnModuleInit {
         const no = Number(/(\d+)$/.exec(n)![1]);
         return tx.purchaseOrder.create({ data: { poNo: `PO-${year}-${String(no).padStart(4, '0')}`, supplierId, basisDays, coverDays, reserveDays, deliverToId: wh?.id ?? null, createdBy: user.id, createdByName: user.fullName,
           lines: { create: items.map((x) => ({ productId: x.productId, whOnHand: x.plan.warehouse.onHand, whAvgPerDay: x.plan.warehouse.avgPerDay.toFixed(3), onOrder: x.onOrder, suggestedQty: x.plan.suggestedOrder, orderQty: x.plan.suggestedOrder,
-            rows: { create: x.plan.rows.filter((r) => r.onHand > 0 || r.avgPerDay > 0).map((r) => ({ locationId: r.locationId, onHand: r.onHand, avgPerDay: r.avgPerDay.toFixed(3), daysLeft: r.daysLeft == null ? null : r.daysLeft.toFixed(1), need: r.need, suggestedTransfer: r.transferQty, transferFromId: r.transferFromId, transferQty: r.transferQty, suggestedAlloc: r.allocQty, allocQty: r.allocQty })) } })) } } });
+            rows: { create: x.plan.rows.filter((r) => mode !== 'SUGGESTED' || r.onHand > 0 || r.avgPerDay > 0).map((r) => ({ locationId: r.locationId, onHand: r.onHand, avgPerDay: r.avgPerDay.toFixed(3), daysLeft: r.daysLeft == null ? null : r.daysLeft.toFixed(1), need: r.need, suggestedTransfer: r.transferQty, transferFromId: r.transferFromId, transferQty: r.transferQty, suggestedAlloc: r.allocQty, allocQty: r.allocQty })) } })) } } });
       });
       created.push({ id: po.id, poNo: po.poNo, supplierId, lines: items.length });
       await this.audit.log({ action: 'CREATE', entityType: 'PurchaseOrder', entityId: po.id, after: { poNo: po.poNo, supplierId, lines: items.length, basisDays, coverDays } });
     }
-    return { created, unassigned, basisDays, coverDays, reserveDays };
+    return { created, unassigned, basisDays, coverDays, reserveDays, mode, nothingNeeded: mode === 'SUGGESTED' && created.length === 0 };
   }
 
   // ── read ──
@@ -147,7 +153,13 @@ export class RestockService implements OnModuleInit {
     this.assertManage(user); const p = await this.editable(user, id);
     const prod = await this.prisma.db.product.findFirst({ where: { id: i.productId, active: true, supplierId: p.supplierId }, select: { id: true } }); if (!prod) throw new BadRequestException('That product is not supplied by this supplier');
     if (await this.prisma.db.purchaseOrderLine.findUnique({ where: { poId_productId: { poId: id, productId: i.productId } } })) throw new BadRequestException('Already on the order');
-    await this.prisma.db.purchaseOrderLine.create({ data: { poId: id, productId: i.productId, orderQty: nat(i.orderQty, 'The order quantity'), note: 'Added by hand' } });
+    // an item added by hand gets a row for every branch (with its stock now) so quantities can be shared out and transfers planned by hand too
+    const branches = await this.prisma.db.location.findMany({ where: { active: true, type: 'BRANCH' }, select: { id: true } });
+    const bal = await this.prisma.db.stockBalance.groupBy({ by: ['locationId'], where: { productId: i.productId, locationId: { in: branches.map((b) => b.id) } }, _sum: { qty: true } });
+    const wh = await this.prisma.db.location.findFirst({ where: { active: true, type: 'WAREHOUSE' }, select: { id: true } });
+    const whBal = wh ? (await this.prisma.db.stockBalance.aggregate({ where: { productId: i.productId, locationId: wh.id }, _sum: { qty: true } }))._sum.qty ?? 0 : 0;
+    await this.prisma.db.purchaseOrderLine.create({ data: { poId: id, productId: i.productId, whOnHand: whBal, orderQty: nat(i.orderQty, 'The order quantity'), note: 'Added by hand',
+      rows: { create: branches.map((b) => ({ locationId: b.id, onHand: bal.find((x) => x.locationId === b.id)?._sum.qty ?? 0, avgPerDay: '0', daysLeft: null, need: 0, suggestedTransfer: 0, transferQty: 0, suggestedAlloc: 0, allocQty: 0 })) } } });
     return this.get(user, id);
   }
 

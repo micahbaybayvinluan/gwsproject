@@ -179,7 +179,7 @@ You enter what comes into and goes out of the warehouse. You never see supplier 
 
 **Your pay:** My Pay & Charges.
 
-**Warehouse expenses** (menu: Expenses): record an expense of the warehouse (choose the account, amount and payee). The warehouse has no cash fund: choose cash on hand, a bank account or an owner advance.
+**Warehouse expenses** (menu: Expenses): record an expense of the warehouse (choose the account, amount and payee). You may also pay from the warehouse **Cash fund** (the balance is shown; you spend it, Accounting / the cash fund holders replenish it), or choose cash on hand, a bank account or an owner advance.
 
 ## Warehouse In-Charge
 <!-- role: WAREHOUSE_IN_CHARGE -->
@@ -228,7 +228,7 @@ You are responsible for the warehouse stock. You check your associates' entries,
 
 **Reports:** Stock on Hand, Inventory Reports (quantities only).
 
-**Warehouse expenses** (menu: Expenses): you and the Warehouse Associate record the warehouse's expenses (cash on hand, bank account or owner advance; no cash fund).
+**Warehouse expenses** (menu: Expenses): you and the Warehouse Associate record the warehouse's expenses (cash fund, cash on hand, bank account or owner advance).
 
 **Restocking:** you can open every purchase order (Restock & Purchase Orders, view only) and print the **warehouse copy**: per branch, what to pull out now from existing stock and each branch's share when the supplier's delivery arrives. When you receive a delivery for an order, choose it under *This delivery is for a purchase order*.
 
@@ -286,6 +286,8 @@ You approve costs and most corrections, audit the branches, and watch the cash.
 **Restocking:** Restock & Purchase Orders → *Generate a restock request* makes one PO per supplier from the days of stock of the warehouse and each branch. Check the suggested transfers (from existing stock first) and the suggested order, change any box, add items, then *Send to the Owner for approval*. After approval, tell the branches to create their pull-outs (the Owner may also ask you to make the transfers). Print the supplier copy (no branches), the internal copy and the warehouse copy.
 
 **Proofs of payment:** *Payment Proofs* (Reports) shows the proof of every online, card and cheque payment, AR collection, replacement payment and deposit slip of a branch for a day or period, with the missing ones in red. Print it with the pictures, or read the proofs at the end of the printed Daily Sales Report: each sale has a reference (ON-1, CC-2, CQ-1 …) in its Proof column, and the legend tells the type.
+
+**Restock override:** if the data says nothing is needed you can still order: in *Generate a restock request* tick the supplier and choose *Every item of the supplier* or *A blank order*, then type the quantities and each branch's share yourself.
 
 ## Asst Auditor
 <!-- role: ASST_AUDITOR -->

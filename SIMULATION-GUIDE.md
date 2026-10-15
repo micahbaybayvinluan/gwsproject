@@ -296,6 +296,8 @@ Waybill Report → **Choose waybill PDF files** (TikTok or Shopee labels) → pi
 115. **Franchise payment** (`acct.head`): Franchise AR → Record payment → GCash or Bank transfer: the reference and the screenshot are both required.
 116. **The printed report carries the proofs** (`sales.westave`, `acct.head`): Reports → Daily Sales Report → PDF. At the end: *Proof of payments* with a legend, a checklist and the pictures; each sale has its reference (ON-1 …) in the Proof column. Open the Excel: the PROOFS sheet shows the same with the pictures.
 117. **Payment Proofs** (`acct.head`): Reports → Payment Proofs → choose a branch and the dates → tick types, tick *Only missing proofs*, switch to *Checklist*, press *Print with the pictures (PDF)* and *Excel*.
+118. **Warehouse pays from its cash fund** (`admin`, then `wh.assoc`): as `admin` open Cash Fund and set the Warehouse fund to ₱3,000 if it is not set. As `wh.assoc` open Expenses → choose an account → Paid from *Cash fund*: the balance shows beside it. Save: the fund goes down. `wh.assoc` cannot set up or replenish the fund.
+119. **Restock override** (`head.auditor`): Restock & Purchase Orders → Generate with a supplier whose items do not need restocking: it says nothing is needed and offers *Order anyway*. Choose *Every item of the supplier* (or *A blank order* and add items): type the order quantity and each branch's share, Save, send to the Owner.
 
 ## Where the files come out
 

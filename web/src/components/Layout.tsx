@@ -37,7 +37,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
     { to: '/expenses', label: 'Expenses', any: ['expense.create.branch', 'expense.create.main', 'expense.view'] },
     { to: '/closing', label: 'Daily Close', any: ['sale.create', 'report.sales.own', 'report.sales.all'], hideFor: ['SALES_MANAGER'] },
     { to: '/cash-on-hand', label: 'Cash on Hand', any: ['cashdeposit.view.all', 'sale.create'], hideFor: ['FRANCHISE_OWNER', 'FRANCHISE_SALES_ASSOCIATE'] },
-    { to: '/cash-fund', label: 'Cash Fund', any: ['cashfund.view.all', 'cashfund.use', 'cashfund.manage', 'cashfund.check'] },
+    { to: '/cash-fund', label: 'Cash Fund', any: ['cashfund.view.all', 'cashfund.use', 'cashfund.manage', 'cashfund.check', 'cashfund.spend'] },
     { to: '/replacements', label: 'Replacement Tickets', any: ['replacement.create', 'replacement.view'] },
     { to: '/marketing-pullouts', label: 'Marketing & BO Pull-outs', any: ['marketing.summary', 'transfer.create'] },
     { to: '/inspections', label: 'Store Inspections', any: ['inspection.create', 'inspection.view', 'inspection.review'] },

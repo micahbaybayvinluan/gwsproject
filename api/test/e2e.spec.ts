@@ -2578,13 +2578,22 @@ describe('Agent field work: outlets, areas, itineraries with photos, consignment
     expect(JSON.stringify((await send(1)).body)).toMatch(/would take the outlet to ₱4,000\.00, over its approved maximum of ₱3,500\.00/); // within the agent's 5,000 but over the outlet's 3,500
   });
 
-  it('the Warehouse Associate (and In-Charge) can record the warehouse\'s expenses; no cash fund at the warehouse', async () => {
+  it('the Warehouse Associate (and In-Charge) can record the warehouse\'s expenses, also from the warehouse cash fund (they spend it, they do not replenish it)', async () => {
     const wh = (await prisma.location.findUniqueOrThrow({ where: { code: 'WH' } })).id;
     for (const u of ['wh.assoc', 'wh.incharge']) {
       const accts = ok(await as(u).get(`/api/expenses/accounts?locationId=${wh}`)).body as { id: string; class: string }[];
       expect(accts.length).toBeGreaterThan(0);
       ok(await as(u).get('/api/expenses'));
-      await as(u).post('/api/expenses').send({ locationId: wh, accountId: accts[0].id, amount: 10, paidFrom: 'PETTY_CASH' }).expect(403);
+    }
+    // the warehouse has a cash fund (₱3,000): the warehouse staff pay expenses from it and see its balance, but cannot set it up or replenish it
+    await as('admin').put(`/api/cash-funds/${wh}`).send({ imprestAmount: 3000 }).expect(200);
+    for (const u of ['wh.assoc', 'wh.incharge']) {
+      const accts = ok(await as(u).get(`/api/expenses/accounts?locationId=${wh}`)).body as { id: string }[];
+      const before = Number(ok(await as(u).get(`/api/cash-funds/${wh}`)).body.balance);
+      ok(await as(u).post('/api/expenses').send({ locationId: wh, accountId: accts[0].id, amount: 100, paidFrom: 'PETTY_CASH' }).expect(201));
+      expect(Number(ok(await as(u).get(`/api/cash-funds/${wh}`)).body.balance)).toBe(before - 100);
+      await as(u).put(`/api/cash-funds/${wh}`).send({ imprestAmount: 9999 }).expect(403);
+      await as(u).post(`/api/cash-funds/${wh}/replenish`).send({}).expect(403);
     }
     // main / office accounts stay with Accounting
     const main = (ok(await as('acct.head').get('/api/expenses/accounts')).body as { id: string }[])[0];
@@ -2657,7 +2666,7 @@ describe('Wheysted members: QR card, counter lookup, portal, stats and campaigns
     expect(d.favorites[0]).toMatchObject({ qty: 4, times: 3 }); expect(d.purchases[0].items.length).toBeGreaterThanOrEqual(1);
     expect(has(d, /unitCost|"cost"/)).toBe(false);
     // a member who never bought; segments; listing
-    const never = ok(await as('sales.westave').post('/api/members').send({ fullName: 'Nina Never', email: `nina${run}@x.test`, birthday: `2000-${today().slice(5, 7)}-15` })).body;
+    const never = ok(await as('sales.westave').post('/api/members').send({ fullName: 'Nina Never', email: `nina${run}@x.test`, birthday: `2000-${today().slice(5, 7)}-${today().slice(8) === '15' ? '16' : '15'}` })).body;
     const list = ok(await as('sales.manager').get('/api/members')).body as { id: string; segments: string[]; orders: number }[];
     expect(list.find((m) => m.id === never.id)!.segments).toEqual(expect.arrayContaining(['NEVER', 'NEW', 'BIRTHDAY']));
     expect((ok(await as('sales.manager').get('/api/members?segment=NEVER')).body as { id: string }[]).map((m) => m.id)).toContain(never.id);
@@ -3183,6 +3192,28 @@ describe('Proofs of payment: required for online, card and cheque; the reports p
     // franchise payments by transfer need proof
     const fp = await prisma.franchiseInvoice.findFirst({ where: { status: { in: ['OPEN', 'PARTIAL'] } } });
     if (fp) { await as('acct.head').post(`/api/franchise-ar/${fp.id}/payments`).send({ amount: 1, mode: 'GCASH', reference: 'G1' }).expect(400); }
+  });
+});
+
+describe('Restock override: an order can be made even when the data says nothing is needed (owner request 2026-10-15)', () => {
+  it('suggested finds nothing; all items lists every item of the supplier at 0; a blank order starts empty; the Head Auditor types the quantities and sends it', async () => {
+    const sup = (await prisma.supplier.create({ data: { code: `SUP-OV${run}`.slice(0, 20), name: `Override Supplier ${run}` } })).id;
+    const cats = ok(await as('admin').get('/api/categories')).body as { id: string; accountingClass: string }[]; const cat = cats.find((c) => c.accountingClass === 'SUPPLEMENT')!.id;
+    const p = ok(await as('admin').post('/api/products').send({ name: `OV A ${run}`, brand: 'X', categoryId: cat, prices: { RETAIL: 1000 }, cost: 500 })).body.id;
+    await prisma.product.update({ where: { id: p }, data: { supplierId: sup } });
+    const gen = async (mode?: string) => ok(await as('head.auditor').post('/api/purchase-orders/generate').send({ supplierIds: [sup], ...(mode ? { mode } : {}) }).expect(201)).body as { created: { id: string }[]; nothingNeeded: boolean };
+    const none = await gen(); expect(none.created.length).toBe(0); expect(none.nothingNeeded).toBe(true);
+    await as('head.auditor').post('/api/purchase-orders/generate').send({ mode: 'ALL_ITEMS' }).expect(400); // the supplier must be chosen
+    await as('sales.westave').post('/api/purchase-orders/generate').send({ supplierIds: [sup], mode: 'ALL_ITEMS' }).expect(403);
+    const all = await gen('ALL_ITEMS'); expect(all.created.length).toBe(1);
+    const po = ok(await as('head.auditor').get(`/api/purchase-orders/${all.created[0].id}`)).body;
+    expect(po.lines.length).toBe(1); expect(po.lines[0].suggestedQty).toBe(0); expect(po.lines[0].rows.length).toBeGreaterThan(1); // every branch can be given a share by hand
+    await as('head.auditor').post(`/api/purchase-orders/${po.id}/submit`).expect(400); // nothing ordered yet
+    ok(await as('head.auditor').put(`/api/purchase-orders/${po.id}`).send({ lines: [{ lineId: po.lines[0].id, orderQty: 60, rows: [{ rowId: po.lines[0].rows[0].id, allocQty: 60 }] }] }));
+    ok(await as('head.auditor').post(`/api/purchase-orders/${po.id}/submit`));
+    // a blank order: items are added by hand and get a row per branch
+    const blank = await gen('BLANK'); const bpo = ok(await as('head.auditor').get(`/api/purchase-orders/${blank.created[0].id}`)).body; expect(bpo.lines.length).toBe(0);
+    const added = ok(await as('head.auditor').post(`/api/purchase-orders/${bpo.id}/lines`).send({ productId: p, orderQty: 25 })).body; expect(added.lines.length).toBe(1); expect(added.lines[0].rows.length).toBeGreaterThan(1);
   });
 });
 

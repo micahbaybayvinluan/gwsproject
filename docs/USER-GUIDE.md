@@ -99,7 +99,7 @@ Each section below starts with a hidden line that says which roles it is for. Th
 2. Choose the account. Only your branch's expense accounts are listed (for example "Meralco - West Ave").
 3. Type the amount and payee, and choose where the money came from: **Cash on hand** (sales cash not yet deposited; it cannot be more than the branch has, a notice pops up) or **Cash fund**.
 4. Save. Your expense gets a number like WA-EX-000001.
-- **Warehouse Associate and In-Charge** also record the warehouse's expenses here. The warehouse has no cash fund, so choose cash on hand, a bank account or an owner advance.
+- **Warehouse Associate and In-Charge** also record the warehouse's expenses here. They may also choose **Cash fund** when Admin has set up a cash fund for the warehouse: the balance is shown beside it, and the expense lowers it. They only spend the fund; those who hold the Cash Fund replenish it. Otherwise choose cash on hand, a bank account or an owner advance.
 - Direct cost accounts are not available to branch staff. Only the Accounting Associate and Accounting Head can use them; direct cost is generated from sales automatically.
 - Cash-drawer expenses reduce the cash for deposit in the Daily Close.
 
@@ -740,6 +740,8 @@ This is how stock is reordered. The **Head Auditor** starts it, the **Owner** de
 7. **Deliveries.** On Supplier Deliveries choose **This delivery is for a purchase order**. The order shows received against ordered (**Partly received** / **Received**) and the branches are told when their goods have arrived so they can pull them out.
 
 **Three printed copies** (buttons on the order): the **supplier copy** (no branches), the **Head Auditor / Owner copy** (every branch with its days left, transfers and shares) and the **warehouse copy** (per branch: what to pull out now from existing stock, and its share when the order arrives). Branches see only their own part, under **Restock Plan**.
+
+**Ordering even when the data says no need.** If the average sales say nothing is needed, **Generate** tells you so and offers **Order anyway**. In the Generate box you can also choose, for the supplier(s) you tick: **Every item of the supplier** (all its items are listed at 0, each branch has a row, and you type the quantity and the share of each branch) or **A blank order** (you add the items yourself with *Add an item*; each added item gets a row for every branch showing its stock now). The suggestions stay as they are; your numbers override them, and the order goes through the same approval.
 
 **Orders and money.** A PO is a plan and a request to the supplier; it books nothing. The supplier's delivery (and its cost, approved by the Head Auditor) is what adds stock and what is owed.
 

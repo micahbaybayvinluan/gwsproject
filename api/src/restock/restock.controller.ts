@@ -6,7 +6,7 @@ import { Z } from '../common/zod.pipe';
 import type { SessionUser } from '../common/request-context';
 import { RestockService } from './restock.service';
 
-const Generate = z.object({ supplierIds: z.array(z.string().uuid()).max(100).optional(), basisDays: z.number().int().min(7).max(180).optional(), coverDays: z.number().int().min(7).max(180).optional(), reserveDays: z.number().int().min(0).max(60).optional(), surplusDays: z.number().int().min(7).max(365).optional() });
+const Generate = z.object({ mode: z.enum(['SUGGESTED', 'ALL_ITEMS', 'BLANK']).optional(), supplierIds: z.array(z.string().uuid()).max(100).optional(), basisDays: z.number().int().min(7).max(180).optional(), coverDays: z.number().int().min(7).max(180).optional(), reserveDays: z.number().int().min(0).max(60).optional(), surplusDays: z.number().int().min(7).max(365).optional() });
 const Update = z.object({ notes: z.string().max(1000).nullable().optional(), expectedOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(), removeLineIds: z.array(z.string().uuid()).max(300).optional(),
   lines: z.array(z.object({ lineId: z.string().uuid(), orderQty: z.number().int().min(0).optional(), note: z.string().max(200).nullable().optional(), rows: z.array(z.object({ rowId: z.string().uuid(), transferQty: z.number().int().min(0).optional(), transferFromId: z.string().uuid().nullable().optional(), allocQty: z.number().int().min(0).optional() })).max(60).optional() })).max(500).optional() });
 const VIEW = ['po.view', 'po.manage'] as const;

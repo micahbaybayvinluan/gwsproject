@@ -98,6 +98,7 @@ export class SalesService implements OnModuleInit {
       await this.expenses.incentiveAccount(locationId, incentive.kind); // clear error before anything is saved
     }
     if (docDate > todayManila()) throw new BadRequestException('Sale date cannot be in the future');
+    if (input.paymentMode === 'AR_PDC' && input.dueDate && toDateOnly(input.dueDate) < docDate) throw new BadRequestException(`The due date (${input.dueDate}) cannot be before the date of the sale (${dateStr(docDate)})`);
     if (!opts.skipClosedCheck && (await this.closing.isClosed(locationId, docDate))) throw new BadRequestException({ message: 'This business day is closed; submit a post-close edit request instead', code: 'DAY_CLOSED' });
     if (!input.lines.length) throw new BadRequestException('At least one line');
     if (!input.drSiNo?.trim()) throw new BadRequestException('DR/SI number is required');

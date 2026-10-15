@@ -311,6 +311,7 @@ Waybill Report → **Choose waybill PDF files** (TikTok or Shopee labels) → pi
 130. **Branch request** (`sales.westave`, then `wh.incharge`): Transfers → Request stock from the warehouse. As `wh.incharge`: Transfers → Requests from the branches → change a quantity → Prepare the pull-out.
 131. **Promo %, internal quantity** (`head.auditor`): Promos → Issue a promo → choose 30% off, type the internal quantity → Issue. Open See promo sales.
 132. **Promo tick** (`sales.westave`): New Sale → add the promo item → the Promo price tick shows; untick it: the normal price returns.
+133. **Interest on unpaid DR goods** (`franchise.coord`, then `acct.head`): New Sale to a franchise on credit with a due date earlier than today: it is refused ("cannot be before the date of the sale"). Make it due today; the next day open Franchise AR (`acct.head`): the DR shows 1 day overdue with 2% penalty and 0.1% interest, and the franchise card shows Total goods AR, Total shipping AR, Total penalty and Total interest AR apart.
 
 ## Where the files come out
 

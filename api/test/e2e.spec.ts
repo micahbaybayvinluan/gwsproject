@@ -226,7 +226,9 @@ describe('Phase 1 flow: receive → approve cost → transfer → confirm → FE
   });
   it('AR/PDC sale, partial payment → credit note, overdue list; daily sales report exports (xlsx + pdf/html) with no cost', async () => {
     const dealer = (ok(await as('sales.westave').get('/api/customers?type=DEALER')).body as { id: string }[])[0];
-    const ar = ok(await as('sales.westave').post('/api/sales').send({ channel: 'DEALER', paymentMode: 'AR_PDC', customerId: dealer.id, drSiNo: `DR-${run}-AR`, dueDate: '2026-01-01', lines: [{ productId, qty: 1 }] })).body;
+    const ar = ok(await as('sales.westave').post('/api/sales').send({ channel: 'DEALER', paymentMode: 'AR_PDC', customerId: dealer.id, drSiNo: `DR-${run}-AR`, dueDate: new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10), lines: [{ productId, qty: 1 }] })).body;
+    await as('sales.westave').post('/api/sales').send({ channel: 'DEALER', paymentMode: 'AR_PDC', customerId: dealer.id, drSiNo: `DR-${run}-ARX`, dueDate: '2026-01-01', lines: [{ productId, qty: 1 }] }).expect(400); // the due date cannot be before the sale date (owner request 2026-10-15)
+    await prisma.salesDoc.update({ where: { id: ar.id }, data: { dueDate: new Date('2026-01-01T00:00:00Z') } }); // a sale entered or edited with an old due date
     expect(ar.lines[0].priceTier).toBe('DEALER'); expect(ar.grandTotal).toBe('1200');
     const list = ok(await as('sales.westave').get(`/api/ar?locationId=${branchId}&overdue=1`)).body as { id: string; daysOverdue: number }[];
     expect(list.find((x) => x.id === ar.id)!.daysOverdue).toBeGreaterThan(0);
@@ -3283,6 +3285,22 @@ describe('Franchise DRs are connected to the franchise: told, check and confirm 
     expect(Number(ar.totals.total)).toBeGreaterThanOrEqual(4300);
     // the franchise's own view of what it owes includes the DR
     const own = ok(await as('fr.mayon.owner').get('/api/franchise-ar')).body.franchises[0]; expect(own.unpaidGoods.some((x: { saleId: string }) => x.saleId === drId)).toBe(true);
+  });
+
+  it('unpaid DR goods earn penalty and interest after the due date (recalculated by itself); the due date cannot be before the sale; Franchise AR shows goods, shipping, penalty and interest apart (owner request 2026-10-15)', async () => {
+    const dayN = (n: number) => new Date(Date.now() + 8 * 3600e3 + n * 86400000).toISOString().slice(0, 10);
+    const bad = await as('franchise.coord').post('/api/sales').send({ locationId: wh, channel: 'FRANCHISE', customerId: fr, paymentMode: 'AR_PDC', dueDate: dayN(-2), drSiNo: `FD-${run}-X`, franchiseShipping: { mode: 'NONE' }, lines: [{ productId: item, qty: 1 }] });
+    expect(bad.status).toBe(400); expect(JSON.stringify(bad.body)).toContain('cannot be before the date of the sale');
+    const row = async () => (ok(await as('acct.head').get('/api/franchise-ar')).body.franchises.find((f: { locationId: string }) => f.locationId === mayon) as { unpaidGoods: { saleId: string; daysOverdue: number; penalty: string; interest: string; balance: string; totalDue: string }[]; totals: Record<string, string> });
+    let f = await row(); let d = f.unpaidGoods.find((x) => x.saleId === drId)!; expect(d.daysOverdue).toBe(0); expect(Number(d.penalty)).toBe(0); expect(Number(d.interest)).toBe(0);
+    const keep = (await prisma.salesDoc.findUniqueOrThrow({ where: { id: drId } })).dueDate;
+    await prisma.salesDoc.update({ where: { id: drId }, data: { dueDate: new Date(`${dayN(-3)}T00:00:00Z`) } }); // as if the sale was entered or edited with a due date three days ago
+    f = await row(); d = f.unpaidGoods.find((x) => x.saleId === drId)!;
+    expect(d.daysOverdue).toBe(3); expect(Number(d.penalty)).toBe(86); expect(Number(d.interest)).toBeCloseTo(12.9, 2); expect(Number(d.totalDue)).toBeCloseTo(4300 + 86 + 12.9, 2);
+    expect(Number(f.totals.goodsAr)).toBeGreaterThanOrEqual(4300); expect(Number(f.totals.interest)).toBeGreaterThanOrEqual(12.9); expect(Number(f.totals.penalty)).toBeGreaterThanOrEqual(86); expect(f.totals).toHaveProperty('shippingAr');
+    expect(Number(f.totals.total)).toBeGreaterThanOrEqual(4300 + 86 + 12.9);
+    await prisma.salesDoc.update({ where: { id: drId }, data: { dueDate: keep } }); // back to the due date it was made with
+    f = await row(); d = f.unpaidGoods.find((x) => x.saleId === drId)!; expect(Number(d.interest)).toBe(0);
   });
 
   it('the franchise reports a problem; the Franchise Coordinator corrects the DR (same number, old one voided, stock follows); the franchise then confirms and its stock goes up', async () => {

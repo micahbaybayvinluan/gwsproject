@@ -428,7 +428,7 @@ You keep the books.
 
 **Proofs of payment:** *Payment Proofs* (Reports) shows the proof of every online, card and cheque payment, AR collection, replacement payment and deposit slip of a branch for a day or period, with the missing ones in red. Print it with the pictures, or read the proofs at the end of the printed Daily Sales Report: each sale has a reference (ON-1, CC-2, CQ-1 …) in its Proof column, and the legend tells the type.
 
-**Franchise AR:** goods delivered on a DR and not yet paid show as **Unpaid goods (DRs)** (click one to open the DR) and are in the franchise total. You can see Franchise DRs.
+**Franchise AR:** each franchise shows Total goods AR, Total shipping AR, Total penalty and Total interest AR apart. Goods delivered on a DR and not yet paid show as **Unpaid goods (DRs)** (click one to open the DR) and earn the 2% penalty and 0.1% daily interest after the due date, by themselves. A due date before the sale date is refused. You can see Franchise DRs.
 
 ## Accounting Associate
 <!-- role: ACCOUNTING_ASSOCIATE -->
@@ -678,7 +678,7 @@ You look after the franchise partners. You never see cost.
 7. **Your password:** press the key icon at the top right. It is personal; never tell it to anyone.
 
 **Franchise availability and orders** (menu: Franchise Orders): (1) *Generate availability* from the warehouse stock → send to the warehouse; (2) the Warehouse In-Charge edits it and sends it back; (3) read it and *Send to the franchises*; (4) each franchise orders its quantities and flavors; (5) open an order → *Make the picklist* → print the PDF → *Send to the warehouse for the final check*; (6) when the warehouse approves, *Make the DR*.
-**Franchise DRs:** every DR for a franchise (from the warehouse or any main branch) is sent to the franchise to confirm. If the franchise reports a problem, open the sale and *Correct this franchise DR* (same number and date). **Franchise AR** now lists *Unpaid goods (DRs)*: click one to open the DR.
+**Franchise DRs:** every DR for a franchise (from the warehouse or any main branch) is sent to the franchise to confirm. If the franchise reports a problem, open the sale and *Correct this franchise DR* (same number and date). **Franchise AR** shows Total goods AR, Total shipping AR, Total penalty and Total interest AR apart, and lists *Unpaid goods (DRs)* with their penalty and interest: click one to open the DR.
 
 ## Asst. Franchise Coordinator
 <!-- role: ASST_FRANCHISE_COORDINATOR -->

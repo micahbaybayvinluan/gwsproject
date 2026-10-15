@@ -155,18 +155,42 @@ export class FranchiseArService implements OnModuleInit {
     const franchises = locs.map((l) => {
       const invoices = rows.filter((r) => r.franchiseLocationId === l.id).map((r) => ({ ...this.view(r, rules, today), pendingExtension: pending.find((x) => x.invoiceId === r.id) ? { requestedDueDate: dateStr(pending.find((x) => x.invoiceId === r.id)!.requestedDueDate) } : null }));
       const sum = (f: (i: (typeof invoices)[number]) => Prisma.Decimal) => invoices.reduce((t, i) => t.plus(f(i)), ZERO);
-      const unpaidGoods = drs.filter((d) => d.franchiseLocationId === l.id); const drTotal = unpaidGoods.reduce((t, d) => t.plus(D(d.balance)), ZERO);
+      const unpaidGoods = drs.filter((d) => d.franchiseLocationId === l.id); const drTotal = unpaidGoods.reduce((t, d) => t.plus(D(d.balance)), ZERO); const drPenalty = unpaidGoods.reduce((t, d) => t.plus(d.penalty), ZERO); const drInterest = unpaidGoods.reduce((t, d) => t.plus(d.interest), ZERO); const drOverdue = unpaidGoods.filter((d) => d.daysOverdue > 0);
       return { locationId: l.id, code: l.code, name: l.name, owner: l.franchiseOwner?.fullName ?? null, creditHold: l.creditHold, creditHoldNote: l.creditHoldNote, invoices, unpaidGoods, unpaidGoodsTotal: drTotal,
-        totals: { goods: sum((i) => D(i.unpaid)), penalty: sum((i) => D(i.penalty).minus(i.penaltyPaid)), interest: sum((i) => D(i.interest).minus(i.interestPaid)), total: sum((i) => D(i.totalDue)).plus(drTotal), unpaidDr: drTotal, overdue: sum((i) => (i.daysOverdue > 0 ? D(i.totalDue) : ZERO)), overdueCount: invoices.filter((i) => i.daysOverdue > 0).length, flagged: invoices.filter((i) => i.twoMonthsOverdue).length } };
+        // the breakdown the owner asked for (2026-10-15): goods AR (invoices for goods + unpaid DRs), shipping AR, penalty and interest (invoices + DRs)
+        totals: { goods: sum((i) => D(i.unpaid)), goodsAr: sum((i) => (i.source === 'SHIPPING' ? ZERO : D(i.unpaid))).plus(drTotal), shippingAr: sum((i) => (i.source === 'SHIPPING' ? D(i.unpaid) : ZERO)), penalty: sum((i) => D(i.penalty).minus(i.penaltyPaid)).plus(drPenalty), interest: sum((i) => D(i.interest).minus(i.interestPaid)).plus(drInterest), drPenalty, drInterest,
+          total: sum((i) => D(i.totalDue)).plus(drTotal).plus(drPenalty).plus(drInterest), unpaidDr: drTotal, overdue: sum((i) => (i.daysOverdue > 0 ? D(i.totalDue) : ZERO)).plus(drOverdue.reduce((t, d) => t.plus(d.totalDue), ZERO)), overdueCount: invoices.filter((i) => i.daysOverdue > 0).length + drOverdue.length, flagged: invoices.filter((i) => i.twoMonthsOverdue).length } };
     });
     return { asOf: dateStr(today), rules, franchises };
   }
-  /** Franchise DRs on credit that still have a balance, per franchise (read across branches: the DR belongs to the sending branch). */
+  /**
+   * Penalty and interest on goods delivered on a DR (owner request 2026-10-15): the same memo rules as an invoice (2% once on the balance of the first overdue day, then 0.1% a day on what is still unpaid),
+   * worked out from the DR's due date and its payments every time, so a changed DR (date, due date, amount) is recalculated by itself and nothing depends on when a job ran.
+   */
+  static drCharges(total: Prisma.Decimal, due: Date | null, paid: { on: Date; amount: Prisma.Decimal }[], rules: Rules, asOf: Date) {
+    const none = { penalty: ZERO, interest: ZERO, daysOverdue: 0 };
+    if (!due) return none;
+    const eff = toDateOnly(rules.effectiveFrom); const day1 = addDays(toDateOnly(due), 1); const first = day1 > eff ? day1 : eff;
+    const unpaidOn = (x: Date) => { const v = total.minus(paid.filter((q) => toDateOnly(q.on) < x).reduce((t, q) => t.plus(q.amount), ZERO)); return v.gt(0) ? v : ZERO; };
+    const daysOverdue = Math.max(0, daysBetween(toDateOnly(due), asOf));
+    if (asOf < first) return { ...none, daysOverdue };
+    let interest = ZERO;
+    for (let x = first; x <= asOf; x = addDays(x, 1)) { const u = unpaidOn(x); if (u.lte(0)) break; interest = interest.plus(u.mul(rules.dailyPct).div(100)); }
+    return { penalty: r2(unpaidOn(first).mul(rules.penaltyPct).div(100)), interest: r2(interest), daysOverdue };
+  }
+  /** Franchise DRs on credit that still have a balance, per franchise (read across branches: the DR belongs to the sending branch), with the penalty and interest they have earned. */
   async unpaidDrs(franchiseIds: string[], today: Date) {
     if (!franchiseIds.length) return [];
     const docs = await requestContext.runSystem(async () => await this.prisma.db.salesDoc.findMany({ where: { channel: 'FRANCHISE', paymentMode: 'AR_PDC', voidedAt: null, customer: { locationId: { in: franchiseIds } } }, include: { customer: { select: { locationId: true } }, location: { select: { name: true } } }, orderBy: { dueDate: 'asc' } }));
-    const receipts = await this.prisma.db.franchiseDrReceipt.findMany({ where: { salesDocId: { in: docs.map((d) => d.id) } }, select: { salesDocId: true, status: true } });
-    return docs.map((d) => ({ saleId: d.id, franchiseLocationId: d.customer!.locationId!, drSiNo: d.drSiNo, docDate: dateStr(d.docDate), dueDate: d.dueDate ? dateStr(d.dueDate) : null, amount: d.grandTotal, paid: d.amountPaid, balance: d.grandTotal.minus(d.amountPaid), from: d.location.name, daysOverdue: d.dueDate && d.dueDate < today ? daysBetween(d.dueDate, today) : 0, receipt: receipts.find((r) => r.salesDocId === d.id)?.status ?? null })).filter((d) => d.balance.gt(0));
+    const ids = docs.map((d) => d.id);
+    const receipts = await this.prisma.db.franchiseDrReceipt.findMany({ where: { salesDocId: { in: ids } }, select: { salesDocId: true, status: true } });
+    const allocs = await requestContext.runSystem(async () => await this.prisma.db.paymentAllocation.findMany({ where: { salesDocId: { in: ids }, payment: { voidedAt: null } }, select: { salesDocId: true, amount: true, payment: { select: { receivedAt: true } } } }));
+    const rules = await this.rules();
+    return docs.map((d) => {
+      const c = FranchiseArService.drCharges(d.grandTotal, d.dueDate, allocs.filter((a) => a.salesDocId === d.id).map((a) => ({ on: a.payment.receivedAt, amount: a.amount })), rules, today);
+      const balance = d.grandTotal.minus(d.amountPaid); const overdue = balance.gt(0) ? c : { penalty: ZERO, interest: ZERO, daysOverdue: 0 };
+      return { saleId: d.id, franchiseLocationId: d.customer!.locationId!, drSiNo: d.drSiNo, docDate: dateStr(d.docDate), dueDate: d.dueDate ? dateStr(d.dueDate) : null, amount: d.grandTotal, paid: d.amountPaid, balance, penalty: overdue.penalty, interest: overdue.interest, chargesDue: overdue.penalty.plus(overdue.interest), totalDue: balance.plus(overdue.penalty).plus(overdue.interest), from: d.location.name, daysOverdue: overdue.daysOverdue, receipt: receipts.find((r) => r.salesDocId === d.id)?.status ?? null };
+    }).filter((d) => d.balance.gt(0));
   }
   /** What one franchise owes GWS today (for the portal and the franchise balance sheet). */
   async summary(locationId: string) {
@@ -174,8 +198,8 @@ export class FranchiseArService implements OnModuleInit {
     const rows = await this.prisma.db.franchiseInvoice.findMany({ where: { franchiseLocationId: locationId, status: 'OPEN' }, orderBy: { dueDate: 'asc' } });
     let goods = ZERO, charges = ZERO, overdue = ZERO, overdueCount = 0, flagged = 0; let nextDue: string | null = null;
     for (const r of rows) { const p = FranchiseArService.project(r, rules, today); goods = goods.plus(p.unpaid); charges = charges.plus(p.chargesDue); if (p.daysOverdue > 0) { overdue = overdue.plus(p.totalDue); overdueCount++; } else if (!nextDue && p.unpaid.gt(0)) nextDue = dateStr(r.dueDate); if (p.daysOverdue >= rules.flagDays) flagged++; }
-    const dr = await this.unpaidDrs([locationId], todayManila()); const drTotal = dr.reduce((t, d) => t.plus(d.balance), ZERO); const drOver = dr.filter((d) => d.daysOverdue > 0).reduce((t, d) => t.plus(d.balance), ZERO);
-    return { goods, charges, unpaidDr: drTotal, total: goods.plus(charges).plus(drTotal), overdue: overdue.plus(drOver), overdueCount: overdueCount + dr.filter((d) => d.daysOverdue > 0).length, flagged, nextDue, invoices: rows.length };
+    const dr = await this.unpaidDrs([locationId], todayManila()); const drTotal = dr.reduce((t, d) => t.plus(d.balance), ZERO); const drCharges = dr.reduce((t, d) => t.plus(d.chargesDue), ZERO); const drOver = dr.filter((d) => d.daysOverdue > 0).reduce((t, d) => t.plus(d.totalDue), ZERO);
+    return { goods, charges: charges.plus(drCharges), unpaidDr: drTotal, total: goods.plus(charges).plus(drTotal).plus(drCharges), overdue: overdue.plus(drOver), overdueCount: overdueCount + dr.filter((d) => d.daysOverdue > 0).length, flagged, nextDue, invoices: rows.length };
   }
   async get(user: SessionUser, id: string) {
     const inv = await this.prisma.db.franchiseInvoice.findUnique({ where: { id }, include: { payments: { where: { voidedAt: null }, orderBy: { paidOn: 'asc' } }, adjustments: { orderBy: { createdAt: 'asc' } }, extensions: { orderBy: { createdAt: 'desc' } } } });

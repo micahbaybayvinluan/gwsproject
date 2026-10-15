@@ -765,9 +765,12 @@ Every DR made for a franchise by **any main branch or the warehouse** (not only 
 - **Franchise Coordinator: correct the DR.** Open the sale → **Correct this franchise DR**: change quantities, flavors or prices. The DR keeps its **number and date**, the old one is voided, stock and AR follow, and the franchise checks the corrected DR again. A DR the franchise has already received cannot be edited: the franchise reports the problem first.
 Head office (Admin, auditors, Accounting) sees every franchise DR; a franchise sees its own only.
 
-## Franchise AR: Unpaid goods and the DRs behind them
+## Franchise AR: Unpaid goods, shipping, penalty and interest
 <!-- for: franchise.ar.view -->
-Goods delivered to a franchise on a DR and not yet paid now show in **Franchise AR** as **Unpaid goods (DRs)**, per franchise, with the amount still owed. Click a DR to open it. They are included in the franchise's total owed (invoices + unpaid goods). The penalty and interest rules still apply to invoices only, not to DR goods. The franchise sees the same under its own Franchise AR.
+Each franchise on **Franchise AR** shows its balance **apart**: **Total goods AR** (invoices for goods + goods delivered on a DR and not paid yet), **Total shipping AR**, **Total penalty (2%)**, **Total interest AR** and the **Total due** (all four added). The **Unpaid goods (DRs)** table lists each DR with its due date, balance, penalty, interest and total; click a DR to open it. The franchise sees the same under its own Franchise AR.
+- **A DR on credit earns penalty and interest like an invoice.** From the day after its due date: **2% once** on the unpaid balance, then **0.1% a day** on what is still unpaid. They are worked out again every day from the due date and the payments, so you never have to run anything: if a sale is edited (date, due date, amount) the interest follows by itself.
+- **The due date cannot be before the date of the sale.** New Sale refuses it (and the date box starts at today). A DR whose due date has passed shows "x d overdue" with its penalty and interest.
+- Payments on a DR are recorded under **AR & Collections** and lower the balance; interest stops growing on the part that is paid.
 
 ## Branch requests to the warehouse
 <!-- for: transfer.create -->

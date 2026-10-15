@@ -6,7 +6,9 @@ import { FranchiseService } from './franchise.service';
 import { FranchiseArController } from './franchise-ar.controller';
 import { FranchiseArService } from './franchise-ar.service';
 import { FranchiseShippingService } from './franchise-shipping.service';
+import { FranchiseDrService } from './franchise-dr.service';
+import { FranchiseDrController } from './franchise-dr.controller';
 
 @Global()
-@Module({ imports: [MasterModule, GlModule], providers: [FranchiseService, FranchiseArService, FranchiseShippingService], controllers: [FranchiseController, FranchiseArController], exports: [FranchiseArService, FranchiseShippingService] })
+@Module({ imports: [MasterModule, GlModule], providers: [FranchiseService, FranchiseArService, FranchiseShippingService, FranchiseDrService], controllers: [FranchiseController, FranchiseArController, FranchiseDrController], exports: [FranchiseArService, FranchiseShippingService, FranchiseDrService] })
 export class FranchiseModule {}

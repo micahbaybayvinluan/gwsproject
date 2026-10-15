@@ -1,4 +1,6 @@
 import { PaymentProofsPage } from './pages/PaymentProofs';
+import { FranchiseDrsPage } from './pages/FranchiseDrs';
+import { AvailabilityPage, FranchiseOrderPage, FranchiseOrdersPage } from './pages/FranchiseOrders';
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -115,6 +117,10 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
               <Route path="/purchase-orders" element={<PurchaseOrdersPage />} />
               <Route path="/purchase-orders/:id" element={<PurchaseOrderPage />} />
               <Route path="/restock-plan" element={<RestockPlanPage />} />
+              <Route path="/franchise-drs" element={<FranchiseDrsPage />} />
+              <Route path="/franchise-orders" element={<FranchiseOrdersPage />} />
+              <Route path="/franchise-orders/availability/:id" element={<AvailabilityPage />} />
+              <Route path="/franchise-orders/order/:id" element={<FranchiseOrderPage />} />
               <Route path="/outlets" element={<OutletsPage />} />
               <Route path="/itinerary" element={<ItineraryPage />} />
               <Route path="/field" element={<FieldMonitorPage />} />

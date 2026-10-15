@@ -298,6 +298,19 @@ Waybill Report → **Choose waybill PDF files** (TikTok or Shopee labels) → pi
 117. **Payment Proofs** (`acct.head`): Reports → Payment Proofs → choose a branch and the dates → tick types, tick *Only missing proofs*, switch to *Checklist*, press *Print with the pictures (PDF)* and *Excel*.
 118. **Warehouse pays from its cash fund** (`admin`, then `wh.assoc`): as `admin` open Cash Fund and set the Warehouse fund to ₱3,000 if it is not set. As `wh.assoc` open Expenses → choose an account → Paid from *Cash fund*: the balance shows beside it. Save: the fund goes down. `wh.assoc` cannot set up or replenish the fund.
 119. **Restock override** (`head.auditor`): Restock & Purchase Orders → Generate with a supplier whose items do not need restocking: it says nothing is needed and offers *Order anyway*. Choose *Every item of the supplier* (or *A blank order* and add items): type the order quantity and each branch's share, Save, send to the Owner.
+120. **Generate availability** (`franchise.coord`): Franchise Orders → Generate availability → the warehouse products with flavors are listed → Send to the warehouse.
+121. **Warehouse edits** (`wh.incharge`): Franchise Orders → open it → change the Offer quantity and flavors, remove one item → Send to the Franchise Coordinator. Try an Offer larger than the stock: it is refused.
+122. **Send to the franchises** (`franchise.coord`): open it → tick Mayon → Send to the franchises.
+123. **Franchise orders** (`fr.mayon.owner`): Notifications → the availability → type I order and choose flavors → Send my order. Ordering more than offered is refused.
+124. **Picklist** (`franchise.coord`): open the order → Make the picklist → Print the picklist (PDF) → Send to the warehouse for the final check.
+125. **Final check and DR** (`wh.incharge`, then `franchise.coord`): Approve the check; then Make the DR (on credit with a due date).
+126. **Franchise DRs** (`fr.mayon.owner`): Franchise DRs → the new DR → Report a problem with a note (or Confirm receipt: the franchise's stock goes up).
+127. **Correct the DR** (`franchise.coord`): Sales → the DR → Correct this franchise DR → change a quantity → Save. Same DR number; the franchise confirms again.
+128. **Any branch DR notifies the franchise** (`sales.westave`): New Sale to Mayon (a franchise customer) → the franchise owner is notified and sees it under Franchise DRs.
+129. **Unpaid goods in Franchise AR** (`acct.head`): Franchise AR → Mayon → Unpaid goods (DRs) → click a DR to open it.
+130. **Branch request** (`sales.westave`, then `wh.incharge`): Transfers → Request stock from the warehouse. As `wh.incharge`: Transfers → Requests from the branches → change a quantity → Prepare the pull-out.
+131. **Promo %, internal quantity** (`head.auditor`): Promos → Issue a promo → choose 30% off, type the internal quantity → Issue. Open See promo sales.
+132. **Promo tick** (`sales.westave`): New Sale → add the promo item → the Promo price tick shows; untick it: the normal price returns.
 
 ## Where the files come out
 

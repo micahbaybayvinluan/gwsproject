@@ -1,3 +1,4 @@
+import { BranchRequestsCard, MyStockRequests } from '@/components/BranchRequests';
 import { BatchChooser, batchText, loadBatches, type BatchOpt } from '@/components/BatchPicker';
 import { locLabel } from '@/lib/utils';
 import { ApprovalTimeline } from '@/components/ApprovalTimeline';
@@ -70,6 +71,7 @@ export function TransfersPage() {
   return <div className="space-y-4">
     <div className="flex flex-wrap items-end gap-2"><h1 className="mr-auto text-2xl font-bold tracking-tight text-navy">Transfers & Pull-outs</h1><Field label="View"><Select value={direction} onChange={(e) => setDirection(e.target.value)}><option value="">All</option><option value="out">Outgoing (Pull-Out)</option><option value="in">Incoming (Transfer-In)</option></Select></Field><BranchTicks locations={(locations.data ?? []).filter((l) => l.type !== 'VIRTUAL' && !(me!.locationScoped && me!.locations.length === 1 && me!.locations[0].id === l.id))} value={ticked} onChange={setTicked} /></div>
     {me!.locationScoped && !warehouseUser && (can('transfer.confirm') || can('transfer.create')) && <StockRequestCard />}
+    {(warehouseUser || me!.roleKey === 'ADMIN') && can('transfer.create') && <BranchRequestsCard />}
     {can('transfer.create') && <Card title={warehouseUser ? 'Send stock from the warehouse (to a branch, franchise or consignee)' : me!.locationScoped ? `Pull-out from ${own?.name ?? 'my branch'} (return to warehouse or send to another branch)` : 'New transfer'}>
       <div className="grid gap-3 md:grid-cols-4">
         <Field label="From">{me!.locationScoped ? <div className="flex min-h-9 items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm font-medium" data-testid="from-fixed">{own?.name ?? '—'}</div> : <Select value={from} onChange={(e) => setF({ ...f, fromLocationId: e.target.value })}><option value="">—</option>{locations.data?.map((l) => <option key={l.id} value={l.id}>{locLabel(l)}</option>)}</Select>}</Field>
@@ -149,16 +151,17 @@ export function TransferDetailPage() {
 
 /** Branch staff ask the warehouse for stock; the warehouse prepares the transfer and the branch only receives it (owner request 2026-09-26). */
 function StockRequestCard() {
+  const qc = useQueryClient();
   const [items, setItems] = useState<{ productId: string; name: string; qty: number }[]>([]); const [search, setSearch] = useState(''); const [notes, setNotes] = useState('');
   const products = useQuery({ queryKey: ['products', search], queryFn: () => api.get<{ id: string; name: string; sku: string }[]>(`/api/products?search=${encodeURIComponent(search)}&take=20`), enabled: search.length >= 2 });
-  const m = useMutation({ mutationFn: () => api.post<{ items: string }>('/api/transfers/request-stock', { items: items.map((i) => ({ productId: i.productId, qty: i.qty })), notes: notes || undefined }), onSuccess: () => { setItems([]); setNotes(''); } });
+  const m = useMutation({ mutationFn: () => api.post<{ items: string }>('/api/transfers/request-stock', { items: items.map((i) => ({ productId: i.productId, qty: i.qty })), notes: notes || undefined }), onSuccess: () => { setItems([]); setNotes(''); void qc.invalidateQueries({ queryKey: ['stock-requests'] }); } });
   return <Card title="Request stock from the warehouse">
     <p className="mb-2 text-sm text-slate-600">The warehouse is notified and prepares the transfer. You do not make a form: the Transfer-In copy appears under Incoming for you to check and receive.</p>
     <Input placeholder="Add product…" value={search} onChange={(e) => setSearch(e.target.value)} />{search.length >= 2 && <ul className="max-h-48 divide-y overflow-auto rounded border bg-white">{products.data?.map((p) => <li key={p.id}><button className="w-full px-3 py-2 text-left text-sm hover:bg-slate-50" onClick={() => { setItems([...items, { productId: p.id, name: p.name, qty: 1 }]); setSearch(''); }}>{p.name} <span className="text-xs text-slate-500">{p.sku}</span></button></li>)}</ul>}
     {items.length > 0 && <table className="mt-2 w-full text-sm"><tbody>{items.map((l, i) => <tr key={i} className="border-t"><td>{l.name}</td><td><Input type="number" min={1} className="w-24" value={l.qty} onChange={(e) => setItems(items.map((x, k) => (k === i ? { ...x, qty: Number(e.target.value) } : x)))} /></td><td><button className="text-red-600" onClick={() => setItems(items.filter((_, k) => k !== i))}>✕</button></td></tr>)}</tbody></table>}
     <Field label="Notes" className="mt-2"><Input value={notes} onChange={(e) => setNotes(e.target.value)} /></Field>
     <Button className="mt-2" disabled={!items.length || items.some((i) => !(i.qty > 0)) || m.isPending} onClick={() => m.mutate()}>Send request to the warehouse</Button>
-    {m.isSuccess && <p className="mt-2 text-sm text-emerald-700">Request sent: {m.data.items}</p>}<ErrorBox error={m.error} />
+    {m.isSuccess && <p className="mt-2 text-sm text-emerald-700">Request sent: {m.data.items}</p>}<ErrorBox error={m.error} /><MyStockRequests />
   </Card>;
 }
 

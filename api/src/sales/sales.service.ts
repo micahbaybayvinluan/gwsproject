@@ -23,10 +23,11 @@ import { OutletsService } from '../agents/outlets.service';
 import { MonitorService } from '../agents/monitor.service';
 import { CustomerFollowUpsService } from './customer-followups.service';
 import { FranchiseShippingService } from '../franchise/franchise-shipping.service';
+import { FranchiseDrService } from '../franchise/franchise-dr.service';
 import { LoyaltyService } from '../members/loyalty.service';
 import { PromosService } from '../promos/promos.service';
 
-export interface SalesLineInput { productId: string; qty: number; unitPrice?: number | null; batchId?: string | null; exactBatch?: boolean; isFreebie?: boolean; lineRemarks?: string; priceTier?: string }
+export interface SalesLineInput { productId: string; qty: number; unitPrice?: number | null; batchId?: string | null; exactBatch?: boolean; isFreebie?: boolean; lineRemarks?: string; priceTier?: string; /** ticked by the associate: sold at the promo price (counted against the promo, owner request 2026-10-15); false = not a promo sale */ promo?: boolean | null }
 export interface SalesInput {
   locationId?: string; docDate?: string; channel: SalesChannel; channelSub?: string | null; customerId?: string | null; agentId?: string | null; outletId?: string | null; memberId?: string | null; voucherCode?: string | null; riderId?: string | null; customerName?: string | null; customerPhone?: string | null; customerEmail?: string | null; drSiNo: string;
   paymentMode: PaymentMode; paymentAccountId?: string | null; proofOfPaymentAttachmentId?: string | null; cardMid?: string; cardSlipNo?: string; cardApprovalCode?: string; cardBatchNo?: string;
@@ -40,7 +41,7 @@ export const TIER_BY_CHANNEL: Record<SalesChannel, string> = { WALK_IN: 'RETAIL'
 /** §8 Sales module: entry (all channels/modes), agents, AR/PDC, payments, credit notes. Stock is deducted on save (FEFO). */
 @Injectable()
 export class SalesService implements OnModuleInit {
-  constructor(private prisma: PrismaService, private seq: SequenceService, private stock: StockService, private approvals: ApprovalsService, private master: MasterService, private notify: NotificationsService, private audit: AuditService, private settings: SettingsService, private attachments: AttachmentsService, private posting: PostingService, private closing: ClosingService, private scope: ScopeService, private expenses: ExpensesService, private followUps: CustomerFollowUpsService, private outlets: OutletsService, private agentMonitor: MonitorService, private sixPack: SixPackService, private franchiseShipping: FranchiseShippingService, private loyalty: LoyaltyService, private promos: PromosService) {}
+  constructor(private prisma: PrismaService, private seq: SequenceService, private stock: StockService, private approvals: ApprovalsService, private master: MasterService, private notify: NotificationsService, private audit: AuditService, private settings: SettingsService, private attachments: AttachmentsService, private posting: PostingService, private closing: ClosingService, private scope: ScopeService, private expenses: ExpensesService, private followUps: CustomerFollowUpsService, private outlets: OutletsService, private agentMonitor: MonitorService, private sixPack: SixPackService, private franchiseShipping: FranchiseShippingService, private loyalty: LoyaltyService, private promos: PromosService, private franchiseDr: FranchiseDrService) {}
 
   onModuleInit() {
     this.approvals.register('SPECIAL_PRICE', (req, outcome) => this.onSpecialPriceDecision(req.documentId, outcome));
@@ -60,7 +61,7 @@ export class SalesService implements OnModuleInit {
     return { ...doc, attachments: await this.attachments.list('SalesDoc', id), balance: doc.grandTotal.minus(doc.amountPaid) };
   }
 
-  async create(input: SalesInput, user: SessionUser) {
+  async create(input: SalesInput, user: SessionUser, opts: { skipClosedCheck?: boolean; amendedFrom?: string } = {}) {
     const locationId = input.locationId ?? user.locationIds[0];
     if (!locationId) throw new BadRequestException('locationId required');
     if (user.locationScoped && !user.locationIds.includes(locationId)) throw new ForbiddenException('Outside your branch');
@@ -97,7 +98,7 @@ export class SalesService implements OnModuleInit {
       await this.expenses.incentiveAccount(locationId, incentive.kind); // clear error before anything is saved
     }
     if (docDate > todayManila()) throw new BadRequestException('Sale date cannot be in the future');
-    if (await this.closing.isClosed(locationId, docDate)) throw new BadRequestException({ message: 'This business day is closed; submit a post-close edit request instead', code: 'DAY_CLOSED' });
+    if (!opts.skipClosedCheck && (await this.closing.isClosed(locationId, docDate))) throw new BadRequestException({ message: 'This business day is closed; submit a post-close edit request instead', code: 'DAY_CLOSED' });
     if (!input.lines.length) throw new BadRequestException('At least one line');
     if (!input.drSiNo?.trim()) throw new BadRequestException('DR/SI number is required');
     if (await this.prisma.db.salesDoc.findUnique({ where: { locationId_drSiNo: { locationId, drSiNo: input.drSiNo.trim() } } })) throw new BadRequestException({ message: `DR/SI ${input.drSiNo.trim()} already exists at this branch (one SalesDoc per DR/SI)`, code: 'DUPLICATE_DR' });
@@ -117,6 +118,8 @@ export class SalesService implements OnModuleInit {
     // promos the Owner or Head Auditor issued (owner request 2026-10-07): a promo price applies by itself while it runs
     const branchPromo = franchiseUserOf(user) ? new Map<string, Prisma.Decimal>() : await this.promos.activePrices(docDate, 'BRANCHES');
     const franchisePromo = franchiseUserOf(user) ? new Map<string, Prisma.Decimal>() : await this.promos.activePrices(docDate, 'FRANCHISES');
+    const branchPromoIds = franchiseUserOf(user) ? new Map<string, string>() : await this.promos.activePromoIds(docDate, 'BRANCHES');
+    const franchisePromoIds = franchiseUserOf(user) ? new Map<string, string>() : await this.promos.activePromoIds(docDate, 'FRANCHISES');
     const voucherLines: Prisma.SalesLineUncheckedCreateWithoutDocInput[] = [];
     let voucherDiscount = ZERO;
 
@@ -136,7 +139,15 @@ export class SalesService implements OnModuleInit {
         const tierPrice = classFree ? ZERO : tier === 'FRANCHISE' || !isPlastic ? D(await this.master.priceFor(product.id, tier, docDate, tx)) : ZERO;
         let unitPrice = classFree ? ZERO : l.unitPrice != null ? D(l.unitPrice) : tierPrice;
         let memberBacked = false;
-        if (!classFree && l.unitPrice == null && !franchiseUser) { const a = this.autoPriceFor(product.id, tier, tierPrice, { offers, branchPromo, franchisePromo, franchiseLoc: loc.type === 'FRANCHISE' }); if (a) { unitPrice = a.price; memberBacked = true; } }
+        const promoIds = tier === 'RETAIL' && loc.type !== 'FRANCHISE' ? branchPromoIds : tier === 'FRANCHISE' ? franchisePromoIds : new Map<string, string>();
+        if (l.promo === true && !classFree && !promoIds.has(product.id)) throw new BadRequestException(`No promo is running for ${product.name}: untick "promo price"`);
+        let promoId: string | null = null; let promoTicked = false;
+        if (!classFree && l.unitPrice == null && !franchiseUser) {
+          // unticked "promo price" = the customer is not given the promo: only a member price can apply
+          const a = this.autoPriceFor(product.id, tier, tierPrice, { offers, branchPromo: l.promo === false ? new Map() : branchPromo, franchisePromo: l.promo === false ? new Map() : franchisePromo, franchiseLoc: loc.type === 'FRANCHISE' });
+          if (a) { unitPrice = a.price; memberBacked = true; if (a.source === 'PROMO') { promoTicked = true; promoId = promoIds.get(product.id) ?? null; } }
+        }
+        if (l.promo === true && !classFree) { promoTicked = true; promoId = promoIds.get(product.id) ?? promoId; }
         const isFreebie = classFree || (isPlastic && unitPrice.isZero());
         if (!isFreebie && product.category.accountingClass === 'SUPPLEMENT') supplementUnits += l.qty;
         if (franchiseUser && l.unitPrice != null && !unitPrice.equals(tierPrice)) {
@@ -158,7 +169,7 @@ export class SalesService implements OnModuleInit {
             const lineQty = product.isBundle ? (first ? l.qty : 0) : p.qty;
             const amount = round2(unitPrice.mul(lineQty));
             // for bundles: the sale line records the bundle product once; component picks record cost with qty 0 price
-            lineRows.push({ productId: product.isBundle ? product.id : c.productId, batchId: p.batchId, qty: product.isBundle ? (first ? l.qty : p.qty) : p.qty, priceTier: tier, tierPrice: tierPrice.toFixed(2), unitPrice: unitPrice.toFixed(2), unitCost: p.unitCost, amount: amount.toFixed(2), isFreebie, lineRemarks: l.lineRemarks, nearExpiryWarn: near, specialPriceFlag: flag });
+            lineRows.push({ promoTicked, promoId, productId: product.isBundle ? product.id : c.productId, batchId: p.batchId, qty: product.isBundle ? (first ? l.qty : p.qty) : p.qty, priceTier: tier, tierPrice: tierPrice.toFixed(2), unitPrice: unitPrice.toFixed(2), unitCost: p.unitCost, amount: amount.toFixed(2), isFreebie, lineRemarks: l.lineRemarks, nearExpiryWarn: near, specialPriceFlag: flag });
             productTotal = productTotal.plus(amount);
             if (voucher && !isFreebie && product.category.accountingClass === 'SUPPLEMENT' && amount.gt(0)) voucherLines.push(lineRows[lineRows.length - 1]!);
             await this.stock.post(tx, [{ locationId, productId: c.productId, batchId: p.batchId, qtyDelta: -p.qty, movementType: isFreebie ? 'FREEBIE_ISSUE' : 'SALE', documentType: 'SalesDoc', documentId: controlNo /* replaced below */, unitCost: p.unitCost, businessDate: docDate, createdBy: user.id }]);
@@ -226,7 +237,43 @@ export class SalesService implements OnModuleInit {
     if (input.memberId) await this.loyalty.onFirstPurchase(input.memberId).catch(() => undefined);
     // shipping charged to the franchise: "to follow" for the Franchise Coordinator, or typed now; either way its own receivable, separate from the order
     if (ship) await this.franchiseShipping.createForSale({ id: doc.id, controlNo: doc.controlNo, drSiNo: doc.drSiNo, locationId }, franchiseCustomer!.locationId!, { mode: ship.mode as 'TO_FOLLOW' | 'AMOUNT', amount: ship.amount, courier: ship.courier, reference: ship.reference }, user);
+    // a DR for a franchise (owner request 2026-10-15): the franchise is told and confirms receipt; a corrected DR replaces the old one
+    if (franchiseCustomer?.locationId && loc.type !== 'FRANCHISE' && input.channel === 'FRANCHISE') {
+      const brief = { id: doc.id, drSiNo: doc.drSiNo, locationId, grandTotal: doc.grandTotal, paymentMode: doc.paymentMode, dueDate: doc.dueDate };
+      if (opts.amendedFrom) await this.franchiseDr.onAmended(opts.amendedFrom, brief, franchiseCustomer.locationId, user); else await this.franchiseDr.onSale(brief, franchiseCustomer.locationId, user);
+    }
     return this.get(doc.id, user);
+  }
+
+  /**
+   * Correct a franchise DR that has a mistake or changed (owner request 2026-10-15): the Franchise Coordinators replace its items, prices, due date or notes while the franchise has not yet received it.
+   * The corrected DR keeps the DR number and date; the old one is voided (stock and journal reversed), its shipping charge moves over, the franchise is told and checks it again.
+   */
+  async amendFranchiseDr(id: string, input: { lines: SalesLineInput[]; notes?: string | null; dueDate?: string | null }, user: SessionUser) {
+    if (!user.permissions.has('franchise.dr.edit')) throw new ForbiddenException('Only the Franchise Coordinators edit a franchise DR');
+    const old = await requestContext.runSystem(() => this.get(id, user));
+    if (old.voidedAt) throw new BadRequestException('This DR was voided');
+    if (old.channel !== 'FRANCHISE' || !old.customerId) throw new BadRequestException('Only a DR made for a franchise is edited here');
+    if (D(old.amountPaid).gt(0) && old.paymentMode === 'AR_PDC') throw new BadRequestException('A payment has been recorded on this DR; void the payment first');
+    if (!input.lines.length) throw new BadRequestException('At least one item');
+    await this.franchiseDr.assertEditable(id);
+    const base: SalesInput = { locationId: old.locationId, docDate: dateStr(old.docDate), channel: 'FRANCHISE', channelSub: old.channelSub, customerId: old.customerId, drSiNo: old.drSiNo, paymentMode: old.paymentMode, paymentAccountId: old.paymentAccountId, proofOfPaymentAttachmentId: old.proofOfPaymentAttachmentId, deliveryFee: Number(old.deliveryFee), shippingFee: Number(old.shippingFee), pdcBank: old.pdcBank ?? undefined, pdcChequeNo: old.pdcChequeNo ?? undefined, pdcDate: old.pdcDate ? dateStr(old.pdcDate) : null, dueDate: old.dueDate ? dateStr(old.dueDate) : null, notes: old.notes ?? undefined, lines: [] };
+    const restore: SalesInput = { ...base, lines: old.lines.filter((l) => l.qty > 0).map((l) => ({ productId: l.productId, qty: l.qty, unitPrice: Number(l.unitPrice), batchId: l.batchId, exactBatch: true, isFreebie: l.isFreebie, priceTier: l.priceTier })) };
+    const oldTotal = D(old.grandTotal);
+    // free the DR number for the corrected DR, then void the old one; if the corrected one cannot be saved the original is put back
+    await this.prisma.db.salesDoc.update({ where: { id }, data: { drSiNo: `${old.drSiNo}~V${Date.now().toString(36)}` } });
+    const putBack = async () => { await this.prisma.db.salesDoc.update({ where: { id }, data: { drSiNo: old.drSiNo } }).catch(() => undefined); };
+    try { await this.void(id, `Corrected by ${user.fullName}`, user, { skipClosedCheck: true }); } catch (e) { await putBack(); throw e; }
+    let created;
+    try {
+      created = await this.create({ ...base, notes: input.notes === undefined ? base.notes : input.notes ?? undefined, dueDate: input.dueDate === undefined ? base.dueDate : input.dueDate, lines: input.lines }, user, { skipClosedCheck: true, amendedFrom: id });
+    } catch (e) {
+      try { await this.create(restore, user, { skipClosedCheck: true, amendedFrom: id }); } catch { /* the original could not be put back either: the voided DR stays for the auditors */ }
+      throw e;
+    }
+    await this.prisma.db.franchiseShippingCharge.updateMany({ where: { salesDocId: id }, data: { salesDocId: created.id } });
+    await this.audit.log({ action: 'FRANCHISE_DR_AMENDED', entityType: 'SalesDoc', entityId: created.id, before: { id, total: oldTotal.toFixed(2) }, after: { total: D(created.grandTotal).toFixed(2) } });
+    return created;
   }
 
   /** The price that applies by itself for an item (a member price or a running promo), when it is lower than the list price. The lowest wins. */
@@ -246,10 +293,12 @@ export class SalesService implements OnModuleInit {
     const loc = await this.prisma.db.location.findUniqueOrThrow({ where: { id: locationId }, select: { type: true } });
     const date = i.docDate ? toDateOnly(i.docDate) : todayManila();
     const ctx = { offers: i.memberId ? await this.loyalty.offerPrices(date) : new Map<string, Prisma.Decimal>(), branchPromo: await this.promos.activePrices(date, 'BRANCHES'), franchisePromo: await this.promos.activePrices(date, 'FRANCHISES'), franchiseLoc: loc.type === 'FRANCHISE' };
-    const out: Record<string, { price: number; listPrice: number; source: 'MEMBER' | 'PROMO' }> = {};
+    const out: Record<string, { price: number; listPrice: number; source: 'MEMBER' | 'PROMO' | null; promoRunning: boolean }> = {};
+    const promoMap = i.tier === 'RETAIL' && !ctx.franchiseLoc ? ctx.branchPromo : i.tier === 'FRANCHISE' ? ctx.franchisePromo : new Map<string, Prisma.Decimal>();
     for (const pid of [...new Set(i.productIds)].slice(0, 100)) {
       const lp = await this.master.priceFor(pid, i.tier, date); if (lp == null) continue;
-      const a = this.autoPriceFor(pid, i.tier, D(lp), ctx); if (a) out[pid] = { price: Number(a.price), listPrice: Number(lp), source: a.source };
+      const a = this.autoPriceFor(pid, i.tier, D(lp), ctx); const running = promoMap.has(pid);
+      if (a || running) out[pid] = { price: Number(a?.price ?? lp), listPrice: Number(lp), source: a?.source ?? null, promoRunning: running };
     }
     return out;
   }
@@ -271,10 +320,10 @@ export class SalesService implements OnModuleInit {
   }
 
   /** Same-day edit by the associate (whole-document replace) or by auditors. Post-close → ClosingService.requestEdit. */
-  async void(id: string, reason: string, user: SessionUser) {
+  async void(id: string, reason: string, user: SessionUser, opts: { skipClosedCheck?: boolean } = {}) {
     const doc = await this.get(id, user);
     if (doc.voidedAt) throw new BadRequestException('Already voided');
-    if (await this.closing.isClosed(doc.locationId, doc.docDate) && !user.permissions.has('sale.edit.postclose')) throw new BadRequestException({ message: 'Day is closed; request a post-close edit', code: 'DAY_CLOSED' });
+    if (!opts.skipClosedCheck && (await this.closing.isClosed(doc.locationId, doc.docDate)) && !user.permissions.has('sale.edit.postclose')) throw new BadRequestException({ message: 'Day is closed; request a post-close edit', code: 'DAY_CLOSED' });
     if (doc.amountPaid.gt(0) && doc.paymentMode === 'AR_PDC') throw new BadRequestException('Void payments first');
     await this.posting.assertPeriodOpen(null, doc.docDate);
     await this.prisma.db.$transaction(async (tx) => {

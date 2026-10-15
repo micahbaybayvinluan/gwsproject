@@ -109,6 +109,10 @@ const BASE_KEYS = [
   'target.manage', 'target.view', 'agent.self',
   // franchise receivables (memo 2026-07-31): everyone's / own franchise's invoices, record payments (Accounting), waive charges and credit hold (Owner), request an extension (franchise owner)
   'franchise.ar.view', 'franchise.ar.own', 'franchise.ar.pay', 'franchise.ar.manage', 'franchise.ar.extend',
+  // franchise DRs (owner request 2026-10-15): see them, the franchise confirms receipt, the coordinators edit them
+  'franchise.dr.view', 'franchise.dr.receive', 'franchise.dr.edit',
+  // franchise availability and orders (owner request 2026-10-15): generate (Franchise Coordinator), review (warehouse), order (franchise), see
+  'fo.generate', 'fo.review', 'fo.order', 'fo.view',
   // memorandums: write and issue (HR, Owner, Franchise Coordinators, Head Auditor)
   'memo.create',
   // 6-Pack Card stickers (Sales Associate), view all branches' stickers and redemptions
@@ -197,7 +201,7 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
     key: 'HEAD_AUDITOR',
     name: 'Head Auditor',
     description: 'Edits/inputs anything; master data with Admin approval; enters/approves costs; approves internal transfers, post-close edits, write-offs.',
-    permissions: ['promo.issue', 'po.manage', 'po.view', 'member.view', 'outlet.view.all', 'approval.act.REPLACEMENT_TICKET', 'approval.act.REPLACEMENT_PAYMENT', 'approval.act.SUPPLIER_RETURN', 'replacement.create', 'replacement.view', 'approval.act.MARKETING_PULLOUT', 'marketing.summary', 'sixpack.override', 'ecom.waybill', 'approval.act.CASH_DEPOSIT_AUDIT', 'franchise.ar.view', 'memo.create', 'sixpack.view.all', 'stock.flavor.set', 
+    permissions: ['franchise.dr.view', 'fo.view', 'promo.issue', 'po.manage', 'po.view', 'member.view', 'outlet.view.all', 'approval.act.REPLACEMENT_TICKET', 'approval.act.REPLACEMENT_PAYMENT', 'approval.act.SUPPLIER_RETURN', 'replacement.create', 'replacement.view', 'approval.act.MARKETING_PULLOUT', 'marketing.summary', 'sixpack.override', 'ecom.waybill', 'approval.act.CASH_DEPOSIT_AUDIT', 'franchise.ar.view', 'memo.create', 'sixpack.view.all', 'stock.flavor.set', 
       ...READ_ALL, ...COST_BUNDLE, 'product.edit', 'product.create', 'price.edit', 'cost.edit', 'supplier.edit',
       'receiving.create', 'receiving.approve_cost', 'transfer.create', 'transfer.confirm', 'transfer.approve.internal', 'transfer.resolve_discrepancy',
       'sale.create', 'sale.edit.sameday', 'sale.edit.postclose', 'sale.void', 'ar.collect', 'expense.create.branch',
@@ -211,7 +215,7 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
     key: 'ASST_AUDITOR',
     name: 'Assistant Auditor',
     description: 'Edits/inputs transactions with Admin + Head Auditor approval. No master data edits. Approves internal transfers and post-close edits.',
-    permissions: ['replacement.create', 'replacement.view', 'marketing.summary', 'approval.act.CASH_DEPOSIT_AUDIT', 'franchise.ar.view', 'sixpack.view.all', 'stock.flavor.set', 
+    permissions: ['franchise.dr.view', 'fo.view', 'replacement.create', 'replacement.view', 'marketing.summary', 'approval.act.CASH_DEPOSIT_AUDIT', 'franchise.ar.view', 'sixpack.view.all', 'stock.flavor.set', 
       ...READ_ALL, ...COST_BUNDLE, 'receiving.create', 'transfer.create', 'transfer.confirm', 'transfer.approve.internal',
       'sale.create', 'sale.edit.sameday', 'ar.collect', 'expense.create.branch', 'count.create', 'writeoff.create', 'gl.view',
       'cashfund.view.all', 'cashfund.check', 'inspection.view', 'inspection.create', 'revision.view', 'cashdeposit.view.all', 'sale.incentive',
@@ -228,7 +232,7 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
     key: 'WAREHOUSE_IN_CHARGE',
     name: 'Warehouse In-Charge',
     description: 'Inputs warehouse receiving, transfers (to any branch or franchise), counts, write-offs and the warehouse\'s expenses; costs are entered and approved by the Head Auditor. Approves every warehouse associate\'s goods in and out before stock moves (own entries need no second approval). Can edit an associate\'s entry, which takes effect only after that associate accepts it. No cost.',
-    permissions: ['po.view', 'replacement.create', 'expense.create.branch', 'expense.view', 'cashfund.spend', 'stock.flavor.set', 
+    permissions: ['fo.review', 'fo.view', 'franchise.dr.view', 'po.view', 'replacement.create', 'expense.create.branch', 'expense.view', 'cashfund.spend', 'stock.flavor.set', 
       'product.view', 'supplier.view.code', 'location.view.own', 'receiving.create', 'transfer.create', 'transfer.confirm', 'warehouse.edit_others', 'approval.act.CONSIGNMENT_CHECK_WH', 'consignment.request', 'approval.act.WAREHOUSE_EDIT', 'approval.act.WAREHOUSE_IN', 'approval.act.WAREHOUSE_OUT', 'approval.act.ECOM_PULLOUT', 'ecom.receive', 'approval.act.TRANSFER_DIFF_SENDER',
       'count.create', 'writeoff.create', 'report.inventory.own', 'dashboard.view', 'notification.view', 'price.view.RETAIL', 'discrepancy.explain',
     ],
@@ -237,7 +241,7 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
     key: 'WAREHOUSE_ASSOCIATE',
     name: 'Warehouse Associate',
     description: 'Creates receiving docs (qty, expiry, batch) and transfers from the warehouse to any branch or franchise, and records the warehouse\'s expenses. Accepts or rejects the In-Charge\'s edits to own entries. Cost hidden.',
-    permissions: ['replacement.create', 'expense.create.branch', 'expense.view', 'cashfund.spend', 'consignment.request', 'product.view', 'supplier.view.code', 'location.view.own', 'receiving.create', 'transfer.create', 'transfer.confirm', 'report.inventory.own', 'dashboard.view', 'notification.view', 'approval.act.WAREHOUSE_EDIT', 'discrepancy.explain'],
+    permissions: ['fo.review', 'fo.view', 'franchise.dr.view', 'replacement.create', 'expense.create.branch', 'expense.view', 'cashfund.spend', 'consignment.request', 'product.view', 'supplier.view.code', 'location.view.own', 'receiving.create', 'transfer.create', 'transfer.confirm', 'report.inventory.own', 'dashboard.view', 'notification.view', 'approval.act.WAREHOUSE_EDIT', 'discrepancy.explain'],
   },
   {
     key: 'SALES_ASSOCIATE',
@@ -254,13 +258,13 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
     key: 'FRANCHISE_SALES_ASSOCIATE',
     name: 'Franchise Sales Associate',
     description: 'Receives stock, enters sales for one franchise. Same-day edits only.',
-    permissions: ['sixpack.issue', 'product.view', 'location.view.own', 'price.view.RETAIL', 'price.view.CC', 'transfer.confirm', 'sale.create', 'sale.edit.sameday', 'ar.view', 'ar.collect', 'report.sales.own', 'report.inventory.own', 'franchise.portal', 'franchise.expense', 'dashboard.view', 'notification.view'],
+    permissions: ['franchise.dr.view', 'franchise.dr.receive', 'fo.order', 'fo.view', 'sixpack.issue', 'product.view', 'location.view.own', 'price.view.RETAIL', 'price.view.CC', 'transfer.confirm', 'sale.create', 'sale.edit.sameday', 'ar.view', 'ar.collect', 'report.sales.own', 'report.inventory.own', 'franchise.portal', 'franchise.expense', 'dashboard.view', 'notification.view'],
   },
   {
     key: 'FRANCHISE_OWNER',
     name: 'Franchise Owner',
     description: 'Receives stock, approves associate edits, own P&L, own expenses. Sees franchise price tier only.',
-    permissions: ['franchise.ar.own', 'franchise.ar.extend', 'sixpack.issue', 'stock.flavor.set', 
+    permissions: ['franchise.dr.view', 'franchise.dr.receive', 'fo.order', 'fo.view', 'franchise.ar.own', 'franchise.ar.extend', 'sixpack.issue', 'stock.flavor.set', 
       'product.view', 'location.view.own', 'price.view.RETAIL', 'price.view.CC', 'price.view.FRANCHISE', 'transfer.confirm', 'sale.create', 'sale.edit.sameday', 'sale.edit.postclose',
       'ar.view', 'ar.collect', 'count.create', 'report.sales.own', 'report.inventory.own', 'franchise.portal', 'franchise.expense', 'franchise.pnl',
       'dashboard.view', 'notification.view', ...approvals('POST_CLOSE_EDIT_FRANCHISE', 'TRANSFER_DIFF_SENDER'),
@@ -276,7 +280,7 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
     key: 'ACCOUNTING_HEAD',
     name: 'Accounting Head',
     description: 'Ledger, vouchers, main expenses, payroll (per employee), closes payroll. TB and ledgers; no IS/BS pages.',
-    permissions: ['po.view', 'replacement.view', 'approval.act.PULLOUT_EXPENSE', 'marketing.summary', 'approval.act.CASH_DEPOSIT_ACCOUNTING', 'franchise.ar.view', 'franchise.ar.pay', 'sixpack.view.all', 
+    permissions: ['franchise.dr.view', 'po.view', 'replacement.view', 'approval.act.PULLOUT_EXPENSE', 'marketing.summary', 'approval.act.CASH_DEPOSIT_ACCOUNTING', 'franchise.ar.view', 'franchise.ar.pay', 'sixpack.view.all', 
       ...READ_ALL, ...COST_BUNDLE, ...ACCOUNTING_BASE, 'gl.period.lock', 'gl.beginning_balance',
       'payroll.view.summary', 'payroll.view.detail', 'payroll.close', 'expense.view', 'cashfund.view.all', 'cashfund.manage', 'contribution.remit',
       'ar.collect', 'ar.approve', 'ar.opening', 'incentive.view', 'incentive.release', ...approvals('AR_PAYMENT', 'ECOM_SETTLEMENT', 'AGENT_INCENTIVE'), 'gl.voucher.edit', 'bank.entry', 'bs.accounts.view', 'ecom.view',
@@ -286,7 +290,7 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
     key: 'ACCOUNTING_ASSOCIATE',
     name: 'Accounting Associate',
     description: 'Ledger, vouchers, main expenses. Payroll totals only.',
-    permissions: ['replacement.view', 'approval.act.PULLOUT_EXPENSE', 'marketing.summary', 'approval.act.CASH_DEPOSIT_ACCOUNTING', 'franchise.ar.view', 'franchise.ar.pay', 'sixpack.view.all', ...READ_ALL, ...COST_BUNDLE, ...ACCOUNTING_BASE, 'payroll.view.summary', 'cashfund.view.all', 'ar.collect', 'ar.approve', 'ar.opening', 'incentive.view', 'incentive.release', ...approvals('AGENT_INCENTIVE'), ...approvals('AR_PAYMENT'), 'gl.voucher.edit', 'bank.entry', 'bs.accounts.view', 'ecom.view'],
+    permissions: ['franchise.dr.view', 'replacement.view', 'approval.act.PULLOUT_EXPENSE', 'marketing.summary', 'approval.act.CASH_DEPOSIT_ACCOUNTING', 'franchise.ar.view', 'franchise.ar.pay', 'sixpack.view.all', ...READ_ALL, ...COST_BUNDLE, ...ACCOUNTING_BASE, 'payroll.view.summary', 'cashfund.view.all', 'ar.collect', 'ar.approve', 'ar.opening', 'incentive.view', 'incentive.release', ...approvals('AGENT_INCENTIVE'), ...approvals('AR_PAYMENT'), 'gl.voucher.edit', 'bank.entry', 'bs.accounts.view', 'ecom.view'],
   },
   {
     key: 'HR_STAFF',
@@ -322,13 +326,13 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
     key: 'FRANCHISE_COORDINATOR',
     name: 'Franchise Coordinator',
     description: 'Looks after the franchise partners: sees every franchise\'s receivables (invoices, penalties, interest, extension requests) and their stock transfers, issues memorandums to franchise partners and staff. Never sees cost. May record sales from the warehouse (franchises and every other channel), and fills in the shipping charge billed to a franchise.',
-    permissions: ['franchise.ar.view', 'sale.create.warehouse', 'franchise.shipping.fill', 'price.view.AGENT', 'price.view.TIKTOK', 'price.view.SHOPEE', 'price.view.LAZADA', 'memo.create', 'ar.view', 'product.view', 'location.view.all', 'report.sales.all', 'report.inventory.all', 'price.view.RETAIL', 'price.view.FRANCHISE', 'price.view.DEALER', 'price.view.CC', 'dashboard.view', 'notification.view', 'discrepancy.view'],
+    permissions: ['franchise.dr.view', 'franchise.dr.edit', 'fo.generate', 'fo.view', 'franchise.ar.view', 'sale.create.warehouse', 'franchise.shipping.fill', 'price.view.AGENT', 'price.view.TIKTOK', 'price.view.SHOPEE', 'price.view.LAZADA', 'memo.create', 'ar.view', 'product.view', 'location.view.all', 'report.sales.all', 'report.inventory.all', 'price.view.RETAIL', 'price.view.FRANCHISE', 'price.view.DEALER', 'price.view.CC', 'dashboard.view', 'notification.view', 'discrepancy.view'],
   },
   {
     key: 'ASST_FRANCHISE_COORDINATOR',
     name: 'Asst. Franchise Coordinator',
     description: 'Helps the Franchise Coordinator: same views of franchise receivables and transfers, and may issue memorandums. Never sees cost. May record sales from the warehouse (franchises and every other channel), and fills in the shipping charge billed to a franchise.',
-    permissions: ['franchise.ar.view', 'sale.create.warehouse', 'franchise.shipping.fill', 'price.view.AGENT', 'price.view.TIKTOK', 'price.view.SHOPEE', 'price.view.LAZADA', 'memo.create', 'ar.view', 'product.view', 'location.view.all', 'report.sales.all', 'report.inventory.all', 'price.view.RETAIL', 'price.view.FRANCHISE', 'price.view.DEALER', 'price.view.CC', 'dashboard.view', 'notification.view', 'discrepancy.view'],
+    permissions: ['franchise.dr.view', 'franchise.dr.edit', 'fo.generate', 'fo.view', 'franchise.ar.view', 'sale.create.warehouse', 'franchise.shipping.fill', 'price.view.AGENT', 'price.view.TIKTOK', 'price.view.SHOPEE', 'price.view.LAZADA', 'memo.create', 'ar.view', 'product.view', 'location.view.all', 'report.sales.all', 'report.inventory.all', 'price.view.RETAIL', 'price.view.FRANCHISE', 'price.view.DEALER', 'price.view.CC', 'dashboard.view', 'notification.view', 'discrepancy.view'],
   },
   {
     key: 'AGENT',

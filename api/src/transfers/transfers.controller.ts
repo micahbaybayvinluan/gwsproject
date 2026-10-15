@@ -2,6 +2,7 @@ import { Body, Controller, Get, Param, Post, Put, Query } from '@nestjs/common';
 import { z } from 'zod';
 import { TransfersService } from './transfers.service';
 import { TransferDiscrepancyService } from './transfer-discrepancy.service';
+import { StockRequestsService } from './stock-requests.service';
 import { CurrentUser, RequirePermission, RequireAnyPermission, Audited } from '../common/decorators';
 import { Z } from '../common/zod.pipe';
 import type { SessionUser } from '../common/request-context';
@@ -17,9 +18,9 @@ const Writeoff = z.object({ chargeTo: z.enum(['COMPANY', 'STAFF']).optional(), e
 
 @Controller('api/transfers')
 export class TransfersController {
-  constructor(private svc: TransfersService) {}
+  constructor(private svc: TransfersService, private requests: StockRequestsService) {}
   @Get() @RequireAnyPermission('transfer.create', 'transfer.confirm', 'report.inventory.all', 'report.inventory.own') list(@CurrentUser() u: SessionUser, @Query('direction') direction?: 'out' | 'in', @Query('status') status?: string, @Query('locationId') locationId?: string, @Query('branchIds') branchIds?: string, @Query('from') from?: string, @Query('to') to?: string) { return this.svc.list(u, { direction, status, locationId, branchIds: branchIds ? branchIds.split(',').filter(Boolean) : undefined, from, to }); }
-  @Post('request-stock') @RequireAnyPermission('transfer.confirm', 'transfer.create') @Audited('Location', 'STOCK_REQUEST') requestStock(@Body(Z(StockRequest)) dto: z.infer<typeof StockRequest>, @CurrentUser() u: SessionUser) { return this.svc.requestStock(dto, u); }
+  @Post('request-stock') @RequireAnyPermission('transfer.confirm', 'transfer.create') @Audited('Location', 'STOCK_REQUEST') requestStock(@Body(Z(StockRequest)) dto: z.infer<typeof StockRequest>, @CurrentUser() u: SessionUser) { return this.requests.create(u, dto); }
   @Get(':id') @RequireAnyPermission('transfer.create', 'transfer.confirm', 'report.inventory.all', 'report.inventory.own') get(@Param('id') id: string, @CurrentUser() u: SessionUser) { return this.svc.get(id, u); }
   @Post() @RequirePermission('transfer.create') @Audited('TransferDoc', 'CREATE') create(@Body(Z(Create)) dto: z.infer<typeof Create>, @CurrentUser() u: SessionUser) { return this.svc.create(dto, u); }
   @Post(':id/submit') @RequirePermission('transfer.create') @Audited('TransferDoc', 'SUBMIT') submit(@Param('id') id: string, @CurrentUser() u: SessionUser) { return this.svc.submit(id, u); }
@@ -44,4 +45,17 @@ export class TransferDiscrepancyController {
   constructor(private svc: TransferDiscrepancyService) {}
   @Get(':id/discrepancy') @RequireAnyPermission('transfer.create', 'transfer.confirm', 'report.inventory.all', 'report.inventory.own') get(@Param('id') id: string, @CurrentUser() u: SessionUser) { return this.svc.get(id, u); }
   @Post(':id/discrepancy/decide') @RequirePermission('transfer.resolve_discrepancy') @Audited('TransferDoc', 'DISCREPANCY_DECIDE') decide(@Param('id') id: string, @Body(Z(DiffDecide)) dto: z.infer<typeof DiffDecide>, @CurrentUser() u: SessionUser) { return this.svc.adminDecide(id, dto, u); }
+}
+
+const RequestEdit = z.object({ lines: z.array(z.object({ lineId: z.string().uuid(), qty: z.number().int().min(0) })).min(1) });
+const Decline = z.object({ note: z.string().trim().min(3) });
+
+/** Stock requests of the branches: the Warehouse In-Charge changes the quantities and makes the pull-out from them. */
+@Controller('api/stock-requests')
+export class StockRequestsController {
+  constructor(private svc: StockRequestsService) {}
+  @Get() @RequireAnyPermission('transfer.create', 'transfer.confirm') list(@CurrentUser() u: SessionUser, @Query('status') status?: string) { return this.svc.list(u, { status }); }
+  @Put(':id') @RequirePermission('transfer.create') @Audited('StockRequest', 'EDIT') edit(@Param('id') id: string, @Body(Z(RequestEdit)) dto: z.infer<typeof RequestEdit>, @CurrentUser() u: SessionUser) { return this.svc.update(u, id, dto.lines); }
+  @Post(':id/prepare') @RequirePermission('transfer.create') prepare(@Param('id') id: string, @CurrentUser() u: SessionUser) { return this.svc.prepare(u, id); }
+  @Post(':id/decline') @RequirePermission('transfer.create') @Audited('StockRequest', 'DECLINE') decline(@Param('id') id: string, @Body(Z(Decline)) dto: z.infer<typeof Decline>, @CurrentUser() u: SessionUser) { return this.svc.decline(u, id, dto.note); }
 }

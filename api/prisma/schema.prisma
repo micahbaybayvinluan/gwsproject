@@ -779,6 +779,9 @@ model SalesLine {
   lineRemarks      String? @map("line_remarks")
   nearExpiryWarn   Boolean @default(false) @map("near_expiry_warn")
   specialPriceFlag String? @map("special_price_flag") // PENDING | APPROVED | REJECTED
+  /// the associate ticked this line as sold at the promo price (owner request 2026-10-15), so promo sales can be monitored; promoId is the promo it was counted against
+  promoTicked      Boolean @default(false) @map("promo_ticked")
+  promoId          String? @map("promo_id")
 
   doc     SalesDoc @relation(fields: [docId], references: [id], onDelete: Cascade)
   product Product  @relation(fields: [productId], references: [id])
@@ -3034,10 +3037,14 @@ model Promo {
 }
 
 model PromoItem {
-  id         String  @id @default(uuid())
-  promoId    String  @map("promo_id")
-  productId  String  @map("product_id")
-  promoPrice Decimal @map("promo_price") @db.Decimal(14, 2)
+  id          String  @id @default(uuid())
+  promoId     String  @map("promo_id")
+  productId   String  @map("product_id")
+  promoPrice  Decimal @map("promo_price") @db.Decimal(14, 2)
+  /// set when the promo price was chosen as a percentage off the regular price (20 to 70)
+  discountPct Int?    @map("discount_pct")
+  /// the quantity set aside for the promo, for the issuers only (internal): sales tagged as promo sales are counted against it
+  internalQty Int?    @map("internal_qty")
 
   promo Promo @relation(fields: [promoId], references: [id], onDelete: Cascade)
 
@@ -3169,4 +3176,142 @@ model PurchaseOrderRow {
 
   @@unique([lineId, locationId])
   @@map("purchase_order_rows")
+}
+
+/// A branch's request for stock from the warehouse: the Warehouse In-Charge sees the items, changes the quantities and makes the pull-out from it (owner request 2026-10-15).
+model StockRequest {
+  id              String    @id @default(uuid())
+  requestNo       String    @unique @map("request_no")
+  locationId      String    @map("location_id")
+  status          String    @default("OPEN") // OPEN | PREPARED | DECLINED
+  notes           String?
+  requestedBy     String    @map("requested_by")
+  requestedByName String?   @map("requested_by_name")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  handledBy       String?   @map("handled_by")
+  handledAt       DateTime? @map("handled_at")
+  transferId      String?   @map("transfer_id")
+  declineNote     String?   @map("decline_note")
+
+  lines StockRequestLine[]
+
+  @@index([locationId, status])
+  @@map("stock_requests")
+}
+
+model StockRequestLine {
+  id           String @id @default(uuid())
+  requestId    String @map("request_id")
+  productId    String @map("product_id")
+  requestedQty Int    @map("requested_qty")
+  /// what the warehouse will send (starts equal to the request)
+  qty          Int
+
+  request StockRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@unique([requestId, productId])
+  @@map("stock_request_lines")
+}
+
+/// What the warehouse has available for the franchises (owner request 2026-10-15): the Franchise Coordinator generates it from the stock, the Warehouse In-Charge edits it
+/// (remove items, change quantities and flavors), sends it back to the Coordinator, who sends it to the franchises; each franchise orders from it.
+model FranchiseAvailability {
+  id             String    @id @default(uuid())
+  listNo         String    @unique @map("list_no")
+  status         String    @default("WAREHOUSE_REVIEW") // WAREHOUSE_REVIEW | FOR_COORDINATOR | PUBLISHED | CLOSED
+  notes          String?
+  createdBy      String    @map("created_by")
+  createdByName  String?   @map("created_by_name")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  reviewedBy     String?   @map("reviewed_by")
+  reviewedByName String?   @map("reviewed_by_name")
+  reviewedAt     DateTime? @map("reviewed_at")
+  publishedAt    DateTime? @map("published_at")
+  publishedTo    String[]  @default([]) @map("published_to")
+  closedAt       DateTime? @map("closed_at")
+
+  lines  FranchiseAvailabilityLine[]
+  orders FranchiseOrder[]
+
+  @@map("franchise_availabilities")
+}
+
+model FranchiseAvailabilityLine {
+  id             String @id @default(uuid())
+  availabilityId String @map("availability_id")
+  productId      String @map("product_id")
+  /// the quantity the system found in the warehouse when the list was made
+  systemQty      Int    @map("system_qty")
+  /// the quantity offered to the franchises (edited by the Warehouse In-Charge)
+  qty            Int
+  /// the flavors offered: [{ flavor: string | null, qty }]
+  flavors        Json   @default("[]")
+
+  availability FranchiseAvailability @relation(fields: [availabilityId], references: [id], onDelete: Cascade)
+
+  @@unique([availabilityId, productId])
+  @@map("franchise_availability_lines")
+}
+
+/// One franchise's order from an availability list; then the picklist for the Franchise Coordinator, the warehouse's final check, and the DR.
+model FranchiseOrder {
+  id                  String    @id @default(uuid())
+  orderNo             String    @unique @map("order_no")
+  availabilityId      String    @map("availability_id")
+  franchiseLocationId String    @map("franchise_location_id")
+  status              String    @default("ORDERED") // ORDERED | PICKLIST | CHECKING | APPROVED | DR_MADE | CANCELLED
+  notes               String?
+  orderedBy           String    @map("ordered_by")
+  orderedByName       String?   @map("ordered_by_name")
+  orderedAt           DateTime  @default(now()) @map("ordered_at")
+  picklistNo          String?   @unique @map("picklist_no")
+  picklistAt          DateTime? @map("picklist_at")
+  sentToWarehouseAt   DateTime? @map("sent_to_warehouse_at")
+  checkedBy           String?   @map("checked_by")
+  checkedByName       String?   @map("checked_by_name")
+  checkedAt           DateTime? @map("checked_at")
+  checkNote           String?   @map("check_note")
+  salesDocId          String?   @map("sales_doc_id")
+  cancelReason        String?   @map("cancel_reason")
+
+  availability FranchiseAvailability @relation(fields: [availabilityId], references: [id])
+  lines        FranchiseOrderLine[]
+
+  @@index([availabilityId, franchiseLocationId])
+  @@map("franchise_orders")
+}
+
+model FranchiseOrderLine {
+  id         String  @id @default(uuid())
+  orderId    String  @map("order_id")
+  productId  String  @map("product_id")
+  flavor     String?
+  /// what the franchise ordered
+  qty        Int
+  /// what the warehouse confirms at the final check (starts equal to qty)
+  checkedQty Int?    @map("checked_qty")
+
+  order FranchiseOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@map("franchise_order_lines")
+}
+
+/// A DR made by a main branch / the warehouse for a franchise (owner request 2026-10-15): the franchise is told, checks the goods and confirms receipt (its stock goes up then),
+/// or reports a problem so the Franchise Coordinator can edit the DR.
+model FranchiseDrReceipt {
+  id                  String    @id @default(uuid())
+  salesDocId          String    @unique @map("sales_doc_id")
+  franchiseLocationId String    @map("franchise_location_id")
+  fromLocationId      String    @map("from_location_id")
+  status              String    @default("PENDING") // PENDING | RECEIVED | DISPUTED | SUPERSEDED
+  createdAt           DateTime  @default(now()) @map("created_at")
+  receivedBy          String?   @map("received_by")
+  receivedByName      String?   @map("received_by_name")
+  receivedAt          DateTime? @map("received_at")
+  disputeNote         String?   @map("dispute_note")
+  disputedBy          String?   @map("disputed_by")
+  disputedAt          DateTime? @map("disputed_at")
+
+  @@index([franchiseLocationId, status])
+  @@map("franchise_dr_receipts")
 }

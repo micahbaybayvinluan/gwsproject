@@ -32,6 +32,8 @@ const NAV: { group: string; items: NavItem[] }[] = [
     { to: '/sales', label: 'Sales', any: ['sale.create', 'sale.create.warehouse', 'report.sales.own', 'report.sales.all'] },
     { to: '/ar', label: 'AR / Credit', any: ['ar.view'] },
     { to: '/franchise-ar', label: 'Franchise AR', any: ['franchise.ar.view', 'franchise.ar.own'] },
+    { to: '/franchise-orders', label: 'Franchise Orders', any: ['fo.view'] },
+    { to: '/franchise-drs', label: 'Franchise DRs', any: ['franchise.dr.view'] },
     { to: '/six-pack', label: '6-Pack Card', any: ['sixpack.issue', 'sixpack.view.all'] },
     { to: '/memos', label: 'Memorandums', any: ['notification.view', 'memo.create'] },
     { to: '/expenses', label: 'Expenses', any: ['expense.create.branch', 'expense.create.main', 'expense.view'] },

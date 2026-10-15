@@ -745,6 +745,40 @@ This is how stock is reordered. The **Head Auditor** starts it, the **Owner** de
 
 **Orders and money.** A PO is a plan and a request to the supplier; it books nothing. The supplier's delivery (and its cost, approved by the Head Auditor) is what adds stock and what is owed.
 
+## Franchise availability and orders (from the warehouse stock to a DR)
+<!-- for: fo.generate, fo.review, fo.order, fo.view -->
+This is how franchises order from the warehouse, step by step. Menu: **Franchise Orders**.
+1. **Franchise Coordinator: generate the availability.** Franchise Orders → **Generate availability**. The system lists the products the warehouse has in stock (with the flavors in stock). Press **Send to the warehouse**.
+2. **Warehouse In-Charge (or Associate): check it.** Open the availability. Under **Offer** type the quantity you can really give and the flavors available for each product; **remove** a product you cannot give to the franchises. You cannot offer more than the warehouse has. Press **Send to the Franchise Coordinator**.
+3. **Franchise Coordinator: send it to the franchises.** Read the edited availability, tick the franchises (or all) and press **Send to the franchises** (you may send it back to the warehouse if something is wrong).
+4. **Franchise owner (or associate): order.** You get a notice. Open **Franchise Orders**: you see only the available products with their flavors and your franchise price. Type **I order** (quantity) and the flavors you want, then **Send my order**. You cannot order more than what is offered (the quantity left is shown, and other franchises' orders count).
+5. **Franchise Coordinator: picklist.** Open the franchise's order → **Make the picklist**. The picklist (PO) is made and sent to you: **Print the picklist (PDF)** for the warehouse to prepare, then press **Send to the warehouse for the final check**.
+6. **Warehouse: final check.** The In-Charge checks the prepared goods against the picklist and presses **Approve** (or sends it back with a note).
+7. **Franchise Coordinator: make the DR.** Once approved, **Make the DR** (choose cash or on credit with the due date). The DR is a normal warehouse sale to the franchise: stock leaves the warehouse and the franchise now sees it under **Franchise DRs** (next section) and in Franchise AR as **Unpaid goods**.
+
+## Franchise DRs: connected to the franchise
+<!-- for: franchise.dr.view, franchise.dr.receive, franchise.dr.edit -->
+Every DR made for a franchise by **any main branch or the warehouse** (not only the warehouse) now tells the franchise and goes through the same steps:
+- The franchise (owner, or the associate if the owner allows it) gets a notice and sees the DR under **Franchise DRs**: items, flavors, quantities, prices and total, and whether it is on credit.
+- **Confirm receipt** after checking the goods: the franchise's stock goes up then. (Do not also make a transfer for the same goods, or the stock is counted twice.)
+- **Report a problem** (a note is required): the Franchise Coordinator is told.
+- **Franchise Coordinator: correct the DR.** Open the sale → **Correct this franchise DR**: change quantities, flavors or prices. The DR keeps its **number and date**, the old one is voided, stock and AR follow, and the franchise checks the corrected DR again. A DR the franchise has already received cannot be edited: the franchise reports the problem first.
+Head office (Admin, auditors, Accounting) sees every franchise DR; a franchise sees its own only.
+
+## Franchise AR: Unpaid goods and the DRs behind them
+<!-- for: franchise.ar.view -->
+Goods delivered to a franchise on a DR and not yet paid now show in **Franchise AR** as **Unpaid goods (DRs)**, per franchise, with the amount still owed. Click a DR to open it. They are included in the franchise's total owed (invoices + unpaid goods). The penalty and interest rules still apply to invoices only, not to DR goods. The franchise sees the same under its own Franchise AR.
+
+## Branch requests to the warehouse
+<!-- for: transfer.create -->
+When a branch asks the warehouse for stock (Transfers → **Request stock**), the request appears to the **Warehouse In-Charge** (and associates) under **Requests from the branches**, with the products and quantities already filled in. The In-Charge only edits the quantities (or removes an item), then **Prepare the pull-out** (a draft pull-out with those items is made) or **Decline** with a reason. The branch is told either way.
+
+## Promos: percentage, internal quantity and the promo tick
+<!-- for: promo.issue, sale.create -->
+- **Percentage.** When issuing a promo, choose **Discount % off** from 20%, 30%, 40%, 50%, 60% or 70% (or type a fixed promo price). The promo price is worked out from the tier price.
+- **Internal quantity.** Each product of a promo has an **internal quantity** (how many may be sold on promo). It is for the Owner and Head Auditor and is not shown on the branch memo. The promo list shows **sold / left** per product; **See promo sales** lists every sale made on it.
+- **Promo tick in New Sale.** While a promo is running for a product, every sales associate sees a **Promo price** tick on that line: ticked = sold at the promo price, unticked = sold at the normal price. The choice is saved so the promo can be monitored.
+
 ## Proof of payment: upload it once, it prints with the report
 <!-- for: sale.create, ar.collect, replacement.create, report.sales.own, report.sales.all -->
 No paper copies are needed any more. Whenever money arrives other than as cash, the branch **uploads the proof** where it records the payment, and the system will not save it without the proof:

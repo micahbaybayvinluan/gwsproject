@@ -73,7 +73,7 @@ async function resetTransactionalData() {
   await prisma.$executeRawUnsafe(`TRUNCATE replacement_receipts, replacement_tickets, franchise_shipping_charges, form_numbers_released, ecom_waybills, ecom_waybill_hints, franchise_payments, franchise_ar_adjustments, franchise_ar_extensions, franchise_invoices, memo_recipients, memos, six_pack_stickers, six_pack_redemptions CASCADE`);
   await prisma.$executeRawUnsafe(`TRUNCATE outlet_changes, outlet_shares, itinerary_claims, itinerary_stops, itineraries, agent_consignment_limits, outlets, sales_areas CASCADE`);
   await prisma.$executeRawUnsafe(`TRUNCATE campaign_recipients, campaigns, message_opt_outs, members CASCADE`);
-  await prisma.$executeRawUnsafe(`TRUNCATE promo_items, promos, customer_contacts, customer_follow_ups, replacement_payments, purchase_order_rows, purchase_order_lines, purchase_orders CASCADE`);
+  await prisma.$executeRawUnsafe(`TRUNCATE franchise_dr_receipts, stock_request_lines, stock_requests, franchise_order_lines, franchise_orders, franchise_availability_lines, franchise_availabilities, promo_items, promos, customer_contacts, customer_follow_ups, replacement_payments, purchase_order_rows, purchase_order_lines, purchase_orders CASCADE`);
   await prisma.$executeRawUnsafe(`TRUNCATE member_vouchers, member_points_entries, member_notes, member_offers, survey_items, survey_responses, survey_invites, lost_sales, reservations, stock_alert_requests, member_auto_messages CASCADE`);
   await prisma.$executeRawUnsafe(`UPDATE consignment_agreements SET agent_key = NULL, agent_name = NULL, outlet_id = NULL`);
   await prisma.$executeRawUnsafe(`UPDATE locations SET credit_hold = false, credit_hold_note = NULL`);
@@ -3192,6 +3192,201 @@ describe('Proofs of payment: required for online, card and cheque; the reports p
     // franchise payments by transfer need proof
     const fp = await prisma.franchiseInvoice.findFirst({ where: { status: { in: ['OPEN', 'PARTIAL'] } } });
     if (fp) { await as('acct.head').post(`/api/franchise-ar/${fp.id}/payments`).send({ amount: 1, mode: 'GCASH', reference: 'G1' }).expect(400); }
+  });
+});
+
+describe('Promo percentages, internal quantity and the promo tick on every sale (owner request 2026-10-15)', () => {
+  const today = () => new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);
+  const plus = (n: number) => new Date(Date.now() + 8 * 3600e3 + n * 86400e3).toISOString().slice(0, 10);
+  it('a percentage off sets the promo price; the quantity set aside is internal; associates tick promo sales; the issuers monitor them', async () => {
+    await prisma.salesReportSubmission.deleteMany({});
+    const west = (await prisma.location.findUniqueOrThrow({ where: { code: 'WESTAVE' } })).id;
+    const cats = ok(await as('admin').get('/api/categories')).body as { id: string; accountingClass: string }[]; const cat = cats.find((c) => c.accountingClass === 'SUPPLEMENT')!.id;
+    const p = ok(await as('admin').post('/api/products').send({ name: `PT A ${run}`, brand: 'X', categoryId: cat, prices: { RETAIL: 1000 }, cost: 400 })).body.id as string;
+    const q = ok(await as('admin').post('/api/products').send({ name: `PT B ${run}`, brand: 'X', categoryId: cat, prices: { RETAIL: 500 }, cost: 200 })).body.id as string;
+    for (const x of [p, q]) { const bt = await prisma.batch.create({ data: { productId: x, batchNo: `PT-${run}-${x.slice(0, 4)}`, receivedRef: 'TEST', unitCost: '300' } }); await prisma.stockLedger.create({ data: { locationId: west, productId: x, batchId: bt.id, qtyDelta: 60, movementType: 'RECEIVE', documentType: 'Opening', documentId: bt.id, unitCost: '300', businessDate: new Date(`${today()}T00:00:00Z`) } }); await prisma.stockBalance.create({ data: { locationId: west, productId: x, batchId: bt.id, qty: 60 } }); }
+    await as('head.auditor').post('/api/promos').send({ title: 'Bad percent', details: 'x y z', audience: 'BRANCHES', startsOn: today(), endsOn: plus(3), items: [{ productId: p, discountPct: 25 }] }).expect(400);
+    const pr = ok(await as('head.auditor').post('/api/promos').send({ title: `Percent week ${run}`, details: 'Percent off for a week.', audience: 'BRANCHES', startsOn: today(), endsOn: plus(6), items: [{ productId: p, discountPct: 30, internalQty: 5 }] })).body;
+    expect(pr.items[0]).toMatchObject({ promoPrice: 700, discountPct: 30, internalQty: 5, soldQty: 0, remainingQty: 5 });
+    // the internal quantity is not shown to the branches
+    const seen = (ok(await as('sales.westave').get('/api/promos/active')).body as { title: string; items: Record<string, unknown>[] }[]).find((x) => x.title === `Percent week ${run}`)!; expect(seen.items[0].internalQty).toBeUndefined(); expect(seen.items[0].promoPrice).toBe(700);
+    const sale = async (n: string, line: Record<string, unknown>) => as('sales.westave').post('/api/sales').send({ channel: 'WALK_IN', paymentMode: 'CASH', drSiNo: `PT-${run}-${n}`, lines: [line] });
+    const s1 = ok(await sale('1', { productId: p, qty: 1 })).body; // not told: the promo applies by itself and is counted
+    expect(Number(s1.productTotal)).toBe(700);
+    const s2 = ok(await sale('2', { productId: p, qty: 1, promo: false })).body; expect(Number(s2.productTotal)).toBe(1000); // not given the promo
+    await sale('3', { productId: q, qty: 1, promo: true }).then((r) => expect(r.status).toBe(400)); // no promo runs for this item
+    const full1 = ok(await as('sales.westave').get(`/api/sales/${s1.id}`)).body; expect(full1.lines[0]).toMatchObject({ promoTicked: true }); expect(ok(await as('sales.westave').get(`/api/sales/${s2.id}`)).body.lines[0].promoTicked).toBe(false);
+    const hint = ok(await as('sales.westave').post('/api/sales/auto-prices').send({ locationId: west, tier: 'RETAIL', productIds: [p, q] })).body; expect(hint[p]).toMatchObject({ source: 'PROMO', promoRunning: true }); expect(hint[q]).toBeUndefined();
+    // monitoring: the issuers see sold against the internal quantity, branch by branch; others cannot
+    const mine = (ok(await as('head.auditor').get('/api/promos')).body as { id: string; items: { soldQty: number; remainingQty: number }[] }[]).find((x) => x.id === pr.id)!; expect(mine.items[0]).toMatchObject({ soldQty: 1, remainingQty: 4 });
+    for (let i = 4; i <= 9; i++) ok(await sale(String(i), { productId: p, qty: 1 })); // five more, one over the quantity set aside
+    const rep = ok(await as('head.auditor').get(`/api/promos/${pr.id}/sales`)).body; expect(rep.items[0]).toMatchObject({ soldQty: 7, over: true }); expect(rep.byBranch[0]).toMatchObject({ branch: 'West Ave', qty: 7 }); expect(rep.sales.length).toBe(7);
+    await as('sales.westave').get(`/api/promos/${pr.id}/sales`).expect(403);
+    ok(await as('head.auditor').post(`/api/promos/${pr.id}/cancel`).send({ reason: 'test done' }));
+  });
+});
+
+describe('Branch requests to the warehouse: the In-Charge sees the items, changes the quantities and makes the pull-out from them (owner request 2026-10-15)', () => {
+  it('a request is a record; the In-Charge edits the quantities and prepares the draft pull-out; the branch follows its status; a request can be declined', async () => {
+    const wh = (await prisma.location.findFirstOrThrow({ where: { type: 'WAREHOUSE' } })).id; const west = (await prisma.location.findUniqueOrThrow({ where: { code: 'WESTAVE' } })).id;
+    const cats = ok(await as('admin').get('/api/categories')).body as { id: string; accountingClass: string }[]; const cat = cats.find((c) => c.accountingClass === 'SUPPLEMENT')!.id;
+    const p1 = ok(await as('admin').post('/api/products').send({ name: `SR A ${run}`, brand: 'X', categoryId: cat, prices: { RETAIL: 1000 }, cost: 500 })).body.id; const p2 = ok(await as('admin').post('/api/products').send({ name: `SR B ${run}`, brand: 'X', categoryId: cat, prices: { RETAIL: 900 }, cost: 400 })).body.id;
+    for (const p of [p1, p2]) { const bt = await prisma.batch.create({ data: { productId: p, batchNo: `SR-${run}-${p.slice(0, 4)}`, receivedRef: 'TEST', unitCost: '400' } }); await prisma.stockLedger.create({ data: { locationId: wh, productId: p, batchId: bt.id, qtyDelta: 50, movementType: 'RECEIVE', documentType: 'OpeningStock', documentId: bt.id, unitCost: '400', businessDate: new Date() } }); await prisma.stockBalance.create({ data: { locationId: wh, productId: p, batchId: bt.id, qty: 50 } }); }
+    const r = ok(await as('sales.westave').post('/api/transfers/request-stock').send({ items: [{ productId: p1, qty: 10 }, { productId: p2, qty: 8 }], notes: 'weekend' })).body; expect(r.requestNo).toMatch(/^SR-\d{4}-\d{4}$/);
+    const open = ok(await as('wh.incharge').get('/api/stock-requests?status=OPEN')).body as { id: string; branch: string; lines: { id: string; productId: string; qty: number; warehouseOnHand: number }[] }[];
+    const mine = open.find((x) => x.id === r.id)!; expect(mine.branch).toBe('West Ave'); expect(mine.lines.length).toBe(2); expect(mine.lines.find((l) => l.productId === p1)!.warehouseOnHand).toBe(50);
+    await as('sales.westave').post(`/api/stock-requests/${r.id}/prepare`).expect(403); // a branch cannot prepare it
+    const la = mine.lines.find((l) => l.productId === p1)!; const lb = mine.lines.find((l) => l.productId === p2)!;
+    ok(await as('wh.incharge').put(`/api/stock-requests/${r.id}`).send({ lines: [{ lineId: la.id, qty: 6 }, { lineId: lb.id, qty: 0 }] })); // 6 of the first, the second removed
+    const prep = ok(await as('wh.incharge').post(`/api/stock-requests/${r.id}/prepare`)).body;
+    const doc = ok(await as('wh.incharge').get(`/api/transfers/${prep.transferId}`)).body; expect(doc.status).toBe('DRAFT'); expect(doc.toLocationId).toBe(west);
+    expect(doc.lines.reduce((n: number, l: { qtySent: number }) => n + l.qtySent, 0)).toBe(6); expect(doc.notes).toContain(r.requestNo);
+    const seen = ok(await as('sales.westave').get('/api/stock-requests')).body as { id: string; status: string; transferId: string }[]; expect(seen.find((x) => x.id === r.id)).toMatchObject({ status: 'PREPARED', transferId: prep.transferId });
+    await as('wh.incharge').post(`/api/stock-requests/${r.id}/prepare`).expect(400); // already handled
+    const r2 = ok(await as('sales.westave').post('/api/transfers/request-stock').send({ items: [{ productId: p2, qty: 3 }] })).body;
+    await as('wh.incharge').post(`/api/stock-requests/${r2.id}/decline`).send({ note: '' }).expect(400);
+    ok(await as('wh.incharge').post(`/api/stock-requests/${r2.id}/decline`).send({ note: 'out of stock until Monday' }));
+    expect((ok(await as('sales.westave').get('/api/stock-requests')).body as { id: string; status: string; declineNote: string }[]).find((x) => x.id === r2.id)).toMatchObject({ status: 'DECLINED', declineNote: 'out of stock until Monday' });
+    expect(((ok(await as('sales.csr').get('/api/stock-requests')).body) as { id: string }[]).some((x) => x.id === r.id)).toBe(false); // another branch does not see it
+  });
+});
+
+describe('Franchise DRs are connected to the franchise: told, check and confirm receipt (stock goes up), can be corrected, unpaid goods show in Franchise AR (owner request 2026-10-15)', () => {
+  const today = () => new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);
+  const day = (n: number) => new Date(Date.now() + 8 * 3600e3 + n * 86400000).toISOString().slice(0, 10);
+  let wh = ''; let mayon = ''; let malolos = ''; let item = ''; let item2 = ''; let fr = '';
+  const give = async (locationId: string, productId: string, qty: number) => { const b = await prisma.batch.create({ data: { productId, batchNo: `FD-${run}-${productId.slice(0, 4)}`, receivedRef: 'TEST', unitCost: '500', flavor: 'Chocolate' } }); await prisma.stockLedger.create({ data: { locationId, productId, batchId: b.id, qtyDelta: qty, movementType: 'RECEIVE', documentType: 'OpeningStock', documentId: b.id, unitCost: '500', businessDate: new Date(`${today()}T00:00:00Z`) } }); await prisma.stockBalance.create({ data: { locationId, productId, batchId: b.id, qty } }); };
+  const onHand = async (loc: string, p: string) => (await prisma.stockBalance.aggregate({ where: { locationId: loc, productId: p }, _sum: { qty: true } }))._sum.qty ?? 0;
+  const notes = async (u: string) => JSON.stringify(ok(await as(u).get('/api/notifications')).body);
+  let drId = ''; let receiptId = '';
+
+  it('setup', async () => {
+    await prisma.salesReportSubmission.deleteMany({});
+    const locs = ok(await as('admin').get('/api/locations')).body as { id: string; code: string }[];
+    wh = locs.find((l) => l.code === 'WH')!.id; mayon = locs.find((l) => l.code === 'MAYON')!.id; malolos = locs.find((l) => l.code === 'MALOLOS')!.id;
+    const cats = ok(await as('admin').get('/api/categories')).body as { id: string; accountingClass: string }[]; const cat = cats.find((c) => c.accountingClass === 'SUPPLEMENT')!.id;
+    item = ok(await as('admin').post('/api/products').send({ name: `FD A ${run}`, categoryId: cat, prices: { RETAIL: 1000, FRANCHISE: 700 }, cost: 500 })).body.id; item2 = ok(await as('admin').post('/api/products').send({ name: `FD B ${run}`, categoryId: cat, prices: { RETAIL: 600, FRANCHISE: 400 }, cost: 300 })).body.id;
+    await give(wh, item, 40); await give(wh, item2, 40);
+    fr = (await prisma.customer.findFirst({ where: { type: 'FRANCHISE', locationId: mayon } }))?.id ?? (await prisma.customer.create({ data: { code: `FRD-${run}`, name: 'Franchise Mayon', type: 'FRANCHISE', locationId: mayon } })).id;
+  });
+
+  it('a DR for a franchise tells the franchise and waits for its confirmation; the franchise sees only its own DRs; unpaid goods show in Franchise AR with the DR behind them', async () => {
+    const r = ok(await as('franchise.coord').post('/api/sales').send({ locationId: wh, channel: 'FRANCHISE', customerId: fr, paymentMode: 'AR_PDC', dueDate: day(30), drSiNo: `FD-${run}-1`, franchiseShipping: { mode: 'NONE' }, lines: [{ productId: item, qty: 5 }, { productId: item2, qty: 2 }] }).expect(201)).body; drId = r.id;
+    expect(Number(r.grandTotal)).toBe(5 * 700 + 2 * 400);
+    expect(await notes('fr.mayon.owner')).toContain('FRANCHISE_DR');
+    const mine = ok(await as('fr.mayon.owner').get('/api/franchise-drs')).body as { id: string; saleId: string; status: string; lines: { qty: number }[]; total: number }[];
+    const d = mine.find((x) => x.saleId === drId)!; expect(d.status).toBe('PENDING'); expect(d.lines.reduce((n, l) => n + l.qty, 0)).toBe(7); receiptId = d.id;
+    expect(((ok(await as('fr.malolos.owner' in {} ? 'admin' : 'admin').get('/api/franchise-drs')).body) as { saleId: string }[]).some((x) => x.saleId === drId)).toBe(true); // head office sees every DR
+    // Franchise AR: the unpaid goods, with the DR to open
+    const ar = ok(await as('acct.head').get('/api/franchise-ar')).body.franchises.find((f: { locationId: string }) => f.locationId === mayon);
+    const row = ar.unpaidGoods.find((x: { saleId: string }) => x.saleId === drId)!; expect(row).toMatchObject({ drSiNo: `FD-${run}-1`, from: expect.any(String) }); expect(Number(row.balance)).toBe(4300); expect(Number(ar.unpaidGoodsTotal)).toBeGreaterThanOrEqual(4300);
+    expect(Number(ar.totals.total)).toBeGreaterThanOrEqual(4300);
+    // the franchise's own view of what it owes includes the DR
+    const own = ok(await as('fr.mayon.owner').get('/api/franchise-ar')).body.franchises[0]; expect(own.unpaidGoods.some((x: { saleId: string }) => x.saleId === drId)).toBe(true);
+  });
+
+  it('the franchise reports a problem; the Franchise Coordinator corrects the DR (same number, old one voided, stock follows); the franchise then confirms and its stock goes up', async () => {
+    await prisma.location.update({ where: { id: mayon }, data: { franchiseAssociateReceives: false } });
+    await as('fr.mayon.assoc').post(`/api/franchise-drs/${receiptId}/receive`).expect(403); // the owner has not let the associate receive
+    await as('fr.mayon.owner').post(`/api/franchise-drs/${receiptId}/problem`).send({ note: '' }).expect(400);
+    ok(await as('fr.mayon.owner').post(`/api/franchise-drs/${receiptId}/problem`).send({ note: 'Only 4 of the first item arrived' }));
+    expect(await notes('franchise.coord')).toContain('FRANCHISE_DR_PROBLEM');
+    const before = await onHand(wh, item);
+    await as('fr.mayon.owner').post(`/api/sales/${drId}/amend-franchise-dr`).send({ lines: [{ productId: item, qty: 4 }] }).expect(403); // a franchise cannot edit it
+    const fixed = ok(await as('franchise.coord').post(`/api/sales/${drId}/amend-franchise-dr`).send({ lines: [{ productId: item, qty: 4 }, { productId: item2, qty: 2 }], notes: 'corrected' })).body;
+    expect(fixed.drSiNo).toBe(`FD-${run}-1`); expect(Number(fixed.grandTotal)).toBe(4 * 700 + 2 * 400); expect(fixed.id).not.toBe(drId);
+    expect((await prisma.salesDoc.findUniqueOrThrow({ where: { id: drId } })).voidedAt).toBeTruthy();
+    expect(await onHand(wh, item)).toBe(before + 5 - 4); // the old 5 came back, 4 went out
+    expect(await notes('fr.mayon.owner')).toContain('FRANCHISE_DR_EDITED');
+    const list = ok(await as('fr.mayon.owner').get('/api/franchise-drs')).body as { id: string; saleId: string; status: string }[];
+    expect(list.some((x) => x.saleId === drId)).toBe(false); const nd = list.find((x) => x.saleId === fixed.id)!; expect(nd.status).toBe('PENDING');
+    // unpaid goods now point to the corrected DR only
+    const ar = ok(await as('acct.head').get('/api/franchise-ar')).body.franchises.find((f: { locationId: string }) => f.locationId === mayon);
+    expect(ar.unpaidGoods.some((x: { saleId: string }) => x.saleId === drId)).toBe(false); expect(Number(ar.unpaidGoods.find((x: { saleId: string }) => x.saleId === fixed.id).balance)).toBe(3600);
+    // the franchise confirms: its stock goes up by what the DR sent
+    const fb = await onHand(mayon, item);
+    ok(await as('fr.mayon.owner').post(`/api/franchise-drs/${nd.id}/receive`));
+    expect(await onHand(mayon, item)).toBe(fb + 4);
+    await as('fr.mayon.owner').post(`/api/franchise-drs/${nd.id}/receive`).expect(400); // once
+    expect(ok(await as('fr.mayon.owner').get(`/api/franchise-drs?status=RECEIVED`)).body.some((x: { saleId: string }) => x.saleId === fixed.id)).toBe(true);
+    // after receipt the DR cannot be replaced any more
+    await as('franchise.coord').post(`/api/sales/${fixed.id}/amend-franchise-dr`).send({ lines: [{ productId: item, qty: 1 }] }).expect(400);
+    void malolos;
+  });
+});
+
+describe('Franchise availability and orders: the Coordinator generates, the warehouse edits, the franchise orders, picklist, final check, DR (owner request 2026-10-15)', () => {
+  const today = () => new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);
+  let wh = ''; let mayon = ''; let item = ''; let item2 = ''; let avId = ''; let orderId = '';
+  const give = async (locationId: string, productId: string, qty: number, flavor: string | null) => { const b = await prisma.batch.create({ data: { productId, batchNo: `FA-${run}-${productId.slice(0, 4)}-${flavor ?? 'x'}`, receivedRef: 'TEST', unitCost: '500', flavor } }); await prisma.stockLedger.create({ data: { locationId, productId, batchId: b.id, qtyDelta: qty, movementType: 'RECEIVE', documentType: 'OpeningStock', documentId: b.id, unitCost: '500', businessDate: new Date(`${today()}T00:00:00Z`) } }); await prisma.stockBalance.create({ data: { locationId, productId, batchId: b.id, qty } }); };
+  const notes = async (u: string) => JSON.stringify(ok(await as(u).get('/api/notifications')).body);
+  type Av = { id: string; status: string; lines: { id: string; productId: string; qty: number; systemQty: number; franchisePrice: number | null; flavors: { flavor: string | null; qty: number; remaining: number }[] }[]; myOrder: { id: string; status: string } | null };
+
+  it('setup and generate: the Coordinator makes the list from the system stock, flavor by flavor; the franchise cannot see it yet', async () => {
+    await prisma.salesReportSubmission.deleteMany({});
+    const locs = ok(await as('admin').get('/api/locations')).body as { id: string; code: string }[]; wh = locs.find((l) => l.code === 'WH')!.id; mayon = locs.find((l) => l.code === 'MAYON')!.id;
+    const cats = ok(await as('admin').get('/api/categories')).body as { id: string; accountingClass: string }[]; const cat = cats.find((c) => c.accountingClass === 'SUPPLEMENT')!.id;
+    item = ok(await as('admin').post('/api/products').send({ name: `FA A ${run}`, categoryId: cat, prices: { RETAIL: 1000, FRANCHISE: 700 }, cost: 500 })).body.id; item2 = ok(await as('admin').post('/api/products').send({ name: `FA B ${run}`, categoryId: cat, prices: { RETAIL: 600, FRANCHISE: 400 }, cost: 300 })).body.id;
+    await give(wh, item, 20, 'Chocolate'); await give(wh, item, 10, 'Vanilla'); await give(wh, item2, 8, null);
+    if (!(await prisma.customer.findFirst({ where: { type: 'FRANCHISE', locationId: mayon } }))) await prisma.customer.create({ data: { code: `FAC-${run}`, name: 'Franchise Mayon', type: 'FRANCHISE', locationId: mayon } });
+    await as('sales.westave').post('/api/franchise-orders/availability').send({}).expect(403); await as('wh.incharge').post('/api/franchise-orders/availability').send({}).expect(403);
+    const av = ok(await as('franchise.coord').post('/api/franchise-orders/availability').send({ notes: 'October stock' }).expect(201)).body as Av; avId = av.id;
+    expect(av.status).toBe('WAREHOUSE_REVIEW'); const l1 = av.lines.find((l) => l.productId === item)!; expect(l1.qty).toBe(30); expect(l1.systemQty).toBe(30); expect(l1.flavors.map((f) => `${f.flavor}:${f.qty}`).sort()).toEqual(['Chocolate:20', 'Vanilla:10']);
+    expect(await notes('wh.incharge')).toContain('FRANCHISE_AVAILABILITY');
+    await as('fr.mayon.owner').get(`/api/franchise-orders/availability/${avId}`).expect(403);
+    expect(((ok(await as('fr.mayon.owner').get('/api/franchise-orders/availability')).body) as { id: string }[]).some((x) => x.id === avId)).toBe(false);
+  });
+
+  it('the warehouse removes items, edits quantities and flavors (less, never more), and sends it back; the Coordinator sends it to the franchises, which are told', async () => {
+    const av = ok(await as('wh.incharge').get(`/api/franchise-orders/availability/${avId}`)).body as Av;
+    const l1 = av.lines.find((l) => l.productId === item)!; const l2 = av.lines.find((l) => l.productId === item2)!;
+    await as('franchise.coord').put(`/api/franchise-orders/availability/${avId}`).send({ lines: [{ lineId: l1.id, remove: true }] }).expect(403); // the coordinator does not edit it
+    await as('wh.incharge').put(`/api/franchise-orders/availability/${avId}`).send({ lines: [{ lineId: l1.id, flavors: [{ flavor: 'Chocolate', qty: 25 }] }] }).expect(400); // more than the system has
+    const cut = ok(await as('wh.incharge').put(`/api/franchise-orders/availability/${avId}`).send({ lines: [{ lineId: l1.id, flavors: [{ flavor: 'Chocolate', qty: 15 }, { flavor: 'Vanilla', qty: 4 }] }, { lineId: l2.id, remove: true }] })).body as Av;
+    expect(cut.lines.find((l) => l.productId === item)).toMatchObject({ qty: 19, systemQty: 30 }); expect(cut.lines.some((l) => l.productId === item2)).toBe(false);
+    ok(await as('wh.incharge').post(`/api/franchise-orders/availability/${avId}/send-to-coordinator`));
+    expect(await notes('franchise.coord')).toContain('checked the availability');
+    await as('wh.incharge').put(`/api/franchise-orders/availability/${avId}`).send({ lines: [{ lineId: l1.id, remove: true }] }).expect(400); // no longer with the warehouse
+    await as('fr.mayon.owner').get(`/api/franchise-orders/availability/${avId}`).expect(403); // still not published
+    const pub = ok(await as('franchise.coord').post(`/api/franchise-orders/availability/${avId}/publish`).send({ franchiseIds: [mayon] })).body as Av; expect(pub.status).toBe('PUBLISHED');
+    expect(await notes('fr.mayon.owner')).toContain('Products available');
+    const mine = ok(await as('fr.mayon.owner').get(`/api/franchise-orders/availability/${avId}`)).body as Av; const m1 = mine.lines.find((l) => l.productId === item)!;
+    expect(m1.franchisePrice).toBe(700); expect(m1.flavors.find((f) => f.flavor === 'Chocolate')).toMatchObject({ qty: 15, remaining: 15 });
+  });
+
+  it('the franchise orders flavor by flavor (never more than is available), the Coordinator makes the picklist and prints it, the warehouse does the final check, then the DR is made', async () => {
+    const orderBody = (choc: number, van: number) => ({ lines: [{ productId: item, flavor: 'Chocolate', qty: choc }, { productId: item, flavor: 'Vanilla', qty: van }], notes: 'for the weekend' });
+    await as('fr.mayon.owner').post(`/api/franchise-orders/availability/${avId}/order`).send(orderBody(16, 1)).expect(400); // only 15 chocolate
+    await as('fr.mayon.owner').post(`/api/franchise-orders/availability/${avId}/order`).send({ lines: [{ productId: item2, flavor: null, qty: 1 }] }).expect(400); // not on the list
+    await as('sales.westave').post(`/api/franchise-orders/availability/${avId}/order`).send(orderBody(1, 1)).expect(403);
+    const o = ok(await as('fr.mayon.owner').post(`/api/franchise-orders/availability/${avId}/order`).send(orderBody(12, 3)).expect(201)).body; orderId = o.id; expect(o.status).toBe('ORDERED'); expect(o.orderNo).toMatch(/^FO-\d{4}-\d{4}$/);
+    expect(await notes('franchise.coord')).toContain(o.orderNo);
+    // the same franchise changes its order before the picklist
+    ok(await as('fr.mayon.owner').post(`/api/franchise-orders/availability/${avId}/order`).send(orderBody(12, 4)));
+    const afterEdit = ok(await as('franchise.coord').get(`/api/franchise-orders/orders/${orderId}`)).body; expect(afterEdit.lines.reduce((n: number, l: { qty: number }) => n + l.qty, 0)).toBe(16);
+    expect(((ok(await as('franchise.coord').get(`/api/franchise-orders/orders?availabilityId=${avId}`)).body) as { id: string }[]).some((x) => x.id === orderId)).toBe(true);
+    // what is left for other franchises
+    const left = ok(await as('fr.mayon.assoc').get(`/api/franchise-orders/availability/${avId}`)).body as Av; expect(left.lines.find((l) => l.productId === item)!.flavors.find((f) => f.flavor === 'Chocolate')!.remaining).toBe(15); // its own order is not counted against itself
+    expect(ok(await as('franchise.coord').get(`/api/franchise-orders/availability/${avId}`)).body.lines.find((l: { productId: string }) => l.productId === item).flavors.find((f: { flavor: string }) => f.flavor === 'Chocolate').remaining).toBe(3); // the head office sees what is left after every order
+    const pk = ok(await as('franchise.coord').post(`/api/franchise-orders/orders/${orderId}/picklist`)).body; expect(pk.status).toBe('PICKLIST'); expect(pk.picklistNo).toMatch(/^PL-\d{4}-\d{4}$/);
+    await as('fr.mayon.owner').post(`/api/franchise-orders/availability/${avId}/order`).send(orderBody(1, 1)).expect(400); // it has gone further
+    const pdf = await as('franchise.coord').get(`/api/franchise-orders/orders/${orderId}/picklist.pdf`).expect(200); const html = pdf.text ?? pdf.body.toString(); expect(html).toContain('PICKLIST'); expect(html).toContain('Chocolate'); expect(html).toContain(`FA-${run}`.slice(0, 2));
+    await as('wh.incharge').post(`/api/franchise-orders/orders/${orderId}/check`).send({ decision: 'APPROVE' }).expect(400); // not sent for checking
+    ok(await as('franchise.coord').post(`/api/franchise-orders/orders/${orderId}/send-to-warehouse`));
+    expect(await notes('wh.incharge')).toContain('final check');
+    await as('franchise.coord').post(`/api/franchise-orders/orders/${orderId}/check`).send({ decision: 'APPROVE' }).expect(403);
+    await as('wh.incharge').post(`/api/franchise-orders/orders/${orderId}/check`).send({ decision: 'RETURN' }).expect(400); // say why
+    const co = ok(await as('wh.incharge').get(`/api/franchise-orders/orders/${orderId}`)).body; const choc = co.lines.find((l: { flavor: string }) => l.flavor === 'Chocolate');
+    ok(await as('wh.incharge').post(`/api/franchise-orders/orders/${orderId}/check`).send({ lines: [{ lineId: choc.id, checkedQty: 10 }], note: 'only 10 chocolate boxes found', decision: 'APPROVE' }));
+    expect(ok(await as('wh.incharge').get(`/api/franchise-orders/orders/${orderId}`)).body.status).toBe('APPROVED');
+    await as('wh.incharge').post(`/api/franchise-orders/orders/${orderId}/make-dr`).send({ drSiNo: `FA-${run}-DR` }).expect(403);
+    await as('franchise.coord').post(`/api/franchise-orders/orders/${orderId}/make-dr`).send({ drSiNo: '' }).expect(400);
+    const done = ok(await as('franchise.coord').post(`/api/franchise-orders/orders/${orderId}/make-dr`).send({ drSiNo: `FA-${run}-DR` })).body; expect(done.status).toBe('DR_MADE'); expect(done.dr.drSiNo).toBe(`FA-${run}-DR`);
+    const sale = ok(await as('franchise.coord').get(`/api/sales/${done.dr.id}`)).body; expect(Number(sale.grandTotal)).toBe((10 + 4) * 700); expect(sale.channel).toBe('FRANCHISE');
+    // the DR is connected to the franchise: it waits for its confirmation and the goods show as unpaid in Franchise AR
+    expect(((ok(await as('fr.mayon.owner').get('/api/franchise-drs')).body) as { saleId: string; status: string }[]).find((x) => x.saleId === done.dr.id)?.status).toBe('PENDING');
+    const bat = await prisma.stockLedger.findMany({ where: { documentType: 'SalesDoc', documentId: done.dr.id, movementType: 'SALE' }, include: { batch: true } }); expect(bat.filter((b) => b.batch.flavor === 'Chocolate').reduce((n, b) => n - b.qtyDelta, 0)).toBe(10); expect(bat.filter((b) => b.batch.flavor === 'Vanilla').reduce((n, b) => n - b.qtyDelta, 0)).toBe(4);
+    await as('franchise.coord').post(`/api/franchise-orders/orders/${orderId}/cancel`).send({ reason: 'too late now' }).expect(400); // the DR exists
   });
 });
 

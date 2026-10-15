@@ -140,6 +140,8 @@ You run one branch: sales, expenses, stock received and sent, the weekly count, 
 
 **Proof of payment:** for every online, card or cheque payment (a sale, an AR collection, a replacement price difference) upload the screenshot, the card slip or the photo of the cheque where you record it: it cannot be saved without it. For a replacement paid in two ways, press *Paid in another way too* and give each amount with its proof. The Daily Sales Report prints your proofs at the end with a reference beside each sale, so there is nothing to print and staple. Check *Payment Proofs* for anything shown in red.
 
+**Promo tick:** while a promo runs for a product, the line in New Sale shows a **Promo price** tick. Tick it when the customer gets the promo price; leave it off when the normal price is charged. It is saved so the Owner can see how many were sold on promo. A DR you make for a franchise is sent to that franchise to confirm.
+
 ## Warehouse Associate
 <!-- role: WAREHOUSE_ASSOCIATE -->
 You enter what comes into and goes out of the warehouse. You never see supplier cost. Your entries are checked by the Warehouse In-Charge before stock changes.
@@ -180,6 +182,8 @@ You enter what comes into and goes out of the warehouse. You never see supplier 
 **Your pay:** My Pay & Charges.
 
 **Warehouse expenses** (menu: Expenses): record an expense of the warehouse (choose the account, amount and payee). You may also pay from the warehouse **Cash fund** (the balance is shown; you spend it, Accounting / the cash fund holders replenish it), or choose cash on hand, a bank account or an owner advance.
+
+**Franchise availability and branch requests:** you can edit an availability (offer quantity and flavors, remove items) and prepare what a branch requested, the same as the In-Charge; the In-Charge does the final approval of a franchise order. You can pay warehouse expenses from the cash fund (not set it up).
 
 ## Warehouse In-Charge
 <!-- role: WAREHOUSE_IN_CHARGE -->
@@ -231,6 +235,10 @@ You are responsible for the warehouse stock. You check your associates' entries,
 **Warehouse expenses** (menu: Expenses): you and the Warehouse Associate record the warehouse's expenses (cash fund, cash on hand, bank account or owner advance).
 
 **Restocking:** you can open every purchase order (Restock & Purchase Orders, view only) and print the **warehouse copy**: per branch, what to pull out now from existing stock and each branch's share when the supplier's delivery arrives. When you receive a delivery for an order, choose it under *This delivery is for a purchase order*.
+
+**Franchise availability** (menu: Franchise Orders): when the Franchise Coordinator sends an availability, open it, type the **Offer** (quantity and flavors you can give) for each product, remove what you cannot give, and *Send to the Franchise Coordinator*. After the coordinator prints the picklist and your team prepares the goods, do the **final check** and *Approve* (or send back with a note); the coordinator then makes the DR.
+**Requests from the branches** (Transfers): a branch's request appears with its products already filled in. Edit the quantities (or remove an item) → *Prepare the pull-out*, or *Decline* with a reason.
+**Cash fund:** you and your associates can pay warehouse expenses from the warehouse cash fund (Expenses → Paid from Cash fund).
 
 ## Head Auditor
 <!-- role: HEAD_AUDITOR -->
@@ -288,6 +296,8 @@ You approve costs and most corrections, audit the branches, and watch the cash.
 **Proofs of payment:** *Payment Proofs* (Reports) shows the proof of every online, card and cheque payment, AR collection, replacement payment and deposit slip of a branch for a day or period, with the missing ones in red. Print it with the pictures, or read the proofs at the end of the printed Daily Sales Report: each sale has a reference (ON-1, CC-2, CQ-1 …) in its Proof column, and the legend tells the type.
 
 **Restock override:** if the data says nothing is needed you can still order: in *Generate a restock request* tick the supplier and choose *Every item of the supplier* or *A blank order*, then type the quantities and each branch's share yourself.
+
+**Promos:** choose a **% off** (20–70%) or a fixed price, set the **internal quantity** per product, and use **See promo sales** to monitor sold / left. Every sale on a promo item carries the associate's promo tick.
 
 ## Asst Auditor
 <!-- role: ASST_AUDITOR -->
@@ -351,6 +361,8 @@ You sell at a franchise. You never see franchise cost.
 
 **Your password:** press the key icon at the top right (**Change my password**) any time. Your account is personal and you answer for everything done under it, so never tell your password to anyone, not even HR, your supervisor or the Owner. Nobody can see it.
 
+**Franchise orders and DRs:** you can order from an availability and see the DRs for your franchise. You can confirm a DR's receipt only if your franchise owner allows associates to receive stock.
+
 ## Franchise Owner
 <!-- role: FRANCHISE_OWNER -->
 You run your franchise. Everything you see is limited to your own branch (every sale, transfer, expense and invoice of your franchise, and no other), and you create your own sales and expenses. Your books are separate from the other GWS branches. Shipping that GWS charges you for a sale appears on **Franchise AR** as its own invoice.
@@ -372,6 +384,8 @@ You run your franchise. Everything you see is limited to your own branch (every 
 - **Need more time?** Press **Ask for extension**, choose the new date and give the reason. The Owner decides; the auditors, Accounting and the Franchise Coordinators are flagged. No new penalty or interest is added until the new date.
 - Unpaid two months after the due date, the account is flagged and the company may issue a demand, suspend credit, or ask for cash before delivery.
 - Sales paid by credit card are priced at the credit-card price automatically.
+
+**Franchise orders:** when the Franchise Coordinator sends the availability you get a notice. Open *Franchise Orders*, type **I order** (quantity) and choose the flavors, then *Send my order*. **Franchise DRs:** every DR made for your franchise (from the warehouse or any main branch) is listed; check the goods and *Confirm receipt* (your stock goes up) or *Report a problem* with a note; the coordinator corrects the DR. **Franchise AR** shows *Unpaid goods (DRs)* with the DR behind each.
 
 ## Accounting Head
 <!-- role: ACCOUNTING_HEAD -->
@@ -413,6 +427,8 @@ You keep the books.
 **Purchase orders:** you can view every purchase order (Restock & Purchase Orders); it books nothing. The delivery and its approved cost do.
 
 **Proofs of payment:** *Payment Proofs* (Reports) shows the proof of every online, card and cheque payment, AR collection, replacement payment and deposit slip of a branch for a day or period, with the missing ones in red. Print it with the pictures, or read the proofs at the end of the printed Daily Sales Report: each sale has a reference (ON-1, CC-2, CQ-1 …) in its Proof column, and the legend tells the type.
+
+**Franchise AR:** goods delivered on a DR and not yet paid show as **Unpaid goods (DRs)** (click one to open the DR) and are in the franchise total. You can see Franchise DRs.
 
 ## Accounting Associate
 <!-- role: ACCOUNTING_ASSOCIATE -->
@@ -530,6 +546,8 @@ You see and can do everything. You are the final approver.
 **Your password:** press the key icon at the top right (**Change my password**) any time. Your account is personal and you answer for everything done under it, so never tell your password to anyone, not even HR, your supervisor or the Owner. Nobody can see it.
 
 **Restocking:** the Head Auditor sends you purchase orders (My Approvals or Restock & Purchase Orders). Each shows days left per branch, the suggested transfers from existing stock and the suggested order; you may change any number, then Approve or Reject with a note. You may also generate one yourself (approved at once). *Ask the Head Auditor to make the transfers* tells the Head Auditor, the Warehouse In-Charge and the branches. Print the internal copy; the supplier copy shows no branches or prices. Mark as sent with the expected delivery date; a delivery linked to the order shows received against ordered.
+
+**Promos:** the same as the Head Auditor (% off 20–70%, internal quantity, See promo sales). **Franchise DRs:** you can see every franchise DR and whether the franchise has confirmed it. **Cash fund:** set the warehouse and every branch fund under Cash Fund; warehouse staff may spend from theirs.
 
 ## E-comm Associate
 <!-- role: ECOMM_ASSOCIATE -->
@@ -659,9 +677,14 @@ You look after the franchise partners. You never see cost.
 6. **Shipping charges to franchises:** on Franchise AR, **Fill in the amount** within **2 days** of the sale (a late one is flagged to you, the Owner, the auditors and Accounting every day). Filling it creates a separate franchise invoice. To change the amount afterwards, or to ask for more time, press **Ask to change / Ask for more time**: the Owner decides.
 7. **Your password:** press the key icon at the top right. It is personal; never tell it to anyone.
 
+**Franchise availability and orders** (menu: Franchise Orders): (1) *Generate availability* from the warehouse stock → send to the warehouse; (2) the Warehouse In-Charge edits it and sends it back; (3) read it and *Send to the franchises*; (4) each franchise orders its quantities and flavors; (5) open an order → *Make the picklist* → print the PDF → *Send to the warehouse for the final check*; (6) when the warehouse approves, *Make the DR*.
+**Franchise DRs:** every DR for a franchise (from the warehouse or any main branch) is sent to the franchise to confirm. If the franchise reports a problem, open the sale and *Correct this franchise DR* (same number and date). **Franchise AR** now lists *Unpaid goods (DRs)*: click one to open the DR.
+
 ## Asst. Franchise Coordinator
 <!-- role: ASST_FRANCHISE_COORDINATOR -->
 You help the Franchise Coordinator with the same screens: **New Sale** (from the warehouse), **Shipping charges to franchises** (fill in the amount within 2 days; ask the Owner to change it), **Franchise AR** (invoices, penalty, interest, extension requests, notifications), **Memorandums** (write, sign, track who has read them) and the franchise stock transfers. You never see cost. Change your password with the key icon at the top right.
+
+**Franchise Orders and Franchise DRs:** you can generate availability, send it to the franchises, make the picklist and the DR, and correct a franchise DR, the same as the Franchise Coordinator.
 
 ## Other users (custom permissions)
 <!-- role: CUSTOM -->

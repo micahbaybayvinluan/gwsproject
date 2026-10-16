@@ -312,6 +312,10 @@ Waybill Report → **Choose waybill PDF files** (TikTok or Shopee labels) → pi
 131. **Promo %, internal quantity** (`head.auditor`): Promos → Issue a promo → choose 30% off, type the internal quantity → Issue. Open See promo sales.
 132. **Promo tick** (`sales.westave`): New Sale → add the promo item → the Promo price tick shows; untick it: the normal price returns.
 133. **Interest on unpaid DR goods** (`franchise.coord`, then `acct.head`): New Sale to a franchise on credit with a due date earlier than today: it is refused ("cannot be before the date of the sale"). Make it due today; the next day open Franchise AR (`acct.head`): the DR shows 1 day overdue with 2% penalty and 0.1% interest, and the franchise card shows Total goods AR, Total shipping AR, Total penalty and Total interest AR apart.
+134. **DR list and Edit** (`sales.westave`): Reports → Daily Sales Report (today): at the bottom *DRs entered* lists today's DRs. Click a DR number: the sale opens. Back on the list press *Edit* on a DR: change the quantity, the DR number or the customer name → *Save the corrected DR*. The DR keeps today's date; the old one is voided (see *Who did what*).
+135. **Edit refused after closing** (`sales.westave`): submit today's Daily Sales Report, then open a DR: the *Edit this DR* card says the day is closed; use the post-close edit request instead.
+136. **Sales figure links** (`admin` or `acct.head`): Inventory Reports → Daily Inventory Report for a day that had sales: click a quantity under *Sales*. The list shows the DRs; *Open the DR* opens the sale and *Open the Daily Sales Report of …* opens that day's report.
+137. **Member boxes by channel** (`sales.westave`): New Sale → channel Walk-in shows *Wheysted member*, phone / email and the 6-Pack tick; change the channel to Franchise, Dealer, Agent or Shipping marketplace: they disappear.
 
 ## Where the files come out
 

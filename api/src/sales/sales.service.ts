@@ -39,6 +39,8 @@ const franchiseUserOf = (u: SessionUser) => u.roleKey.startsWith('FRANCHISE');
 export const TIER_BY_CHANNEL: Record<SalesChannel, string> = { WALK_IN: 'RETAIL', DELIVERY: 'RETAIL', SHIPPING_COURIER: 'RETAIL', SHIPPING_MARKETPLACE: 'RETAIL', FRANCHISE: 'FRANCHISE', DEALER: 'DEALER', AGENT: 'AGENT', PERSONAL: 'RETAIL', OTHER: 'RETAIL' };
 
 /** §8 Sales module: entry (all channels/modes), agents, AR/PDC, payments, credit notes. Stock is deducted on save (FEFO). */
+export type AmendInput = { lines: SalesLineInput[]; notes?: string | null; dueDate?: string | null; drSiNo?: string | null; customerName?: string | null };
+
 @Injectable()
 export class SalesService implements OnModuleInit {
   constructor(private prisma: PrismaService, private seq: SequenceService, private stock: StockService, private approvals: ApprovalsService, private master: MasterService, private notify: NotificationsService, private audit: AuditService, private settings: SettingsService, private attachments: AttachmentsService, private posting: PostingService, private closing: ClosingService, private scope: ScopeService, private expenses: ExpensesService, private followUps: CustomerFollowUpsService, private outlets: OutletsService, private agentMonitor: MonitorService, private sixPack: SixPackService, private franchiseShipping: FranchiseShippingService, private loyalty: LoyaltyService, private promos: PromosService, private franchiseDr: FranchiseDrService) {}
@@ -62,6 +64,8 @@ export class SalesService implements OnModuleInit {
   }
 
   async create(input: SalesInput, user: SessionUser, opts: { skipClosedCheck?: boolean; amendedFrom?: string } = {}) {
+    // Wheysted member, voucher, 6-Pack sticker and the customer's phone / email are for retail customers only; a franchise, dealer, agent or marketplace sale carries none of them (owner request 2026-10-16)
+    if (['FRANCHISE', 'DEALER', 'AGENT', 'SHIPPING_MARKETPLACE'].includes(input.channel)) input = { ...input, memberId: null, voucherCode: null, sixPackSticker: false, customerPhone: null, customerEmail: null };
     const locationId = input.locationId ?? user.locationIds[0];
     if (!locationId) throw new BadRequestException('locationId required');
     if (user.locationScoped && !user.locationIds.includes(locationId)) throw new ForbiddenException('Outside your branch');
@@ -250,15 +254,37 @@ export class SalesService implements OnModuleInit {
    * Correct a franchise DR that has a mistake or changed (owner request 2026-10-15): the Franchise Coordinators replace its items, prices, due date or notes while the franchise has not yet received it.
    * The corrected DR keeps the DR number and date; the old one is voided (stock and journal reversed), its shipping charge moves over, the franchise is told and checks it again.
    */
-  async amendFranchiseDr(id: string, input: { lines: SalesLineInput[]; notes?: string | null; dueDate?: string | null }, user: SessionUser) {
+  async amendFranchiseDr(id: string, input: AmendInput, user: SessionUser) {
     if (!user.permissions.has('franchise.dr.edit')) throw new ForbiddenException('Only the Franchise Coordinators edit a franchise DR');
-    const old = await requestContext.runSystem(() => this.get(id, user));
+    return this.amendCore(id, input, user, { franchiseOnly: true, skipClosedCheck: true });
+  }
+
+  /**
+   * Edit a sale / DR until its day closes (owner request 2026-10-16): the DR keeps its number and date; the old document is voided and the corrected one is made, so stock, journal, AR and proofs follow.
+   * The day is open until the branch submits its Daily Sales Report (and never after midnight): after that, a post-close edit request is needed.
+   */
+  async amendSale(id: string, input: AmendInput, user: SessionUser) {
+    if (!user.permissions.has('sale.edit.sameday')) throw new ForbiddenException('You may not edit sales');
+    return this.amendCore(id, input, user, { franchiseOnly: false, skipClosedCheck: false });
+  }
+
+  private async amendCore(id: string, input: AmendInput, user: SessionUser, o: { franchiseOnly: boolean; skipClosedCheck: boolean }) {
+    const old = await requestContext.runSystem(async () => await this.get(id, user));
+    if (user.locationScoped && !user.locationIds.includes(old.locationId) && !(o.franchiseOnly && user.permissions.has('franchise.dr.edit'))) throw new ForbiddenException('Outside your branch');
     if (old.voidedAt) throw new BadRequestException('This DR was voided');
-    if (old.channel !== 'FRANCHISE' || !old.customerId) throw new BadRequestException('Only a DR made for a franchise is edited here');
+    if (o.franchiseOnly && (old.channel !== 'FRANCHISE' || !old.customerId)) throw new BadRequestException('Only a DR made for a franchise is edited here');
+    if (old.channelSub === 'CONSIGNMENT') throw new BadRequestException('A consignment sale is changed from its consignment report');
     if (D(old.amountPaid).gt(0) && old.paymentMode === 'AR_PDC') throw new BadRequestException('A payment has been recorded on this DR; void the payment first');
+    if (!o.skipClosedCheck && (await this.closing.isClosed(old.locationId, old.docDate))) throw new BadRequestException({ message: 'This business day is closed; submit a post-close edit request instead', code: 'DAY_CLOSED' });
     if (!input.lines.length) throw new BadRequestException('At least one item');
-    await this.franchiseDr.assertEditable(id);
-    const base: SalesInput = { locationId: old.locationId, docDate: dateStr(old.docDate), channel: 'FRANCHISE', channelSub: old.channelSub, customerId: old.customerId, drSiNo: old.drSiNo, paymentMode: old.paymentMode, paymentAccountId: old.paymentAccountId, proofOfPaymentAttachmentId: old.proofOfPaymentAttachmentId, deliveryFee: Number(old.deliveryFee), shippingFee: Number(old.shippingFee), pdcBank: old.pdcBank ?? undefined, pdcChequeNo: old.pdcChequeNo ?? undefined, pdcDate: old.pdcDate ? dateStr(old.pdcDate) : null, dueDate: old.dueDate ? dateStr(old.dueDate) : null, notes: old.notes ?? undefined, lines: [] };
+    if (old.channel === 'FRANCHISE' && old.customerId) await this.franchiseDr.assertEditable(id);
+    if (old.voucherId) throw new BadRequestException('A member voucher was used on this sale; void it and record it again');
+    const drSiNo = input.drSiNo?.trim() || old.drSiNo;
+    const base: SalesInput = { locationId: old.locationId, docDate: dateStr(old.docDate), channel: old.channel, channelSub: old.channelSub, customerId: old.customerId, agentId: old.agentId, riderId: old.riderId, customerName: old.customerName ?? undefined, drSiNo: old.drSiNo, paymentMode: old.paymentMode, paymentAccountId: old.paymentAccountId, proofOfPaymentAttachmentId: old.proofOfPaymentAttachmentId, deliveryFee: Number(old.deliveryFee), shippingFee: Number(old.shippingFee), pdcBank: old.pdcBank ?? undefined, pdcChequeNo: old.pdcChequeNo ?? undefined, pdcDate: old.pdcDate ? dateStr(old.pdcDate) : null, dueDate: old.dueDate ? dateStr(old.dueDate) : null, notes: old.notes ?? undefined, lines: [],
+      // what the sale already carries stays as it was
+      outletId: old.outletId, memberId: old.memberId, customerPhone: old.customerPhone, customerEmail: old.customerEmail, cardMid: old.cardMid ?? undefined, cardSlipNo: old.cardSlipNo ?? undefined, cardApprovalCode: old.cardApprovalCode ?? undefined, cardBatchNo: old.cardBatchNo ?? undefined,
+      shippingExpense: Number(old.shippingExpense), marketplaceCharges: Number(old.marketplaceCharges), riderIncentive: Number(old.riderIncentive), sixPackSticker: old.sixPackStickers > 0,
+      incentive: D(old.incentiveAmount).gt(0) ? { amount: Number(old.incentiveAmount), payee: old.incentivePayee ?? '' } : null };
     const restore: SalesInput = { ...base, lines: old.lines.filter((l) => l.qty > 0).map((l) => ({ productId: l.productId, qty: l.qty, unitPrice: Number(l.unitPrice), batchId: l.batchId, exactBatch: true, isFreebie: l.isFreebie, priceTier: l.priceTier })) };
     const oldTotal = D(old.grandTotal);
     // free the DR number for the corrected DR, then void the old one; if the corrected one cannot be saved the original is put back
@@ -267,13 +293,13 @@ export class SalesService implements OnModuleInit {
     try { await this.void(id, `Corrected by ${user.fullName}`, user, { skipClosedCheck: true }); } catch (e) { await putBack(); throw e; }
     let created;
     try {
-      created = await this.create({ ...base, notes: input.notes === undefined ? base.notes : input.notes ?? undefined, dueDate: input.dueDate === undefined ? base.dueDate : input.dueDate, lines: input.lines }, user, { skipClosedCheck: true, amendedFrom: id });
+      created = await this.create({ ...base, drSiNo, customerName: input.customerName === undefined ? base.customerName : input.customerName ?? undefined, notes: input.notes === undefined ? base.notes : input.notes ?? undefined, dueDate: input.dueDate === undefined ? base.dueDate : input.dueDate, lines: input.lines }, user, { skipClosedCheck: true, amendedFrom: id });
     } catch (e) {
       try { await this.create(restore, user, { skipClosedCheck: true, amendedFrom: id }); } catch { /* the original could not be put back either: the voided DR stays for the auditors */ }
       throw e;
     }
-    await this.prisma.db.franchiseShippingCharge.updateMany({ where: { salesDocId: id }, data: { salesDocId: created.id } });
-    await this.audit.log({ action: 'FRANCHISE_DR_AMENDED', entityType: 'SalesDoc', entityId: created.id, before: { id, total: oldTotal.toFixed(2) }, after: { total: D(created.grandTotal).toFixed(2) } });
+    if (old.channel === 'FRANCHISE') await this.prisma.db.franchiseShippingCharge.updateMany({ where: { salesDocId: id }, data: { salesDocId: created.id } });
+    await this.audit.log({ action: o.franchiseOnly ? 'FRANCHISE_DR_AMENDED' : 'SALE_AMENDED', entityType: 'SalesDoc', entityId: created.id, before: { id, total: oldTotal.toFixed(2) }, after: { total: D(created.grandTotal).toFixed(2) } });
     return created;
   }
 

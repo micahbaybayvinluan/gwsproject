@@ -142,6 +142,8 @@ You run one branch: sales, expenses, stock received and sent, the weekly count, 
 
 **Promo tick:** while a promo runs for a product, the line in New Sale shows a **Promo price** tick. Tick it when the customer gets the promo price; leave it off when the normal price is charged. It is saved so the Owner can see how many were sold on promo. A DR you make for a franchise is sent to that franchise to confirm.
 
+**Edit a DR before the day closes:** at the bottom of your **Daily Sales Report** the **DRs entered** list shows every DR of the day: click one to open it, or press **Edit** to correct items, quantities, prices, DR number, customer name, due date or notes. The DR keeps its date. After you submit the report the day is closed and Edit disappears (use a post-close edit request). In New Sale, the Wheysted member, phone / email and 6-Pack boxes show only for retail sales, not for Franchise, Dealer, Agent or Marketplace.
+
 ## Warehouse Associate
 <!-- role: WAREHOUSE_ASSOCIATE -->
 You enter what comes into and goes out of the warehouse. You never see supplier cost. Your entries are checked by the Warehouse In-Charge before stock changes.
@@ -299,6 +301,8 @@ You approve costs and most corrections, audit the branches, and watch the cash.
 
 **Promos:** choose a **% off** (20–70%) or a fixed price, set the **internal quantity** per product, and use **See promo sales** to monitor sold / left. Every sale on a promo item carries the associate's promo tick.
 
+**DRs and Inventory Reports:** the Daily Sales Report lists the DRs of the day (click to open, **Edit** while the day is open). In Inventory Reports, click a **Sales** quantity to see the DRs behind it and open the Daily Sales Report of that day.
+
 ## Asst Auditor
 <!-- role: ASST_AUDITOR -->
 You support the Head Auditor.
@@ -320,6 +324,8 @@ You support the Head Auditor.
 **Entering on behalf of a branch**
 - You may record sales, expenses, receiving and transfers when needed. They follow the same approvals as the branch's own entries.
 
+**DRs and Inventory Reports:** the Daily Sales Report lists the DRs of the day (click to open, **Edit** while the day is open). In Inventory Reports, click a **Sales** quantity to see the DRs behind it and open the Daily Sales Report of that day.
+
 ## Audit Associate
 <!-- role: AUDIT_ASSOCIATE -->
 You review branch reports (with supplier cost) and ask for corrections.
@@ -333,6 +339,8 @@ You review branch reports (with supplier cost) and ask for corrections.
 4. You are notified of count discrepancies, cash on hand that is due, and reports not submitted by the cut-off.
 
 **Proofs of payment:** *Payment Proofs* (Reports) shows the proof of every online, card and cheque payment, AR collection, replacement payment and deposit slip of a branch for a day or period, with the missing ones in red. Print it with the pictures, or read the proofs at the end of the printed Daily Sales Report: each sale has a reference (ON-1, CC-2, CQ-1 …) in its Proof column, and the legend tells the type.
+
+**Inventory Reports:** click a **Sales** quantity to see the DRs behind it, each linked to the sale and to the Daily Sales Report of that day.
 
 ## Field Auditor
 <!-- role: FIELD_AUDITOR -->
@@ -430,6 +438,8 @@ You keep the books.
 
 **Franchise AR:** each franchise shows Total goods AR, Total shipping AR, Total penalty and Total interest AR apart. Goods delivered on a DR and not yet paid show as **Unpaid goods (DRs)** (click one to open the DR) and earn the 2% penalty and 0.1% daily interest after the due date, by themselves. A due date before the sale date is refused. You can see Franchise DRs.
 
+**Inventory Reports:** click a **Sales** quantity to see the DRs behind it, each linked to the sale and to the Daily Sales Report of that day.
+
 ## Accounting Associate
 <!-- role: ACCOUNTING_ASSOCIATE -->
 You accept **pull-outs endorsed as an expense** in My Approvals (booked at cost) and are told of every replacement ticket, its price difference and when it is settled (Replacement Tickets, Marketing & BO Pull-outs).
@@ -446,6 +456,8 @@ You accept **pull-outs endorsed as an expense** in My Approvals (booked at cost)
 **Your password:** press the key icon at the top right (**Change my password**) any time. Your account is personal and you answer for everything done under it, so never tell your password to anyone, not even HR, your supervisor or the Owner. Nobody can see it.
 
 **Proofs of payment:** *Payment Proofs* (Reports) shows the proof of every online, card and cheque payment, AR collection, replacement payment and deposit slip of a branch for a day or period, with the missing ones in red. Print it with the pictures, or read the proofs at the end of the printed Daily Sales Report: each sale has a reference (ON-1, CC-2, CQ-1 …) in its Proof column, and the legend tells the type.
+
+**Inventory Reports:** click a **Sales** quantity to see the DRs behind it, each linked to the sale and to the Daily Sales Report of that day.
 
 ## HR Staff
 <!-- role: HR_STAFF -->
@@ -548,6 +560,8 @@ You see and can do everything. You are the final approver.
 **Restocking:** the Head Auditor sends you purchase orders (My Approvals or Restock & Purchase Orders). Each shows days left per branch, the suggested transfers from existing stock and the suggested order; you may change any number, then Approve or Reject with a note. You may also generate one yourself (approved at once). *Ask the Head Auditor to make the transfers* tells the Head Auditor, the Warehouse In-Charge and the branches. Print the internal copy; the supplier copy shows no branches or prices. Mark as sent with the expected delivery date; a delivery linked to the order shows received against ordered.
 
 **Promos:** the same as the Head Auditor (% off 20–70%, internal quantity, See promo sales). **Franchise DRs:** you can see every franchise DR and whether the franchise has confirmed it. **Cash fund:** set the warehouse and every branch fund under Cash Fund; warehouse staff may spend from theirs.
+
+**DRs and Inventory Reports:** the Daily Sales Report lists the DRs of the day (click to open, **Edit** while the branch has not submitted the day). In Inventory Reports, click a **Sales** quantity to see its DRs and open the Daily Sales Report of that date.
 
 ## E-comm Associate
 <!-- role: ECOMM_ASSOCIATE -->

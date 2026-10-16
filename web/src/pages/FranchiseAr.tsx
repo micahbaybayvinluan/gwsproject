@@ -30,7 +30,12 @@ export function FranchiseArPage() {
   const { can, me } = useAuth(); const qc = useQueryClient(); const [sp] = useSearchParams();
   const [showPaid, setShowPaid] = useState(false); const [open, setOpen] = useState<string | null>(sp.get('invoice'));
   const [modal, setModal] = useState<{ kind: 'pay' | 'extend' | 'waive'; inv: Inv } | null>(null);
-  const list = useQuery({ queryKey: ['franchise-ar', showPaid], queryFn: () => api.get<{ asOf: string; rules: Rules; franchises: Franchise[] }>(`/api/franchise-ar?status=${showPaid ? 'ALL' : 'OPEN'}`) });
+  const list = useQuery({ queryKey: ['franchise-ar', showPaid], queryFn: async () => {
+    const r = await api.get<{ asOf: string; rules: Rules; franchises: Franchise[] }>(`/api/franchise-ar?status=${showPaid ? 'ALL' : 'OPEN'}`);
+    // tolerate a server that has not been restarted after an update (missing lists / totals): show zeros instead of crashing the page
+    const z = { goods: '0', goodsAr: '0', shippingAr: '0', penalty: '0', interest: '0', total: '0', overdue: '0', overdueCount: 0, flagged: 0 };
+    return { ...r, franchises: (r.franchises ?? []).map((f) => ({ ...f, invoices: f.invoices ?? [], unpaidGoods: (f.unpaidGoods ?? []).map((d) => ({ ...d, penalty: d.penalty ?? '0', interest: d.interest ?? '0', chargesDue: d.chargesDue ?? '0', totalDue: d.totalDue ?? d.balance })), unpaidGoodsTotal: f.unpaidGoodsTotal ?? '0', totals: { ...z, ...(f.totals ?? {}), goodsAr: f.totals?.goodsAr ?? f.totals?.goods ?? '0', shippingAr: f.totals?.shippingAr ?? '0' } })) };
+  } });
   const refresh = () => { void qc.invalidateQueries({ queryKey: ['franchise-ar'] }); void qc.invalidateQueries({ queryKey: ['franchise-ar-detail'] }); };
   const hold = useMutation({ mutationFn: (v: { id: string; hold: boolean; note?: string }) => api.put(`/api/franchise-ar/locations/${v.id}/credit-hold`, { hold: v.hold, note: v.note }), onSuccess: refresh });
   const rules = list.data?.rules; const all = list.data?.franchises ?? [];

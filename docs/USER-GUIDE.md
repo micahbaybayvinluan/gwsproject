@@ -129,6 +129,18 @@ Each section below starts with a hidden line that says which roles it is for. Th
 - **Credit Card** shows the number of card transactions and the products sold on card; card sales are counted in "Number of products".
 - **Online & card payments by account** shows where the non-cash money went (each bank, **Gcash (GWS)**, card and platform account). The Excel file has it on the **PAYMENT ACCOUNTS** sheet.
 
+## Editing a DR before the day closes, and the DR list of the Daily Sales Report
+<!-- for: sale.edit.sameday, report.sales.own, report.sales.all -->
+- **DRs entered.** At the bottom of the **Daily Sales Report** there is a list of every DR entered that day (DR / SI number, customer, channel, payment, total). **Click a DR** to open it.
+- **Edit.** While the day is open, each DR has an **Edit** button (sales associates of the branch, the Head Auditor, the Asst Auditor, the Franchise Owner and the Owner). You may change the items, quantities and prices, the DR / SI number, the customer name, the due date and the notes. **Save the corrected DR**: the DR keeps its **date**, the old document is voided with a note and the corrected one replaces it, so stock, sales, AR and the Daily Sales Report follow by themselves. Every edit is recorded under *Who did what*.
+- **Until when.** A day is open until the branch **submits its Daily Sales Report** (and never after midnight). After that the Edit button is gone: use **Post-close edit request** (Void / correct) as before.
+- **Not editable here:** a DR that already has an AR payment (void the payment first), a DR that used a member voucher (void it and record it again), a consignment sale, and a franchise DR the franchise has already received (the franchise reports the problem first).
+- **Wheysted member fields only where they apply.** In New Sale the **Wheysted member**, **customer phone / email** and **6-Pack sticker** boxes appear only for retail customers. Choosing **Franchise, Dealer, Agent or Marketplace** removes them (and clears anything typed); the server ignores them for those sales too.
+
+## Inventory Reports: from a Sales figure to its DRs and its Daily Sales Report
+<!-- for: report.inventory.own, report.inventory.all -->
+In the **Daily Inventory Report**, every figure is clickable. **Click a Sales quantity**: a list shows the **DRs** that made it (DR / SI number, items and quantities, date). **Open the DR** goes to that sale; **Open the Daily Sales Report of <date>** goes to the Daily Sales Report of that branch for that day (for example 10 Oct 2026), where the DR was entered. A DR that was voided or corrected later is still listed and marked **VOIDED** (its stock came back under Returns). Pull Out and Transfer In still open their forms.
+
 ## Submitting today's Daily Sales Report (branch staff)
 <!-- for: sale.create -->
 1. Before 8 PM, open **Daily Sales Report** (the dashboard reminds you) and review every detail: on screen, or in **Review report (Excel / PDF)**. Compare it with your DR/SI slips, card slips, receipts and the cash you counted.
@@ -711,7 +723,7 @@ A draft that was not submitted (a transfer / pull-out, a supplier delivery, a co
 
 ## The forms behind a stock movement
 <!-- for: report.inventory.all, report.inventory.own -->
-In **Inventory Reports → Daily Inventory Report**, the figures under **Receive, Transfer In, Returns, Pull Out, Other Out and Adj** are links. Press one to see the forms that made that movement: the Pull-Out and Transfer-In forms (each side sees its own copy), the Supplier's Form with the supplier's delivery receipt, the count sheet, the write-off or the replacement ticket, each with its attachments. Sales has no such view; open the sale in Sales List.
+In **Inventory Reports → Daily Inventory Report**, the figures under **Receive, Transfer In, Returns, Pull Out, Other Out and Adj** are links. Press one to see the forms that made that movement: the Pull-Out and Transfer-In forms (each side sees its own copy), the Supplier's Form with the supplier's delivery receipt, the count sheet, the write-off or the replacement ticket, each with its attachments. The **Sales** figure is a link too: it lists the DRs behind it, each linking to the sale and to the Daily Sales Report of that day (see the next section).
 
 ## Printed forms: the checker's column
 <!-- for: all -->

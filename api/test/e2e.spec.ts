@@ -2242,7 +2242,7 @@ describe('Pull-outs to Prothin Marketing / GWS Marketing / BO, and the forms beh
     expect(own.canCost).toBe(false); expect(JSON.stringify(own)).not.toContain('"value"');
   });
 
-  it('click a figure of the Daily Inventory Report: the forms behind it (pull-out and transfer-in), never for sales', async () => {
+  it('click a figure of the Daily Inventory Report: the forms behind it (pull-out and transfer-in); Sales lists the DRs (owner request 2026-10-16)', async () => {
     const t = ok(await as('wh.incharge').post('/api/transfers').send({ fromLocationId: wh, toLocationId: west, transferType: 'RESTOCK', lines: [{ productId: item, qty: 4 }] }).expect(201)).body;
     ok(await as('wh.incharge').post(`/api/transfers/${t.id}/submit`));
     const r = await prisma.approvalRequest.findFirstOrThrow({ where: { documentId: t.id, status: 'PENDING' } });
@@ -2255,7 +2255,8 @@ describe('Pull-outs to Prothin Marketing / GWS Marketing / BO, and the forms beh
     expect(mine.qty).toBe(4); expect(mine.forms.map((f) => f.label)).toContain('Transfer-In form'); expect(mine.forms.map((f) => f.label)).not.toContain('Pull-Out form'); // the receiver gets its own copy only
     const out = ok(await q('pullOut', 'wh.incharge', wh)).body as { forms: { label: string }[] }[];
     expect(out.some((d) => d.forms.some((f) => f.label === 'Pull-Out form'))).toBe(true);
-    expect((await q('sales')).status).toBe(400);
+    expect((await q('sales')).status).toBe(200); // Sales lists its DRs (covered in the DR edit tests)
+    expect((await q('nonsense')).status).toBe(400);
     await as('sales.westave').get(`/api/stock/movement-documents?locationId=${wh}&productId=${item}&from=${day()}&to=${day()}&bucket=transferIn`).expect(403);
   });
 });
@@ -3512,5 +3513,46 @@ describe('Restocking and purchase orders: suggested per supplier from the days o
     // the Owner's own order needs no second approval; a cancelled order is closed
     const g3 = await gen('admin'); if (g3.created.length) { const id3 = g3.created[0].id; const lines = ok(await as('admin').get(`/api/purchase-orders/${id3}`)).body.lines as { orderQty: number }[]; if (lines.some((l) => l.orderQty > 0)) { expect(ok(await as('admin').post(`/api/purchase-orders/${id3}/submit`)).body.status).toBe('APPROVED'); } ok(await as('admin').post(`/api/purchase-orders/${id3}/cancel`).send({ reason: 'test over' })); await as('admin').post(`/api/purchase-orders/${id3}/cancel`).send({ reason: 'again' }).expect(400); }
     if (g2.created.length) ok(await as('head.auditor').post(`/api/purchase-orders/${g2.created[0].id}/cancel`).send({ reason: 'test over' }));
+  });
+});
+
+describe('Editing a DR until its day closes: the DR keeps its number and date, the Daily Sales Report lists it (owner request 2026-10-16)', () => {
+  const today = () => new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);
+  let loc = ''; let item = ''; let saleId = ''; let newId = '';
+  const onHand = async (p: string) => (await prisma.stockBalance.aggregate({ where: { locationId: loc, productId: p }, _sum: { qty: true } }))._sum.qty ?? 0;
+  it('setup', async () => {
+    await prisma.salesReportSubmission.deleteMany({});
+    loc = ok(await as('sales.westave').get('/api/auth/me')).body.locations[0].id;
+    const cat = (ok(await as('admin').get('/api/categories')).body as { id: string; accountingClass: string }[]).find((c) => c.accountingClass === 'SUPPLEMENT')!.id;
+    item = ok(await as('admin').post('/api/products').send({ name: `ED A ${run}`, categoryId: cat, prices: { RETAIL: 1000 }, cost: 500 })).body.id;
+    const b = await prisma.batch.create({ data: { productId: item, batchNo: `ED-${run}`, receivedRef: 'TEST', unitCost: '500', flavor: 'Vanilla' } });
+    await prisma.stockLedger.create({ data: { locationId: loc, productId: item, batchId: b.id, qtyDelta: 20, movementType: 'RECEIVE', documentType: 'OpeningStock', documentId: b.id, unitCost: '500', businessDate: new Date(`${today()}T00:00:00Z`) } });
+    await prisma.stockBalance.create({ data: { locationId: loc, productId: item, batchId: b.id, qty: 20 } });
+  });
+  it('the associate edits an open-day DR (quantity, DR number, customer): same date, old voided, stock and totals follow; the report lists the corrected one', async () => {
+    const s = ok(await as('sales.westave').post('/api/sales').send({ channel: 'WALK_IN', paymentMode: 'CASH', drSiNo: `ED-${run}-1`, lines: [{ productId: item, qty: 2 }] })).body;
+    saleId = s.id; expect(Number(s.grandTotal)).toBe(2000); expect(await onHand(item)).toBe(18);
+    const n = ok(await as('sales.westave').post(`/api/sales/${saleId}/amend`).send({ lines: [{ productId: item, qty: 3 }], drSiNo: `ED-${run}-1B`, customerName: 'Edited Customer' })).body;
+    newId = n.id; expect(newId).not.toBe(saleId); expect(n.drSiNo).toBe(`ED-${run}-1B`); expect(Number(n.grandTotal)).toBe(3000); expect(String(n.docDate).slice(0, 10)).toBe(today());
+    expect(await onHand(item)).toBe(17);
+    expect(ok(await as('sales.westave').get(`/api/sales/${saleId}`)).body.voidedAt).toBeTruthy();
+    const rep = ok(await as('sales.westave').get(`/api/reports/daily-sales?locationId=${loc}&date=${today()}`)).body as { sales: { id: string }[] };
+    expect(rep.sales.some((x) => x.id === newId)).toBe(true); expect(rep.sales.some((x) => x.id === saleId)).toBe(false);
+  });
+  it('the Sales figure of the Daily Inventory Report links to the DRs behind it and to the Daily Sales Report of that day', async () => {
+    const docs = ok(await as('sales.westave').get(`/api/stock/movement-documents?locationId=${loc}&productId=${item}&from=${today()}&to=${today()}&bucket=sales`)).body as { documentId: string; link: string | null; reportLink: string | null; qty: number; number: string | null; status: string | null }[];
+    // the figure counts the corrected DR (3) and the voided original (2, its stock came back under Returns): both are listed, the voided one marked
+    expect(docs.map((d) => d.documentId).sort()).toEqual([newId, saleId].sort());
+    const cur = docs.find((d) => d.documentId === newId)!; expect(cur.qty).toBe(3); expect(cur.link).toBe(`/sales/${newId}`); expect(cur.reportLink).toBe(`/reports/daily-sales?locationId=${loc}&date=${today()}`); expect(cur.number).toContain(`ED-${run}-1B`);
+    expect(docs.find((d) => d.documentId === saleId)!.status).toBe('VOIDED');
+  });
+  it('another branch, a user without the permission and a sale with a payment cannot edit it; after the Daily Sales Report is submitted it is refused with the closed-day message', async () => {
+    expect([403, 404]).toContain((await as('sales.csr').post(`/api/sales/${newId}/amend`).send({ lines: [{ productId: item, qty: 1 }] })).status);
+    await as('acct.head').post(`/api/sales/${newId}/amend`).send({ lines: [{ productId: item, qty: 1 }] }).expect(403);
+    await as('sales.westave').post(`/api/sales/${newId}/amend`).send({ lines: [] }).expect(400);
+    ok(await as('sales.westave').post('/api/reports/daily-sales/submit').send({ date: today(), acknowledged: true }));
+    const r = await as('sales.westave').post(`/api/sales/${newId}/amend`).send({ lines: [{ productId: item, qty: 1 }] });
+    expect(r.status).toBe(400); expect(JSON.stringify(r.body)).toMatch(/closed/i);
+    await prisma.salesReportSubmission.deleteMany({});
   });
 });

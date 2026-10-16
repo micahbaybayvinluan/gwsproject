@@ -1,6 +1,6 @@
 import { addFlavor, batchLabel } from './flavors';
 import { randomUUID } from 'crypto';
-import { buildDailyInventory, dateRange, type DailyInventoryReport, RECEIVE, TRANSFER_IN, RETURNS, PULL_OUT, OTHER_OUT, ADJUST } from './daily-inventory';
+import { buildDailyInventory, dateRange, type DailyInventoryReport, RECEIVE, TRANSFER_IN, RETURNS, PULL_OUT, SALES, OTHER_OUT, ADJUST } from './daily-inventory';
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { MovementType, Prisma } from '@prisma/client';
 import { PrismaService, Tx } from '../common/prisma.service';
@@ -201,21 +201,24 @@ export class StockService {
    * open or print and its attachments. Sales have no such view.
    */
   async movementDocuments(user: SessionUser, q: { locationId: string; productId?: string; from: string; to: string; bucket: string }) {
-    const types: Record<string, MovementType[]> = { receive: RECEIVE, transferIn: [...TRANSFER_IN, 'CONSIGN_OUT'], returns: RETURNS, pullOut: PULL_OUT, other: OTHER_OUT, adjust: ADJUST };
-    if (q.bucket === 'sales') throw new BadRequestException('Sales are shown in the Sales List, not here');
+    // sales too (owner request 2026-10-16): the DRs behind the Sales figure, each linking to the sale and to the Daily Sales Report of its day
+    const types: Record<string, MovementType[]> = { receive: RECEIVE, transferIn: [...TRANSFER_IN, 'CONSIGN_OUT'], returns: RETURNS, pullOut: PULL_OUT, sales: SALES, other: OTHER_OUT, adjust: ADJUST };
     const movementTypes = types[q.bucket]; if (!movementTypes) throw new BadRequestException('Unknown column');
     if (!/^\d{4}-\d{2}-\d{2}$/.test(q.from) || !/^\d{4}-\d{2}-\d{2}$/.test(q.to)) throw new BadRequestException('from/to must be YYYY-MM-DD');
     const rows = await this.prisma.db.stockLedger.findMany({ where: { locationId: q.locationId, productId: q.productId, movementType: { in: movementTypes }, businessDate: { gte: toDateOnly(q.from), lte: toDateOnly(q.to) } }, select: { documentType: true, documentId: true, locationId: true, qtyDelta: true, businessDate: true, product: { select: { sku: true, name: true } } }, orderBy: { postedAt: 'asc' } });
     const groups = new Map<string, { documentType: string; documentId: string; locationId: string; qty: number; date: string; items: Map<string, number> }>();
     for (const r of rows) {
       const k = `${r.documentType}:${r.documentId}`; const g = groups.get(k) ?? { documentType: r.documentType, documentId: r.documentId, locationId: r.locationId, qty: 0, date: dateStr(r.businessDate), items: new Map() };
-      g.qty += Math.abs(r.qtyDelta); g.items.set(r.product.name, (g.items.get(r.product.name) ?? 0) + Math.abs(r.qtyDelta)); groups.set(k, g);
+      const dq = Math.abs(r.qtyDelta);
+      g.qty += dq; g.items.set(r.product.name, (g.items.get(r.product.name) ?? 0) + dq); groups.set(k, g);
     }
     const list = [...groups.values()];
     const withDocs = await this.withDocuments(list.map((g) => ({ documentType: g.documentType, documentId: g.documentId, locationId: g.locationId })));
     return requestContext.runSystem(async () => {
       const tIds = list.filter((g) => g.documentType === 'TransferDoc').map((g) => g.documentId);
       const transfers = await this.prisma.db.transferDoc.findMany({ where: { id: { in: tIds } }, select: { id: true, controlNo: true, transferInNo: true, status: true, transferType: true, fromLocationId: true, toLocationId: true, fromLocation: { select: { name: true } }, toLocation: { select: { name: true } }, notes: true, returnReason: true } });
+      // a DR that was voided or corrected later still counts in the figure (its stock came back under Returns): it is listed, marked VOIDED
+      const voidedSales = new Set((await this.prisma.db.salesDoc.findMany({ where: { id: { in: list.filter((g) => g.documentType === 'SalesDoc').map((g) => g.documentId) }, voidedAt: { not: null } }, select: { id: true } })).map((x) => x.id));
       const rIds = list.filter((g) => g.documentType === 'ReceivingDoc').map((g) => g.documentId);
       const receivings = await this.prisma.db.receivingDoc.findMany({ where: { id: { in: rIds } }, select: { id: true, controlNo: true, status: true, supplier: { select: { name: true, code: true } }, supplierRef: true } });
       const atts = await this.prisma.db.attachment.findMany({ where: { documentId: { in: list.map((g) => g.documentId) } }, select: { id: true, documentId: true, fileName: true, contentType: true } });
@@ -223,6 +226,7 @@ export class StockService {
       return list.map((g, i) => {
         const d = withDocs[i]; const forms: { label: string; number: string; pdf: string }[] = [];
         let from: string | null = null; let to: string | null = null; let status: string | null = null; let note: string | null = null;
+        if (g.documentType === 'SalesDoc' && voidedSales.has(g.documentId)) status = 'VOIDED';
         if (g.documentType === 'TransferDoc') {
           const t = transfers.find((x) => x.id === g.documentId);
           if (t) {
@@ -234,7 +238,7 @@ export class StockService {
           const r = receivings.find((x) => x.id === g.documentId);
           if (r) { from = r.supplier ? (user.permissions.has('supplier.view.name') ? r.supplier.name : r.supplier.code) : null; status = r.status; note = r.supplierRef ? `Supplier ref ${r.supplierRef}` : null; forms.push({ label: "Supplier's Form", number: r.controlNo, pdf: `/api/reports/forms/supplier-form/${r.id}.pdf` }); }
         } else if (g.documentType === 'CountDoc') forms.push({ label: 'Count sheet', number: d.documentNo ?? '', pdf: `/api/reports/forms/count/${g.documentId}.pdf` });
-        return { documentType: g.documentType, documentId: g.documentId, label: d.documentLabel, number: d.documentNo, link: d.documentLink, qty: g.qty, date: g.date, items: [...g.items].map(([name, qty]) => ({ name, qty })), from, to, status, note, forms, attachments: atts.filter((a) => a.documentId === g.documentId).map((a) => ({ id: a.id, name: a.fileName, contentType: a.contentType })) };
+        return { documentType: g.documentType, documentId: g.documentId, label: d.documentLabel, number: d.documentNo, link: d.documentLink, reportLink: g.documentType === 'SalesDoc' ? `/reports/daily-sales?locationId=${g.locationId}&date=${g.date}` : null, qty: g.qty, date: g.date, items: [...g.items].map(([name, qty]) => ({ name, qty })), from, to, status, note, forms, attachments: atts.filter((a) => a.documentId === g.documentId).map((a) => ({ id: a.id, name: a.fileName, contentType: a.contentType })) };
       });
     });
   }

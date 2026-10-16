@@ -9,8 +9,8 @@ import { Searchable } from '@/components/Searchable';
 interface Signer { name: string; title: string; userId?: string | null }
 interface MemoTable { headers: string[]; rows: string[][] }
 interface Memo { id: string; memoNo: string; subject: string; addressedTo: string; fromText: string; memoDate: string; body: string; table: MemoTable | null; signers: Signer[]; status: string; createdBy: string; voidReason: string | null; recipientCount: number; acknowledgedCount: number; mine: { acknowledgedAt: string | null } | null; recipients?: { userId: string; name: string; role: string; acknowledgedAt: string | null }[] }
-interface Options { roles: { key: string; name: string }[]; locations: { id: string; name: string; type: string }[]; users: { id: string; name: string; roleKey: string; role: string }[]; ownerSigners: Signer[] }
-interface Audience { all?: boolean; franchiseOwners?: boolean; franchiseAssociates?: boolean; roles?: string[]; locationIds?: string[]; userIds?: string[] }
+interface Options { employees?: { id: string; name: string; employeeNo: string; position: string | null; hasLogin: boolean }[]; roles: { key: string; name: string }[]; locations: { id: string; name: string; type: string }[]; users: { id: string; name: string; roleKey: string; role: string }[]; ownerSigners: Signer[] }
+interface Audience { all?: boolean; franchiseOwners?: boolean; franchiseAssociates?: boolean; roles?: string[]; locationIds?: string[]; userIds?: string[]; employeeIds?: string[] }
 
 const longDate = (d: string) => new Date(`${d}T00:00:00Z`).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' }).toUpperCase();
 const isNum = (s: string) => /^[\d,.\s₱%()-]+$/.test(s) && /\d/.test(s);
@@ -81,7 +81,7 @@ function Compose({ onClose, onCreated, prefill }: { onClose: () => void; onCreat
   const [subject, setSubject] = useState(''); const [date, setDate] = useState(today()); const [from, setFrom] = useState('Get Wheysted Supplements Corporation');
   const [body, setBody] = useState('Good day!\n\n'); const [withTable, setWithTable] = useState(false);
   const [table, setTable] = useState<MemoTable>({ headers: ['Products', 'Price'], rows: [['', '']] });
-  const [signers, setSigners] = useState<Signer[]>([]); const [find, setFind] = useState(''); const [person, setPerson] = useState('');
+  const [signers, setSigners] = useState<Signer[]>([]); const [find, setFind] = useState(''); const [empFind, setEmpFind] = useState(''); const [person, setPerson] = useState('');
   const admin = me?.roleKey === 'ADMIN';
   // a notice / demand to an overdue franchise, written from Franchise AR
   useEffect(() => {
@@ -101,12 +101,14 @@ function Compose({ onClose, onCreated, prefill }: { onClose: () => void; onCreat
     for (const r of aud.roles ?? []) parts.push((opts.data?.roles.find((x) => x.key === r)?.name ?? r).toUpperCase());
     for (const l of aud.locationIds ?? []) parts.push((opts.data?.locations.find((x) => x.id === l)?.name ?? '').toUpperCase());
     for (const u of aud.userIds ?? []) parts.push((opts.data?.users.find((x) => x.id === u)?.name ?? '').toUpperCase());
+    for (const u of aud.employeeIds ?? []) parts.push((opts.data?.employees?.find((x) => x.id === u)?.name ?? '').toUpperCase());
     return parts.join(', ');
   }, [aud, opts.data]);
   useEffect(() => { if (!toTouched) setToText(auto); }, [auto, toTouched]);
-  const toggle = <K extends 'roles' | 'locationIds' | 'userIds'>(k: K, v: string) => setAud((a) => { const cur = new Set(a[k] ?? []); if (cur.has(v)) cur.delete(v); else cur.add(v); return { ...a, [k]: [...cur] }; });
+  const toggle = <K extends 'roles' | 'locationIds' | 'userIds' | 'employeeIds'>(k: K, v: string) => setAud((a) => { const cur = new Set(a[k] ?? []); if (cur.has(v)) cur.delete(v); else cur.add(v); return { ...a, [k]: [...cur] }; });
   const save = useMutation({ mutationFn: () => api.post<Memo>('/api/memos', { subject, addressedTo: toText, fromText: from, memoDate: date, body, table: withTable ? { headers: table.headers, rows: table.rows } : null, signers, audience: aud }), onSuccess: onCreated });
   const fixed: Signer[] = admin ? opts.data?.ownerSigners ?? [] : [{ name: (me?.fullName ?? '').toUpperCase(), title: me?.roleName ?? '' }];
+  const empMatches = (opts.data?.employees ?? []).filter((e) => empFind.length >= 2 && `${e.name} ${e.employeeNo}`.toLowerCase().includes(empFind.toLowerCase())).slice(0, 8);
   const matches = (opts.data?.users ?? []).filter((u) => find.length >= 2 && u.name.toLowerCase().includes(find.toLowerCase())).slice(0, 8);
   return <Modal title="Write a memo" onClose={onClose} wide>
     <div className="space-y-4 text-sm">
@@ -116,6 +118,8 @@ function Compose({ onClose, onCreated, prefill }: { onClose: () => void; onCreat
         <details className="mt-1" open={!!aud.locationIds?.length}><summary className="cursor-pointer">Choose by branch / franchise (staff and owner there)</summary><div className="mt-1 grid gap-x-4 sm:grid-cols-3">{opts.data?.locations.map((l) => <label key={l.id} className="flex items-center gap-1"><input type="checkbox" checked={!!aud.locationIds?.includes(l.id)} onChange={() => toggle('locationIds', l.id)} /> {l.name}{l.type === 'FRANCHISE' ? ' (franchise)' : ''}</label>)}</div></details>
         <div className="mt-2"><Input value={find} onChange={(e) => setFind(e.target.value)} placeholder="Or find a person by name" />{matches.length > 0 && <ul className="mt-1 rounded border bg-white">{matches.map((u) => <li key={u.id}><button className="w-full px-2 py-1 text-left hover:bg-slate-50" onClick={() => { toggle('userIds', u.id); setFind(''); }}>{u.name} <span className="text-xs text-slate-500">{u.role}</span></button></li>)}</ul>}
           <div className="mt-1 flex flex-wrap gap-1">{(aud.userIds ?? []).map((id) => <span key={id} className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs">{opts.data?.users.find((u) => u.id === id)?.name}<button onClick={() => toggle('userIds', id)} aria-label="remove">×</button></span>)}</div></div>
+        <div className="mt-2" data-testid="memo-employee"><Input value={empFind} onChange={(e) => setEmpFind(e.target.value)} placeholder="Or an employee from the staff list (name or employee no.), even one without a login" />{empMatches.length > 0 && <ul className="mt-1 rounded border bg-white">{empMatches.map((e) => <li key={e.id}><button className="w-full px-2 py-1 text-left hover:bg-slate-50" onClick={() => { toggle('employeeIds', e.id); setEmpFind(''); }}>{e.name} <span className="text-xs text-slate-500">{e.employeeNo}{e.position ? ` · ${e.position}` : ''}{e.hasLogin ? '' : ' · no login (printed memo only)'}</span></button></li>)}</ul>}
+          <div className="mt-1 flex flex-wrap gap-1">{(aud.employeeIds ?? []).map((id) => <span key={id} className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-xs">{opts.data?.employees?.find((u) => u.id === id)?.name}<button onClick={() => toggle('employeeIds', id)} aria-label="remove">×</button></span>)}</div></div>
         <p className="mt-1 text-xs text-slate-500">{preview.data ? `${preview.data.count} people will be notified.` : 'Choose at least one.'}</p></div>
       <div className="grid gap-3 md:grid-cols-2">
         <Field label="TO (printed on the memo)"><Input value={toText} onChange={(e) => { setToTouched(true); setToText(e.target.value); }} placeholder="e.g. FRANCHISE PARTNERS AND GETWHEYSTED STAFF" /></Field>

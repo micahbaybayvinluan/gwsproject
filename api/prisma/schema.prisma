@@ -1682,6 +1682,8 @@ model PayrollLine {
   loans                  Decimal @default(0) @db.Decimal(14, 2)
   chargeDeductions       Decimal @default(0) @map("charge_deductions") @db.Decimal(14, 2)
   otherDeductions        Decimal @default(0) @map("other_deductions") @db.Decimal(14, 2)
+  /// HR typed the government contribution shares of this line herself (owner request 2026-10-16): they are no longer recomputed from the table
+  contributionsEdited    Boolean @default(false) @map("contributions_edited")
   netPay                 Decimal @default(0) @map("net_pay") @db.Decimal(14, 2)
 
   run      PayrollRun @relation(fields: [runId], references: [id], onDelete: Cascade)
@@ -1930,6 +1932,36 @@ model HrNotice {
 
   @@index([status])
   @@map("hr_notices")
+}
+
+/// Notice to Explain to one employee (owner request 2026-10-16): numbered, printed on the letterhead, with the employee's reply and HR's decision.
+model Nte {
+  id           String    @id @default(uuid())
+  nteNo        String    @unique @map("nte_no")
+  employeeId   String    @map("employee_id")
+  employeeName String    @map("employee_name")
+  locationId   String?   @map("location_id")
+  hrNoticeId   String?   @map("hr_notice_id")
+  subject      String
+  details      String
+  incidentDate DateTime? @map("incident_date") @db.Date
+  issuedOn     DateTime  @map("issued_on") @db.Date
+  replyDueOn   DateTime  @map("reply_due_on") @db.Date
+  status       String    @default("ISSUED") // ISSUED | REPLIED | DECIDED | VOIDED
+  reply        String?
+  repliedOn    DateTime? @map("replied_on")
+  repliedBy    String?   @map("replied_by")
+  decision     String? // NO_ACTION | WARNING | SUSPENSION | CHARGE | OTHER
+  decisionNote String?   @map("decision_note")
+  decidedOn    DateTime? @map("decided_on")
+  decidedBy    String?   @map("decided_by")
+  voidReason   String?   @map("void_reason")
+  issuedBy     String    @map("issued_by")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  @@index([employeeId])
+  @@index([status])
+  @@map("ntes")
 }
 
 /// The day's Daily Branch Sales Report as submitted by the branch ("true and correct"), or submitted automatically at the cut-off

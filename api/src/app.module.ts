@@ -33,6 +33,7 @@ import { InspectionsModule } from './inspections/inspections.module';
 import { HelpModule } from './help/help.module';
 import { FranchiseModule } from './franchise/franchise.module';
 import { MemosModule } from './memos/memos.module';
+import { NteModule } from './nte/nte.module';
 import { SixPackModule } from './sixpack/sixpack.module';
 import { DraftsModule } from './drafts/drafts.module';
 import { ReplacementsModule } from './replacements/replacements.module';
@@ -45,7 +46,7 @@ import { CustomerServiceModule } from './customer-service/customer-service.modul
 @Module({
   imports: [
     CommonModule, DraftsModule, ReplacementsModule, AgentsModule, MembersModule, PromosModule, RestockModule, FranchiseOrdersModule, CustomerServiceModule, ChargesModule, RevisionsModule, AuthModule, UsersModule, MasterModule, StockModule, NotificationsModule, ApprovalsModule, AttachmentsModule, GlModule,
-    ReceivingModule, TransfersModule, PricingModule, ClosingModule, SalesModule, ExpensesModule, AlertsModule, CountsModule, ReportsModule, ImportsModule, PayrollModule, DashboardModule, JobsModule, EditsModule, CashFundModule, InspectionsModule, HelpModule, FranchiseModule, MemosModule, SixPackModule, EcommerceModule, TargetsModule,
+    ReceivingModule, TransfersModule, PricingModule, ClosingModule, SalesModule, ExpensesModule, AlertsModule, CountsModule, ReportsModule, ImportsModule, PayrollModule, DashboardModule, JobsModule, EditsModule, CashFundModule, InspectionsModule, HelpModule, FranchiseModule, MemosModule, NteModule, SixPackModule, EcommerceModule, TargetsModule,
   ],
   controllers: [HealthController],
 })

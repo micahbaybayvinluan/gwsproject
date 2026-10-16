@@ -361,6 +361,10 @@ export class CountsService implements OnModuleInit {
     await this.audit.log({ action: 'FINALIZE', entityType: 'ChargeForm', entityId: id });
     const users = (await this.prisma.db.employee.findMany({ where: { id: { in: cf.allocations.map((a) => a.employeeId) } }, select: { userId: true } })).map((e) => e.userId).filter((u): u is string => !!u);
     if (users.length) await this.notify.toUsers(users, { type: 'CHARGE_FINALIZED', title: `Charge ${cf.controlNo} finalized by HR; it will be deducted from payroll`, link: '/my-hr' });
+    // the branch is told too (owner request 2026-10-16): who was charged, for what and how much, so the staff of the branch are aware of it
+    const emps = await this.prisma.db.employee.findMany({ where: { id: { in: cf.allocations.map((x) => x.employeeId) } }, select: { id: true, fullName: true } });
+    const staff = await this.prisma.db.user.findMany({ where: { active: true, assignments: { some: { locationId: cf.locationId } }, id: { notIn: users } }, select: { id: true } });
+    if (staff.length) await this.notify.toUsers(staff.map((x) => x.id), { type: 'CHARGE_BRANCH', title: `Charge ${cf.controlNo} at your branch: ${cf.allocations.map((x) => `${emps.find((e) => e.id === x.employeeId)?.fullName ?? ''} ₱${D(x.amount).toFixed(2)}`).join(', ')}`, body: cf.reason ?? undefined, link: '/my-hr' });
     return this.chargeForm(id, user);
   }
 }

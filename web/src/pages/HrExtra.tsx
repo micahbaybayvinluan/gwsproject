@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api, fmtDate, peso, today } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
+import { MyNtes } from '@/pages/Nte';
 import { Badge, Button, Card, Empty, ErrorBox, Field, Input, Select } from '@/components/ui/primitives';
 import { Searchable } from '@/components/Searchable';
 
@@ -40,6 +41,8 @@ function CompanyMyPay() {
   return <div className="mx-auto max-w-4xl space-y-4">
     <div className="flex flex-wrap items-center gap-2"><h1 className="text-2xl font-bold tracking-tight text-navy">My Pay & Charges</h1><span className="text-sm text-slate-500">{d.employee.fullName} · {d.employee.employeeNo} · {d.employee.location?.name ?? 'Office'}</span>
       <Button size="sm" variant="outline" className="ml-auto" onClick={() => api.download(`/api/reports/forms/employee-ledger/${d.employee!.id}.pdf`, 'MyLedger.pdf')}>My ledger (PDF)</Button></div>
+    <MyNtes />
+    <BranchCharges />
     <Card title="Charges to me">
       {!d.charges.length ? <Empty>No charges.</Empty> : <ul className="divide-y">{d.charges.map((c) => <li key={c.id} className="py-3 text-sm">
         <div className="flex flex-wrap items-center gap-2"><span className="font-medium">{c.chargeForm.controlNo}</span><Badge tone="amber">{c.kindLabel}</Badge><span>{c.chargeForm.location.name}</span><span className="text-slate-500">{fmtDate(c.chargeForm.createdAt)}</span>
@@ -158,5 +161,36 @@ export function NewChargeFormCard() {
     {f.locationId && <div className="mt-3"><div className="text-xs uppercase text-slate-500">Charge to (split equally; you can change the split after)</div><div className="mt-1 flex flex-wrap gap-3">{staff.data?.map((e) => <label key={e.id} className="flex items-center gap-1 text-sm"><input type="checkbox" checked={emp.has(e.id)} onChange={(ev) => { const n = new Set(emp); if (ev.target.checked) n.add(e.id); else n.delete(e.id); setEmp(n); }} />{e.fullName}</label>)}{staff.data?.length === 0 && <span className="text-sm text-slate-500">No employees at this branch yet.</span>}</div></div>}
     <div className="mt-3 flex items-center gap-2"><Button disabled={!f.locationId || !f.reason || total <= 0 || m.isPending} onClick={() => m.mutate()}>Create charge form ({peso(total)})</Button><Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button></div>
     <ErrorBox error={m.error} />
+  </Card>;
+}
+
+
+/** SSS / PhilHealth / Pag-IBIG tables (owner request 2026-10-16): what the payroll runs use, with a warning when one is missing and a way to load or replace it. */
+export function ContributionTablesCard() {
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: ['contribution-tables'], queryFn: () => api.get<{ id: string; kind: string; effectiveFrom: string; rows: unknown }[]>('/api/payroll/tables') });
+  const load = useMutation({ mutationFn: () => api.post('/api/payroll/tables/defaults'), onSuccess: () => void qc.invalidateQueries({ queryKey: ['contribution-tables'] }) });
+  const [edit, setEdit] = useState<{ kind: string; effectiveFrom: string; rows: string } | null>(null);
+  const save = useMutation({ mutationFn: () => api.put(`/api/payroll/tables/${edit!.kind}`, { effectiveFrom: edit!.effectiveFrom, rows: JSON.parse(edit!.rows) }), onSuccess: () => { setEdit(null); void qc.invalidateQueries({ queryKey: ['contribution-tables'] }); } });
+  const kinds = ['SSS', 'PHIC', 'HDMF']; const rows = q.data ?? [];
+  const missing = kinds.filter((k) => !rows.some((r) => r.kind === k));
+  return <Card title="Contribution tables (SSS, PhilHealth, Pag-IBIG)">
+    {missing.length > 0 && <p className="mb-2 rounded-lg bg-red-50 p-2 text-sm text-red-800" data-testid="tables-missing">No table for {missing.join(', ')}: payroll computes <b>₱0</b> for it. <Button size="sm" className="ml-2" disabled={load.isPending} onClick={() => load.mutate()}>Load the standard tables</Button></p>}
+    <table className="w-full text-sm"><thead className="text-left text-xs uppercase text-slate-500"><tr><th>Table</th><th>Used from</th><th /></tr></thead><tbody>{kinds.map((k) => { const cur = rows.filter((r) => r.kind === k).sort((a, b) => b.effectiveFrom.localeCompare(a.effectiveFrom))[0]; return <tr key={k} className="border-t"><td className="py-1.5 font-semibold">{k === 'PHIC' ? 'PhilHealth' : k === 'HDMF' ? 'Pag-IBIG' : k}</td><td>{cur ? fmtDate(cur.effectiveFrom) : <span className="text-red-700">none</span>}</td><td className="text-right"><Button size="sm" variant="outline" onClick={() => setEdit({ kind: k, effectiveFrom: today(), rows: JSON.stringify(cur?.rows ?? [], null, 1) })}>Replace with a new table</Button></td></tr>; })}</tbody></table>
+    {edit && <div className="mt-3 space-y-2 rounded-xl border p-3"><div className="flex flex-wrap items-end gap-2"><Field label="New table for"><Input value={edit.kind} disabled /></Field><Field label="Used from"><Input type="date" value={edit.effectiveFrom} onChange={(e) => setEdit({ ...edit, effectiveFrom: e.target.value })} /></Field></div>
+      <Field label="Rows (the same layout as the current table; change the figures when the rates change)"><textarea className="min-h-48 w-full rounded-xl border border-slate-200 bg-white p-2 font-mono text-xs" value={edit.rows} onChange={(e) => setEdit({ ...edit, rows: e.target.value })} /></Field>
+      <ErrorBox error={save.error} /><div className="flex gap-2"><Button onClick={() => save.mutate()} disabled={save.isPending}>Save the new table</Button><Button variant="ghost" onClick={() => setEdit(null)}>Cancel</Button></div></div>}
+    <p className="mt-2 text-xs text-slate-500">The share of each employee comes from these tables and the monthly basic pay. In a draft payroll run HR can type the employee and employer shares of one line when they differ.</p>
+  </Card>;
+}
+
+
+/** The charges finalized at the user's own branch: who, what for and how much, so the branch is aware (owner request 2026-10-16). */
+function BranchCharges() {
+  const q = useQuery({ queryKey: ['branch-charges'], queryFn: () => api.get<{ id: string; controlNo: string; kind: string; reason: string | null; branch: string; total: string; date: string | null; charged: { name: string; amount: string; acknowledged: boolean }[] }[]>('/api/me/branch-charges') });
+  if (!q.data?.length) return null;
+  return <Card title="Charges at my branch">
+    <p className="mb-2 text-xs text-slate-500">Charge forms HR finalized for your branch, so everyone is aware. Each person acknowledges their own charge in their My Pay & Charges.</p>
+    <div className="overflow-x-auto"><table className="w-full text-sm" data-testid="branch-charges"><thead className="text-left text-xs uppercase text-slate-500"><tr><th>Form</th><th>What for</th><th>Charged to</th><th className="num">Total</th></tr></thead><tbody>{q.data.map((f) => <tr key={f.id} className="border-t align-top"><td className="py-1.5"><span className="font-mono text-xs">{f.controlNo}</span><div className="text-xs text-slate-500">{f.date ? fmtDate(f.date) : ''}</div></td><td>{f.kind}{f.reason ? ` · ${f.reason}` : ''}</td><td>{f.charged.map((c) => <div key={c.name}>{c.name} {peso(c.amount)} {c.acknowledged ? <Badge tone="green">acknowledged</Badge> : <Badge tone="amber">not yet</Badge>}</div>)}</td><td className="num">{peso(f.total)}</td></tr>)}</tbody></table></div>
   </Card>;
 }

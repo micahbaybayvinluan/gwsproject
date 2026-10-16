@@ -144,6 +144,8 @@ You run one branch: sales, expenses, stock received and sent, the weekly count, 
 
 **Edit a DR before the day closes:** at the bottom of your **Daily Sales Report** the **DRs entered** list shows every DR of the day: click one to open it, or press **Edit** to correct items, quantities, prices, DR number, customer name, due date or notes. The DR keeps its date. After you submit the report the day is closed and Edit disappears (use a post-close edit request). In New Sale, the Wheysted member, phone / email and 6-Pack boxes show only for retail sales, not for Franchise, Dealer, Agent or Marketplace.
 
+**Charges and NTE:** *My Pay & Charges* shows *Charges at my branch* (form, who, what for, how much) and, if HR issued a Notice to Explain to you, the NTE: read it, type your explanation by the reply date and print it.
+
 ## Warehouse Associate
 <!-- role: WAREHOUSE_ASSOCIATE -->
 You enter what comes into and goes out of the warehouse. You never see supplier cost. Your entries are checked by the Warehouse In-Charge before stock changes.
@@ -186,6 +188,8 @@ You enter what comes into and goes out of the warehouse. You never see supplier 
 **Warehouse expenses** (menu: Expenses): record an expense of the warehouse (choose the account, amount and payee). You may also pay from the warehouse **Cash fund** (the balance is shown; you spend it, Accounting / the cash fund holders replenish it), or choose cash on hand, a bank account or an owner advance.
 
 **Franchise availability and branch requests:** you can edit an availability (offer quantity and flavors, remove items) and prepare what a branch requested, the same as the In-Charge; the In-Charge does the final approval of a franchise order. You can pay warehouse expenses from the cash fund (not set it up).
+
+**Charges and NTE:** *My Pay & Charges* shows *Charges at my branch* and any Notice to Explain issued to you (type your explanation there).
 
 ## Warehouse In-Charge
 <!-- role: WAREHOUSE_IN_CHARGE -->
@@ -241,6 +245,8 @@ You are responsible for the warehouse stock. You check your associates' entries,
 **Franchise availability** (menu: Franchise Orders): when the Franchise Coordinator sends an availability, open it, type the **Offer** (quantity and flavors you can give) for each product, remove what you cannot give, and *Send to the Franchise Coordinator*. After the coordinator prints the picklist and your team prepares the goods, do the **final check** and *Approve* (or send back with a note); the coordinator then makes the DR.
 **Requests from the branches** (Transfers): a branch's request appears with its products already filled in. Edit the quantities (or remove an item) → *Prepare the pull-out*, or *Decline* with a reason.
 **Cash fund:** you and your associates can pay warehouse expenses from the warehouse cash fund (Expenses → Paid from Cash fund).
+
+**Charges and NTE:** *My Pay & Charges* shows *Charges at my branch* and any Notice to Explain issued to you (type your explanation there).
 
 ## Head Auditor
 <!-- role: HEAD_AUDITOR -->
@@ -496,6 +502,10 @@ You handle people: employees, accounts, pay, charges and notices. You have no ac
 
 **Your password:** press the key icon at the top right (**Change my password**) any time. Your account is personal and you answer for everything done under it, so never tell your password to anyone, not even HR, your supervisor or the Owner. Nobody can see it.
 
+**Notice to Explain (NTE):** HR Notices → *Issue an NTE…* on a notice (tick the person or persons: for a late deposit the list is all the sales associates of the branch), or *NTEs issued → Issue an NTE to an employee*. The NTE is numbered, printed on the letterhead, the employee replies (or you type the paper reply), and you record the decision. **Memo to one employee:** Memorandums → Write a memo → pick the employee by name or employee no.
+**Charge forms:** every charge is charged to named employees; when you finalize, the branch is told too.
+**Employee page (Payroll → click the employee):** profile, **staff ID number change (the Owner approves)**, loans and cash advances (they are deducted by payroll), charges, NTEs and memos. Add employees once with the Excel import; a blank employee no. becomes GWS-0001, GWS-0002… **Government contributions:** type the employee and employer shares of a draft payroll line; check the *Contribution tables* card (load the standard tables if it says one is missing).
+
 ## Executive Assistant
 <!-- role: EXECUTIVE_ASSISTANT -->
 You record main office bank transactions. You do not see cost, branch reports or income.
@@ -562,6 +572,8 @@ You see and can do everything. You are the final approver.
 **Promos:** the same as the Head Auditor (% off 20–70%, internal quantity, See promo sales). **Franchise DRs:** you can see every franchise DR and whether the franchise has confirmed it. **Cash fund:** set the warehouse and every branch fund under Cash Fund; warehouse staff may spend from theirs.
 
 **DRs and Inventory Reports:** the Daily Sales Report lists the DRs of the day (click to open, **Edit** while the branch has not submitted the day). In Inventory Reports, click a **Sales** quantity to see its DRs and open the Daily Sales Report of that date.
+
+**Staff ID number changes:** HR asks, you approve under My Approvals (the staff ID and the login Company ID change together). **NTEs:** you are told when HR issues one; HR records the reply and decision.
 
 ## E-comm Associate
 <!-- role: ECOMM_ASSOCIATE -->

@@ -73,7 +73,7 @@ async function resetTransactionalData() {
   await prisma.$executeRawUnsafe(`TRUNCATE replacement_receipts, replacement_tickets, franchise_shipping_charges, form_numbers_released, ecom_waybills, ecom_waybill_hints, franchise_payments, franchise_ar_adjustments, franchise_ar_extensions, franchise_invoices, memo_recipients, memos, six_pack_stickers, six_pack_redemptions CASCADE`);
   await prisma.$executeRawUnsafe(`TRUNCATE outlet_changes, outlet_shares, itinerary_claims, itinerary_stops, itineraries, agent_consignment_limits, outlets, sales_areas CASCADE`);
   await prisma.$executeRawUnsafe(`TRUNCATE campaign_recipients, campaigns, message_opt_outs, members CASCADE`);
-  await prisma.$executeRawUnsafe(`TRUNCATE franchise_dr_receipts, stock_request_lines, stock_requests, franchise_order_lines, franchise_orders, franchise_availability_lines, franchise_availabilities, promo_items, promos, customer_contacts, customer_follow_ups, replacement_payments, purchase_order_rows, purchase_order_lines, purchase_orders CASCADE`);
+  await prisma.$executeRawUnsafe(`TRUNCATE ntes, franchise_dr_receipts, stock_request_lines, stock_requests, franchise_order_lines, franchise_orders, franchise_availability_lines, franchise_availabilities, promo_items, promos, customer_contacts, customer_follow_ups, replacement_payments, purchase_order_rows, purchase_order_lines, purchase_orders CASCADE`);
   await prisma.$executeRawUnsafe(`TRUNCATE member_vouchers, member_points_entries, member_notes, member_offers, survey_items, survey_responses, survey_invites, lost_sales, reservations, stock_alert_requests, member_auto_messages CASCADE`);
   await prisma.$executeRawUnsafe(`UPDATE consignment_agreements SET agent_key = NULL, agent_name = NULL, outlet_id = NULL`);
   await prisma.$executeRawUnsafe(`UPDATE locations SET credit_hold = false, credit_hold_note = NULL`);
@@ -773,7 +773,7 @@ describe('Owner approval of new master data and HR user accounts (owner request 
   });
   it('HR adds an employee and opens their user account; both wait for the Owner; the person signs in with the temporary password and must change it', async () => {
     const westId = (ok(await as('admin').get('/api/locations')).body as { id: string; code: string }[]).find((l) => l.code === 'WESTAVE')!.id;
-    const e = ok(await as('hr.staff').post('/api/payroll/employees').send({ employeeNo: `NEW-${run}`, fullName: `Carla New ${run}`, locationId: westId, basicRate: 15000 })).body;
+    const e = ok(await as('hr.staff').post('/api/payroll/employees').send({ employeeNo: `HRN-${run}`, fullName: `Carla New ${run}`, locationId: westId, basicRate: 15000 })).body;
     expect(e.pending).toBe(true);
     const emp = await ownerApproves({ body: e });
     await as('hr.staff').post(`/api/hr/employees/${emp.id}/account`).send({ username: `carla.${run}`, email: `carla.${run}@gws.local`, roleKey: 'ADMIN', password: 'Temporary#2026' }).expect(403);
@@ -784,7 +784,7 @@ describe('Owner approval of new master data and HR user accounts (owner request 
     expect(await prisma.user.count({ where: { username: `carla.${run}` } })).toBe(0);
     ok(await as('admin').post(`/api/approvals/${acc.approvalRequestId}/decide`).send({ decision: 'APPROVE' }));
     const u = await prisma.user.findUniqueOrThrow({ where: { username: `carla.${run}` }, include: { employee: true } });
-    expect(u.mustChangePassword).toBe(true); expect(u.employee?.id).toBe(emp.id); expect(u.idNumber).toBe(`NEW-${run}`);
+    expect(u.mustChangePassword).toBe(true); expect(u.employee?.id).toBe(emp.id); expect(u.idNumber).toBe(`HRN-${run}`);
     const login = await http.post('/api/auth/login').send({ identifier: `carla.${run}`, password: 'Temporary#2026' }); expect(login.status).toBeLessThan(300); expect(login.body.mustChangePassword).toBe(true);
   });
 });
@@ -3554,5 +3554,97 @@ describe('Editing a DR until its day closes: the DR keeps its number and date, t
     const r = await as('sales.westave').post(`/api/sales/${newId}/amend`).send({ lines: [{ productId: item, qty: 1 }] });
     expect(r.status).toBe(400); expect(JSON.stringify(r.body)).toMatch(/closed/i);
     await prisma.salesReportSubmission.deleteMany({});
+  });
+});
+
+describe('HR batch (owner request 2026-10-16): auto staff numbers, ID change with the Owner, NTE, memo to an employee, loans, editable contributions, branch charge notice', () => {
+  let empNoLogin = ''; let empLogin = ''; let csrUser = ''; let csrLoc = ''; let nteId = ''; let firstNo = '';
+  const notes = async (u: string) => JSON.stringify(ok(await as(u).get('/api/notifications')).body);
+  it('setup: the next staff number is made by the system; a typed one is kept; a number cannot be used twice', async () => {
+    const me = ok(await as('sales.csr').get('/api/auth/me')).body; csrUser = me.id; csrLoc = me.locations[0].id;
+    await prisma.employee.updateMany({ where: { userId: csrUser }, data: { userId: null } });
+    const a = await ownerApproves(ok(await as('hr.staff').post('/api/payroll/employees').send({ fullName: `HR Test A ${run}`, locationId: csrLoc, basicRate: 18000 })));
+    const b = await ownerApproves(ok(await as('hr.staff').post('/api/payroll/employees').send({ fullName: `HR Test B ${run}`, locationId: csrLoc, basicRate: 12000, userId: csrUser })));
+    empNoLogin = a.id; empLogin = b.id;
+    const ea = await prisma.employee.findUniqueOrThrow({ where: { id: a.id } }); const eb = await prisma.employee.findUniqueOrThrow({ where: { id: b.id } });
+    expect(ea.employeeNo).toMatch(/^GWS-\d{4}$/); expect(eb.employeeNo).toMatch(/^GWS-\d{4}$/); expect(Number(eb.employeeNo.slice(4))).toBe(Number(ea.employeeNo.slice(4)) + 1); firstNo = ea.employeeNo;
+    const typed = await ownerApproves(ok(await as('hr.staff').post('/api/payroll/employees').send({ employeeNo: `TYPED-${run}`, fullName: `HR Test C ${run}`, basicRate: 9000 })));
+    expect((await prisma.employee.findUniqueOrThrow({ where: { id: typed.id } })).employeeNo).toBe(`TYPED-${run}`);
+    // an employee number cannot be changed by the plain edit
+    await as('hr.staff').patch(`/api/payroll/employees/${a.id}`).send({ employeeNo: 'HACK-1' }).expect(400);
+  });
+  it('HR changes a staff ID number: the Owner approves; the login Company ID follows; a used number is refused', async () => {
+    const r = ok(await as('hr.staff').post(`/api/payroll/employees/${empLogin}/id-number`).send({ employeeNo: `IDC-${run}`, reason: 'assigned the company ID' })).body;
+    expect(r.pending).toBe(true); expect((await prisma.employee.findUniqueOrThrow({ where: { id: empLogin } })).employeeNo).not.toBe(`IDC-${run}`);
+    const det = ok(await as('hr.staff').get(`/api/payroll/employees/${empLogin}/detail`)).body; expect(det.idChangePending.to).toBe(`IDC-${run}`);
+    ok(await as('admin').post(`/api/approvals/${r.approvalRequestId}/decide`).send({ decision: 'APPROVE' }));
+    expect((await prisma.employee.findUniqueOrThrow({ where: { id: empLogin } })).employeeNo).toBe(`IDC-${run}`);
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: csrUser } })).idNumber).toBe(`IDC-${run}`);
+    const bad = await as('hr.staff').post(`/api/payroll/employees/${empLogin}/id-number`).send({ employeeNo: firstNo, reason: 'duplicate' }); expect(bad.status).toBe(400);
+    await as('sales.csr').post(`/api/payroll/employees/${empLogin}/id-number`).send({ employeeNo: 'X', reason: 'abc' }).expect(403);
+    // the Owner's own change applies at once
+    const own = ok(await as('admin').post(`/api/payroll/employees/${empLogin}/id-number`).send({ employeeNo: `OWN-${run}`, reason: 'owner' })).body; expect(own.employeeNo).toBe(`OWN-${run}`);
+  });
+  it('NTE: HR issues a numbered NTE to one employee, the employee replies, HR decides; others cannot; PDF', async () => {
+    await as('sales.csr').post('/api/ntes').send({ employeeId: empLogin, subject: 'Late deposit', details: 'The sales of 10 Oct were deposited late' }).expect(403);
+    const n = ok(await as('hr.staff').post('/api/ntes').send({ employeeId: empLogin, subject: 'Late deposit of the cash sales', details: 'The cash sales of 10 Oct were not deposited by the due date.', incidentDate: '2026-10-10' })).body;
+    nteId = n.id; expect(n.nteNo).toMatch(/^NTE-\d{4}-\d{3}$/); expect(n.status).toBe('ISSUED'); expect(await notes('sales.csr')).toContain('NTE_ISSUED');
+    const mine = ok(await as('sales.csr').get('/api/me/ntes')).body as { id: string }[]; expect(mine.map((x) => x.id)).toContain(nteId);
+    await as('sales.westave').post(`/api/ntes/${nteId}/reply`).send({ reply: 'not mine to answer' }).expect(403);
+    ok(await as('sales.csr').post(`/api/ntes/${nteId}/reply`).send({ reply: 'The bank was closed, I deposited the next day.' }));
+    expect(ok(await as('hr.staff').get(`/api/ntes/${nteId}`)).body.status).toBe('REPLIED'); expect(await notes('hr.staff')).toContain('NTE_REPLIED');
+    await as('sales.csr').post(`/api/ntes/${nteId}/decision`).send({ decision: 'WARNING' }).expect(403);
+    const dec = ok(await as('hr.staff').post(`/api/ntes/${nteId}/decision`).send({ decision: 'WARNING', note: 'first offence' })).body; expect(dec.status).toBe('DECIDED');
+    expect(await notes('sales.csr')).toContain('NTE_DECIDED');
+    await as('sales.csr').get(`/api/ntes/${nteId}/pdf`).expect(200); await as('hr.staff').get(`/api/ntes/${nteId}/pdf`).expect(200); await as('sales.westave').get(`/api/ntes/${nteId}/pdf`).expect(403);
+    const det = ok(await as('hr.staff').get(`/api/payroll/employees/${empLogin}/detail`)).body; expect(det.ntes.map((x: { id: string }) => x.id)).toContain(nteId);
+    const v = ok(await as('hr.staff').post('/api/ntes').send({ employeeId: empNoLogin, subject: 'Cancelled one', details: 'to be cancelled' })).body;
+    expect(ok(await as('hr.staff').post(`/api/ntes/${v.id}/void`).send({ reason: 'issued by mistake' })).body.status).toBe('VOIDED');
+  });
+  it('an HR notice (late deposit) becomes an NTE for the people ticked; the notice is marked NTE_ISSUED; a person with no employee record is refused', async () => {
+    const notice = await prisma.hrNotice.create({ data: { kind: 'CASH_DEPOSIT_OVERDUE', dedupeKey: `HRB-${run}`, locationId: csrLoc, title: `Branch: cash sales of 2026-10-10 not deposited by 2026-10-12`, details: { businessDate: '2026-10-10', dueDate: '2026-10-12', outstanding: '5000.00' }, staffIds: [{ id: csrUser, name: 'CSR' }] } });
+    const out = ok(await as('hr.staff').post(`/api/hr-notices/${notice.id}/issue-nte`).send({ userIds: [csrUser] })).body as { nteNo: string; hrNoticeId: string; details: string }[];
+    expect(out).toHaveLength(1); expect(out[0].hrNoticeId).toBe(notice.id); expect(out[0].details).toContain('5000.00');
+    expect((await prisma.hrNotice.findUniqueOrThrow({ where: { id: notice.id } })).status).toBe('NTE_ISSUED');
+    const n2 = await prisma.hrNotice.create({ data: { kind: 'CASH_DEPOSIT_OVERDUE', dedupeKey: `HRB2-${run}`, title: 'x', staffIds: [{ id: '00000000-0000-0000-0000-000000000000', name: 'nobody' }] } });
+    expect((await as('hr.staff').post(`/api/hr-notices/${n2.id}/issue-nte`).send({ userIds: ['00000000-0000-0000-0000-000000000000'] })).status).toBe(400);
+    await as('sales.csr').post(`/api/hr-notices/${notice.id}/issue-nte`).send({ userIds: [csrUser] }).expect(403);
+  });
+  it('memo to one employee: with a login he is notified; without a login the memo is only printed', async () => {
+    const m1 = ok(await as('hr.staff').post('/api/memos').send({ subject: 'Reminder', body: 'Please deposit on time.', audience: { employeeIds: [empLogin] } })).body;
+    expect(m1.addressedTo).toContain('CSR'); expect(await notes('sales.csr')).toContain(m1.memoNo);
+    const m2 = ok(await as('hr.staff').post('/api/memos').send({ subject: 'Reminder 2', body: 'For the employee without a login.', audience: { employeeIds: [empNoLogin] } })).body;
+    expect(m2.addressedTo).toContain('HR TEST A'); await as('hr.staff').get(`/api/memos/${m2.id}/pdf`).expect(200);
+    const opts = ok(await as('hr.staff').get('/api/memos/options')).body; expect(opts.employees.some((e: { id: string; hasLogin: boolean }) => e.id === empNoLogin && !e.hasLogin)).toBe(true);
+  });
+  it('loans and cash advances: HR adds, changes the instalment and closes; the employee page shows them', async () => {
+    const l = ok(await as('hr.staff').post('/api/payroll/loans').send({ employeeId: empLogin, kind: 'ADVANCE', principal: 3000, perPeriod: 500 })).body;
+    ok(await as('hr.staff').patch(`/api/payroll/loans/${l.id}`).send({ perPeriod: 750 }));
+    let det = ok(await as('hr.staff').get(`/api/payroll/employees/${empLogin}/detail`)).body; expect(Number(det.loans.find((x: { id: string }) => x.id === l.id).perPeriod)).toBe(750);
+    await as('sales.csr').patch(`/api/payroll/loans/${l.id}`).send({ active: false }).expect(403);
+    ok(await as('hr.staff').patch(`/api/payroll/loans/${l.id}`).send({ active: false }));
+    det = ok(await as('hr.staff').get(`/api/payroll/employees/${empLogin}/detail`)).body; expect(det.loans.find((x: { id: string }) => x.id === l.id).active).toBe(false);
+  });
+  it('government contributions: HR types the shares of a draft line (kept), a changed basic recomputes an untouched line, reset goes back to the table', async () => {
+    ok(await as('hr.staff').post('/api/payroll/tables/defaults'));
+    const run_ = ok(await as('hr.staff').post('/api/payroll/runs').send({ periodFrom: '2026-10-01', periodTo: '2026-10-15' })).body;
+    try {
+      const get = async () => ((ok(await as('hr.staff').get(`/api/payroll/runs/${run_.id}`)).body as { lines: { id: string; employeeId: string; sssEe: string; sssEr: string; netPay: string; basic: string; contributionsEdited: boolean }[] }).lines.find((l) => l.employeeId === empNoLogin)!);
+      const l0 = await get(); expect(Number(l0.sssEe)).toBeGreaterThan(0); expect(l0.contributionsEdited).toBe(false);
+      const edited = ok(await as('hr.staff').patch(`/api/payroll/runs/${run_.id}/lines/${l0.id}`).send({ sssEe: 123.45, sssEr: 234.56 })).body;
+      expect(edited.sssEe).toBe('123.45'); expect(edited.sssEr).toBe('234.56'); expect(edited.contributionsEdited).toBe(true); expect(Number(edited.netPay)).toBeCloseTo(Number(l0.netPay) + Number(l0.sssEe) - 123.45, 1);
+      const afterBasic = ok(await as('hr.staff').patch(`/api/payroll/runs/${run_.id}/lines/${l0.id}`).send({ basic: 5000 })).body; expect(afterBasic.sssEe).toBe('123.45'); // typed shares are kept
+      const reset = ok(await as('hr.staff').patch(`/api/payroll/runs/${run_.id}/lines/${l0.id}`).send({ resetContributions: true })).body; expect(reset.contributionsEdited).toBe(false); expect(reset.sssEe).not.toBe('123.45');
+      const l1 = await get(); expect(Number(l1.sssEe)).toBeGreaterThan(0);
+      const rec = ok(await as('hr.staff').patch(`/api/payroll/runs/${run_.id}/lines/${l0.id}`).send({ basic: 20000 })).body; expect(Number(rec.sssEe)).toBeGreaterThan(Number(reset.sssEe)); // untouched line: recomputed from the table for the new basic
+    } finally { await prisma.payrollRun.delete({ where: { id: run_.id } }); }
+  });
+  it('a finalized charge form tells the branch (who, what for, how much) and is listed under Charges at my branch', async () => {
+    const cf = ok(await as('hr.staff').post('/api/charge-forms').send({ kind: 'OTHER', locationId: csrLoc, reason: 'Damaged display', employeeIds: [empLogin], lines: [{ description: 'Display stand', qty: 1, unitCharge: 800 }] })).body;
+    ok(await as('hr.staff').post(`/api/charge-forms/${cf.id}/finalize`).send({ periods: 2 }));
+    const staffNote = JSON.stringify(ok(await as('sales.csr').get('/api/notifications')).body); expect(staffNote).toContain(cf.controlNo);
+    const branch = ok(await as('sales.csr').get('/api/me/branch-charges')).body as { controlNo: string; charged: { amount: string }[] }[];
+    const row = branch.find((b) => b.controlNo === cf.controlNo)!; expect(row).toBeTruthy(); expect(Number(row.charged[0].amount)).toBe(800);
+    const det = ok(await as('hr.staff').get(`/api/payroll/employees/${empLogin}/detail`)).body; expect(det.chargeAllocations.some((a: { form: { controlNo: string } }) => a.form.controlNo === cf.controlNo)).toBe(true);
   });
 });

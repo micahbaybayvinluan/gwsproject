@@ -316,6 +316,16 @@ Waybill Report → **Choose waybill PDF files** (TikTok or Shopee labels) → pi
 135. **Edit refused after closing** (`sales.westave`): submit today's Daily Sales Report, then open a DR: the *Edit this DR* card says the day is closed; use the post-close edit request instead.
 136. **Sales figure links** (`admin` or `acct.head`): Inventory Reports → Daily Inventory Report for a day that had sales: click a quantity under *Sales*. The list shows the DRs; *Open the DR* opens the sale and *Open the Daily Sales Report of …* opens that day's report.
 137. **Member boxes by channel** (`sales.westave`): New Sale → channel Walk-in shows *Wheysted member*, phone / email and the 6-Pack tick; change the channel to Franchise, Dealer, Agent or Shipping marketplace: they disappear.
+138. **Late deposit to NTE** (`hr.staff`): HR Notices → a late-deposit notice → *Issue an NTE…* → tick the associate → *Issue*. NTEs issued: the numbered NTE appears; *Print the NTE (PDF)*. The notice shows *NTE issued*.
+139. **Employee explains** (the associate that was named): My Pay & Charges → *Notice to Explain* → type the explanation → *Send the reply*.
+140. **HR decides** (`hr.staff`): NTEs issued → the NTE (now *REPLIED*) → choose *Written warning*, write a note → *Record the decision*. The employee is notified.
+141. **NTE to any employee** (`hr.staff`): NTEs issued → *Issue an NTE to an employee* → choose the employee, subject, facts → Issue. Or Payroll → click the employee → *Issue a Notice to Explain*.
+142. **Memo to one employee** (`hr.staff`): Memorandums → Write a memo → in *an employee from the staff list* type a name → write the memo → Issue. If the employee has a login they are notified.
+143. **Add employees** (`hr.staff`, then `admin`): Payroll → Employees → Add with *Employee no.* blank → the Owner approves under My Approvals → the employee is GWS-000n. Or Excel Imports → Employees.
+144. **Change a staff ID number** (`hr.staff`, then `admin`): Payroll → click the employee → *Staff ID number* → type the new number and the reason → *Ask the Owner to approve*; the Owner approves in My Approvals; the number (and the login Company ID) changes.
+145. **Loan or cash advance** (`hr.staff`): employee page → *Loans and cash advances* → add ₱3,000, ₱500 each payroll → create a payroll run: the line shows the ₱500 deduction.
+146. **Charges at the branch** (`hr.staff`, then a sales associate): Staff Charges → a charge form → allocate to an employee of the branch → *Finalize*. The branch associates are notified; My Pay & Charges → *Charges at my branch* lists it; the charged employee presses *Acknowledge*.
+147. **Edit the contributions** (`hr.staff`): Payroll → create a run → in the line type different SSS (EE) and employer share → net pay follows; press *back to the table* to restore. Payroll → *Contribution tables*: if one is missing press *Load the standard tables*.
 
 ## Where the files come out
 

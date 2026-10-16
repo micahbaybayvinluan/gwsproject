@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Put, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Param, Patch, Post, Put, Query } from '@nestjs/common';
 import { z } from 'zod';
 import { PayrollService } from './payroll.service';
 import { MasterDataApprovals } from '../approvals/master-data.service';
@@ -6,11 +6,11 @@ import { CurrentUser, RequirePermission, RequireAnyPermission, Audited } from '.
 import { Z } from '../common/zod.pipe';
 import type { SessionUser } from '../common/request-context';
 
-const Emp = z.object({ employeeNo: z.string(), fullName: z.string(), locationId: z.string().uuid().nullable().optional(), position: z.string().optional(), basicRate: z.number().nonnegative(), payFrequency: z.enum(['MONTHLY', 'SEMI_MONTHLY', 'WEEKLY']).optional(), sssNo: z.string().optional(), phicNo: z.string().optional(), hdmfNo: z.string().optional(), bankAccount: z.string().optional(), userId: z.string().uuid().nullable().optional(), active: z.boolean().optional() });
+const Emp = z.object({ employeeNo: z.string().optional().default(''), fullName: z.string(), locationId: z.string().uuid().nullable().optional(), position: z.string().optional(), basicRate: z.number().nonnegative(), payFrequency: z.enum(['MONTHLY', 'SEMI_MONTHLY', 'WEEKLY']).optional(), sssNo: z.string().optional(), phicNo: z.string().optional(), hdmfNo: z.string().optional(), bankAccount: z.string().optional(), userId: z.string().uuid().nullable().optional(), active: z.boolean().optional() });
 const Loan = z.object({ employeeId: z.string().uuid(), kind: z.enum(['SSS_LOAN', 'HDMF_LOAN', 'VALE', 'ADVANCE']), principal: z.number().positive(), perPeriod: z.number().positive() });
 const Remit = z.object({ kind: z.enum(['SSS', 'PHIC', 'HDMF']), year: z.number().int().min(2020), month: z.number().int().min(1).max(12), referenceNo: z.string().min(1), paidAt: z.string(), paidFromAccountId: z.string().uuid().nullable().optional() });
 const Run = z.object({ periodFrom: z.string(), periodTo: z.string() });
-const Line = z.object({ basic: z.number().nonnegative().optional(), overtime: z.number().nonnegative().optional(), incentives: z.number().nonnegative().optional(), otherDeductions: z.number().nonnegative().optional() });
+const Line = z.object({ basic: z.number().nonnegative().optional(), overtime: z.number().nonnegative().optional(), incentives: z.number().nonnegative().optional(), otherDeductions: z.number().nonnegative().optional(), sssEe: z.number().nonnegative().optional(), sssEr: z.number().nonnegative().optional(), phicEe: z.number().nonnegative().optional(), phicEr: z.number().nonnegative().optional(), hdmfEe: z.number().nonnegative().optional(), hdmfEr: z.number().nonnegative().optional(), resetContributions: z.boolean().optional() });
 const Asset = z.object({ name: z.string(), assetAccountId: z.string().uuid(), accumDepnAccountId: z.string().uuid(), cost: z.number().positive(), salvageValue: z.number().nonnegative().optional(), usefulLifeMonths: z.number().int().positive(), startDate: z.string(), locationId: z.string().uuid().optional() });
 
 @Controller('api/payroll')
@@ -20,7 +20,11 @@ export class PayrollController {
   /** Accounts HR can link an employee record to (names and IDs only), so charges and payslips reach that person. */
   @Get('linkable-users') @RequirePermission('employee.manage') linkable() { return this.svc.linkableUsers(); }
   @Post('employees') @RequirePermission('employee.manage') @Audited('Employee', 'CREATE') async createEmployee(@Body(Z(Emp)) dto: z.infer<typeof Emp>, @CurrentUser() u: SessionUser) { const data = { ...dto, basicRate: dto.basicRate.toFixed(2) }; await this.svc.assertCompanyLocation(dto.locationId); return this.md.submit('Employee', data, u, { name: dto.fullName, employeeNo: dto.employeeNo, position: dto.position, basicRate: dto.basicRate, payFrequency: dto.payFrequency }, () => this.svc.createEmployee(data, u)); }
-  @Patch('employees/:id') @RequirePermission('employee.manage') @Audited('Employee') updateEmployee(@Param('id') id: string, @Body(Z(Emp.partial())) dto: Partial<z.infer<typeof Emp>>) { return this.svc.updateEmployee(id, { ...dto, basicRate: dto.basicRate?.toFixed(2) }); }
+  @Patch('employees/:id') @RequirePermission('employee.manage') @Audited('Employee') updateEmployee(@Param('id') id: string, @Body(Z(Emp.partial())) dto: Partial<z.infer<typeof Emp>>) { if (dto.employeeNo !== undefined && dto.employeeNo !== '') throw new BadRequestException('The staff ID number is changed with "Change ID number" (the Owner approves it)'); const { employeeNo: _no, ...rest } = dto; void _no; return this.svc.updateEmployee(id, { ...rest, basicRate: rest.basicRate?.toFixed(2) }); }
+  @Get('employees/:id/detail') @RequireAnyPermission('employee.manage', 'payroll.view.detail') employeeDetail(@Param('id') id: string) { return this.svc.employeeDetail(id); }
+  @Post('employees/:id/id-number') @RequirePermission('employee.manage') @Audited('Employee', 'ID_NUMBER_CHANGE') idNumber(@Param('id') id: string, @Body(Z(z.object({ employeeNo: z.string().trim().min(1).max(40), reason: z.string().trim().min(3).max(300) }))) dto: { employeeNo: string; reason: string }, @CurrentUser() u: SessionUser) { return this.svc.requestIdChange(id, dto.employeeNo, dto.reason, u); }
+  @Get('employee-loans') @RequireAnyPermission('employee.manage', 'payroll.view.detail') employeeLoans(@Query('employeeId') employeeId?: string) { return this.svc.loansOf(employeeId); }
+  @Patch('loans/:id') @RequirePermission('employee.manage') @Audited('EmployeeLoan', 'UPDATE') updateLoan(@Param('id') id: string, @Body(Z(z.object({ perPeriod: z.number().positive().optional(), active: z.boolean().optional() }))) dto: { perPeriod?: number; active?: boolean }) { return this.svc.updateLoan(id, dto); }
   @Post('loans') @RequirePermission('employee.manage') @Audited('EmployeeLoan', 'CREATE') loan(@Body(Z(Loan)) dto: z.infer<typeof Loan>) { return this.svc.addLoan(dto); }
   @Get('tables') @RequireAnyPermission('payroll.edit', 'payroll.view.summary') tables() { return this.svc.tables(); }
   @Put('tables/:kind') @RequirePermission('payroll.edit') @Audited('ContributionTable') setTable(@Param('kind') kind: string, @Body() body: { effectiveFrom: string; rows: unknown }) { return this.svc.setTable(kind, body.effectiveFrom, body.rows); }

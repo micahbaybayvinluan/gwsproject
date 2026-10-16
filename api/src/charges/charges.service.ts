@@ -78,6 +78,13 @@ export class ChargesService {
     return after;
   }
 
+  /** The finalized charges of the user's own branch(es): form no., what for, who and how much (no pay or contribution data). Owner request 2026-10-16. */
+  async branchCharges(user: SessionUser) {
+    if (!user.locationIds.length) return [];
+    const forms = await this.prisma.db.chargeForm.findMany({ where: { locationId: { in: user.locationIds }, finalizedByHrAt: { not: null } }, include: { allocations: { include: { employee: { select: { fullName: true } } } }, location: { select: { name: true } } }, orderBy: { createdAt: 'desc' }, take: 100 });
+    return forms.map((f) => ({ id: f.id, controlNo: f.controlNo, kind: KIND_LABEL[f.kind], reason: f.reason, branch: f.location.name, total: f.totalAmount, date: f.finalizedByHrAt, charged: f.allocations.map((a) => ({ name: a.employee.fullName, amount: a.amount, acknowledged: !!a.acknowledgedAt })) }));
+  }
+
   /** "My Pay & Charges": the signed-in person's own employee record, charges, loans/advances and payslips — nobody else's. */
   async mine(user: SessionUser) {
     const e = await this.prisma.db.employee.findUnique({ where: { userId: user.id }, select: { id: true, employeeNo: true, fullName: true, position: true, location: { select: { name: true } } } });

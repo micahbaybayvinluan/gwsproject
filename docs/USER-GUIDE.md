@@ -346,6 +346,7 @@ In the **Daily Inventory Report**, every figure is clickable. **Click a Sales qu
 <!-- for: all -->
 - **My Pay & Charges** shows only your own charges, loans or advances and payslips.
 - When you are charged (cash shortage, damaged or expired items, inventory discrepancy), you are notified. Open it and press **Acknowledge** to confirm you have seen it.
+- **Charges at my branch** lists the charge forms HR finalized for your branch (who, what for, how much), so everyone is aware. **Notice to Explain (NTE):** if HR issued one to you, read it here, type your explanation and print it.
 - The amount is deducted from your pay over the number of pay periods HR set. Nobody else except HR, the External Auditor, the Accounting Head and Admin can see who was charged.
 
 ## HR: charge forms
@@ -355,11 +356,17 @@ In the **Daily Inventory Report**, every figure is clickable. **Click a Sales qu
 - Open a form to change the split between staff, set the number of pay periods, and **Finalize**. Payroll then deducts it.
 - Print the **Charge Form** and the **Salary Deduction Authorization** from the form. No uploads are needed.
 - The Acknowledged column shows which staff have confirmed their charge.
+- **Charged to a specific employee.** Every charge form is charged to named employees (ticked when the form is made, or allocated by HR afterwards). **When HR finalizes a form, the branch is told too**: its staff get a notice with the form number, who was charged, what for and how much, and **My Pay & Charges → Charges at my branch** lists it. The charged employee acknowledges their own charge there. This is a record **and** a notice, not only a record.
 
 ## HR: payroll and government contributions
-<!-- for: payroll.view.summary, payroll.view.detail, payroll.edit, contribution.remit -->
-- **Payroll & Contributions → Employees:** add each employee with their rate and branch, and link them to their user account so charges reach them.
-- **Create run** for a period. It fills in basic pay, SSS, PhilHealth and Pag-IBIG (employee and employer shares from the tables), loans and charge-form deductions. Edit overtime and incentives, then **Finalize**. The Accounting Head picks the paying bank account and closes the run.
+<!-- for: payroll.view.summary, payroll.view.detail, payroll.edit, contribution.remit, employee.manage -->
+- **Adding the employees.** Do it once with **Excel Imports → Employees** (one row per person: name, branch, position, monthly basic, government numbers, bank). Leave *EmployeeNo* blank and the system numbers them **GWS-0001, GWS-0002…** (the company ID card has no number). To add one person, use **Payroll → Employees → Add** (leave *Employee no.* blank for the automatic number, or type your own). The Owner approves new employees.
+- **Employee page.** Click an employee under Payroll → Employees: **Profile** (name, position, branch, monthly basic, how often paid, SSS / PhilHealth / Pag-IBIG numbers, bank; *Set as inactive* when someone leaves), **Staff ID number**, **Loans and cash advances**, **Charges**, **Notices to Explain and memos**, and the ledger PDF.
+- **Staff ID number: HR can change it, the Owner approves.** On the employee page type the new number and why → **Ask the Owner to approve**. When the Owner approves it, the staff ID and the employee's login Company ID both change. A number already used by someone else is refused. (The Owner's own change applies at once.)
+- **Loans and cash advances** (SSS loan, Pag-IBIG loan, vale, cash advance): add them on the employee page with the amount and the amount to deduct each payroll; change that amount or **Close** the loan there. **They are not only recorded:** every payroll run deducts the amount (never more than the balance) and lowers the balance when the run is finalized. **Charges** work the same way once HR has **finalized** the charge form (the page shows charged, deducted so far and balance). The deduction does not wait for the employee's acknowledgement.
+- **Create run** for a period. It fills in basic pay (monthly basic divided by the pay periods), SSS, PhilHealth and Pag-IBIG (employee and employer shares from the tables), loans and charge-form deductions. Edit overtime, incentives and other deductions, then **Finalize**. The Accounting Head picks the paying bank account and closes the run.
+- **Government contributions are editable.** The share of each employee comes from the tables and the monthly basic pay (so it is not a fixed amount). In a **draft** run you can **type the employee share (EE) and the employer share** of one line yourself: the line keeps your figures and net pay follows; *back to the table* returns to the table figures. If you change the basic of a line you did not type, its contributions are recomputed from the tables.
+- **Contribution tables** (Payroll page): shows the SSS, PhilHealth and Pag-IBIG table in use and when it started. If a table is missing, a red warning says payroll computes ₱0 for it: press **Load the standard tables**. **Replace with a new table** to put in new rates from a date.
 - **Contributions register:** SSS, PhilHealth and Pag-IBIG per employee per month, with **Register xlsx**. Record each payment to the agency with **Record payment**.
 - Print payslips and each employee's ledger from the run.
 - Names and amounts per person are visible only to HR, the External Auditor, the Accounting Head and Admin. The Accounting Associate sees totals only.
@@ -438,10 +445,14 @@ In the **Daily Inventory Report**, every figure is clickable. **Click a Sales qu
 - **Extension:** press **Request extension** on a day, choose the new date and give the reason. The Head Auditor **and** the Owner must both approve.
 - **Reminders:** every morning the branch, Head Auditor, Asst Auditor and Audit Associate are told about cash due or overdue. A day past its deadline without an approved extension becomes an **HR notice** for a Notice to Explain.
 
-## HR notices (Notice to Explain)
+## HR notices and Notice to Explain (NTE)
 <!-- for: hr.notice -->
-- **HR Notices (NTE)** lists situations HR must act on, such as cash not deposited on time. Each notice shows the amount, the sales day, the deadline and the staff on duty.
-- Issue the NTE, press **Mark NTE issued** and write a note; **Close** it when settled.
+- **HR Notices** has two tabs. **Notices (what may need an NTE)** lists the situations HR must act on: cash not deposited on time (late deposit), too many post-close edits by one person, and transfer differences. **NTEs issued** lists every Notice to Explain.
+- **These notices are the cases for an NTE.** For a late deposit the notice lists *all the sales associates of that branch* (not only who was on duty): HR decides who must explain. Press **Issue an NTE…**, **tick the person or persons**, add words if you wish, and **Issue**. One numbered NTE (NTE-2026-001) is made for each person, with the notice details already in it, and the notice becomes *NTE issued*. A person who has no employee record cannot receive an NTE (add them under Payroll first).
+- **NTE to any employee, without a notice:** NTEs issued → **Issue an NTE to an employee**, or open the employee under Payroll → **Issue a Notice to Explain**. Choose the employee, the subject, what happened, the date, and the reply date (default 5 days).
+- **Print** the NTE (letterhead, number, facts, reply date, boxes for the reply and the decision, signatures). An employee who has a login is notified and finds it in **My Pay & Charges**, where they can type the explanation; otherwise HR types the reply received on paper (*Type the reply received on paper*).
+- **Decision:** after the reply, HR records *no action*, *written warning*, *suspension*, *charge / salary deduction* or *other*, with a note. The employee is told. A mistaken NTE can be **cancelled** with a reason.
+- **Mark issued on paper** (the old button) is still there for an NTE served outside the system. **Refer to the Owner** and **Close** work as before.
 
 ## Product cost and days to consume
 <!-- for: cost.edit, product.edit -->
@@ -692,6 +703,8 @@ Goods sent to a franchise are billed at the franchise price when it receives the
 ## Memorandums
 <!-- for: all -->
 **Memorandums** lists the memos addressed to you: open one and press **I have read this memo**. HR, the Owner, the Franchise Coordinators and the Head Auditor can **Write a memo**: choose who it is for (everyone, franchise owners, franchise associates, a role, a branch or named people), the subject, the text, an optional table and the people who sign. It is numbered by itself (2026-Q3-046), everyone addressed and every signer is notified, and **Print / download PDF** gives the company layout. The Owner's memos always carry AL MARVIN VINLUAN (President) and MICAH VINLUAN (Manager).
+
+**Memo to one employee.** In **Write a memo**, under *Who is it for?*, type a name or employee no. in the box *an employee from the staff list*: the memo is addressed to that employee. If the employee has a login, they are notified and press *I have read this memo*; if not (for example a staff member without an account), the memo is only printed with their name on the TO line.
 
 ## Bank deposit slip and verification
 <!-- for: sale.create, approval.act.CASH_DEPOSIT_AUDIT, approval.act.CASH_DEPOSIT_ACCOUNTING -->

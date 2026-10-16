@@ -1,3 +1,4 @@
+import { EmployeePage } from './pages/EmployeePage';
 import { PaymentProofsPage } from './pages/PaymentProofs';
 import { FranchiseDrsPage } from './pages/FranchiseDrs';
 import { AvailabilityPage, FranchiseOrderPage, FranchiseOrdersPage } from './pages/FranchiseOrders';
@@ -169,6 +170,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
               <Route path="/inspections/:id" element={<InspectionDetailPage />} />
               <Route path="/reports/customers" element={<CustomersReportPage />} />
               <Route path="/accounting/inventory-cost" element={<InventoryCostPage />} />
+              <Route path="/payroll/employees/:id" element={<EmployeePage />} />
               <Route path="/payroll/:id" element={<PayrollPage />} />
               <Route path="/users" element={<UsersPage />} />
               <Route path="/audit-log" element={<AuditLogPage />} />

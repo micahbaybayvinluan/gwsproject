@@ -9,7 +9,7 @@ import { PdfService, type Letterhead, LETTERHEAD_KEY } from '../reports/pdf.serv
 import type { SessionUser } from '../common/request-context';
 import { dateStr, manilaDateStr, toDateOnly } from '../common/manila';
 
-export interface Audience { all?: boolean; franchiseOwners?: boolean; franchiseAssociates?: boolean; roles?: string[]; locationIds?: string[]; userIds?: string[] }
+export interface Audience { all?: boolean; franchiseOwners?: boolean; franchiseAssociates?: boolean; roles?: string[]; locationIds?: string[]; userIds?: string[]; employeeIds?: string[] }
 export interface Signer { name: string; title: string; userId?: string | null }
 export interface MemoTable { headers: string[]; rows: string[][] }
 export interface MemoInput { subject: string; addressedTo?: string; fromText?: string; memoDate?: string; body: string; table?: MemoTable | null; signers?: Signer[]; audience: Audience }
@@ -41,18 +41,23 @@ export class MemosService {
     if (a.roles?.length) or.push({ role: { key: { in: a.roles } } });
     if (a.locationIds?.length) or.push({ assignments: { some: { locationId: { in: a.locationIds } } } }, { ownedFranchises: { some: { id: { in: a.locationIds } } } });
     if (a.userIds?.length) or.push({ id: { in: a.userIds } });
+    // employees chosen from the staff list (owner request 2026-10-16): the one who has a login is notified; the others are only named on the printed TO line
+    if (a.employeeIds?.length) or.push({ employee: { id: { in: a.employeeIds } } });
     if (!or.length) return [];
     return this.prisma.db.user.findMany({ where: { active: true, OR: or }, select: { id: true, fullName: true, role: { select: { name: true } } }, orderBy: { fullName: 'asc' } });
   }
 
+  employeesWithoutLogin(ids: string[]) { return this.prisma.db.employee.findMany({ where: { id: { in: ids }, userId: null }, select: { id: true, fullName: true } }); }
+
   /** What the writer can choose from. */
   async options() {
-    const [roles, locations, users] = await Promise.all([
+    const [roles, locations, users, employees] = await Promise.all([
       this.prisma.db.role.findMany({ select: { key: true, name: true }, orderBy: { name: 'asc' } }),
       this.prisma.db.location.findMany({ where: { active: true, type: { not: 'VIRTUAL' } }, select: { id: true, name: true, type: true }, orderBy: { name: 'asc' } }),
       this.prisma.db.user.findMany({ where: { active: true }, select: { id: true, fullName: true, role: { select: { key: true, name: true } } }, orderBy: { fullName: 'asc' } }),
+      this.prisma.db.employee.findMany({ where: { active: true }, select: { id: true, fullName: true, employeeNo: true, position: true, userId: true }, orderBy: { fullName: 'asc' } }),
     ]);
-    return { roles: roles.filter((r) => r.key !== 'CUSTOM'), locations, users: users.map((u) => ({ id: u.id, name: u.fullName, roleKey: u.role.key, role: u.role.name })), ownerSigners: OWNER_SIGNERS };
+    return { employees: employees.map((e) => ({ id: e.id, name: e.fullName, employeeNo: e.employeeNo, position: e.position, hasLogin: !!e.userId })), roles: roles.filter((r) => r.key !== 'CUSTOM'), locations, users: users.map((u) => ({ id: u.id, name: u.fullName, roleKey: u.role.key, role: u.role.name })), ownerSigners: OWNER_SIGNERS };
   }
 
   private async signersFor(user: SessionUser, given: Signer[] | undefined): Promise<Signer[]> {
@@ -71,7 +76,8 @@ export class MemosService {
     if (!input.subject?.trim()) throw new BadRequestException('Type the subject (RE)');
     if (!input.body?.trim()) throw new BadRequestException('Type the memo');
     const recipients = await this.resolve(input.audience ?? {});
-    if (!recipients.length) throw new BadRequestException('Choose who the memo is addressed to');
+    const noLogin = input.audience?.employeeIds?.length ? await this.prisma.db.employee.findMany({ where: { id: { in: input.audience.employeeIds }, userId: null }, select: { fullName: true } }) : [];
+    if (!recipients.length && !noLogin.length) throw new BadRequestException('Choose who the memo is addressed to');
     const table = input.table && input.table.headers?.length ? { headers: input.table.headers.map((h) => h.trim()), rows: input.table.rows.filter((r) => r.some((c) => c.trim())).map((r) => input.table!.headers.map((_, i) => (r[i] ?? '').trim())) } : null;
     const memoDate = input.memoDate ? toDateOnly(input.memoDate) : toDateOnly(manilaDateStr());
     const signers = await this.signersFor(user, input.signers);
@@ -80,7 +86,7 @@ export class MemosService {
       const n = await this.seq.next(tx, 'MEMO', { locationId: `${year}-Q${q}`, year, prefix: 'M', pad: 3 });
       const no = Number(/(\d+)$/.exec(n)![1]);
       const memoNo = `${year}-Q${q}-${String(no).padStart(3, '0')}`;
-      const m = await tx.memo.create({ data: { memoNo, subject: input.subject.trim().toUpperCase(), addressedTo: (input.addressedTo?.trim() || recipients.map((r) => r.fullName).join(', ')).toUpperCase(), fromText: (input.fromText?.trim() || DEFAULT_FROM).toUpperCase(), memoDate, body: input.body.trim(), table: table as unknown as Prisma.InputJsonValue ?? Prisma.DbNull, signers: signers as unknown as Prisma.InputJsonValue, audience: input.audience as unknown as Prisma.InputJsonValue, createdBy: user.id } });
+      const m = await tx.memo.create({ data: { memoNo, subject: input.subject.trim().toUpperCase(), addressedTo: (input.addressedTo?.trim() || [...recipients.map((r) => r.fullName), ...noLogin.map((e) => e.fullName)].join(', ')).toUpperCase(), fromText: (input.fromText?.trim() || DEFAULT_FROM).toUpperCase(), memoDate, body: input.body.trim(), table: table as unknown as Prisma.InputJsonValue ?? Prisma.DbNull, signers: signers as unknown as Prisma.InputJsonValue, audience: input.audience as unknown as Prisma.InputJsonValue, createdBy: user.id } });
       await tx.memoRecipient.createMany({ data: recipients.map((r) => ({ memoId: m.id, userId: r.id })), skipDuplicates: true });
       return m;
     });

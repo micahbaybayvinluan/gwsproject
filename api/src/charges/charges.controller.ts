@@ -11,6 +11,8 @@ export class ChargesController {
   staff(@CurrentUser() u: SessionUser, @Query('locationId') locationId?: string) { return this.svc.staff(u, locationId); }
   @Get('me/hr') @RequirePermission('dashboard.view')
   mine(@CurrentUser() u: SessionUser) { return this.svc.mine(u); }
+  @Get('me/branch-charges') @RequirePermission('dashboard.view')
+  branchCharges(@CurrentUser() u: SessionUser) { return this.svc.branchCharges(u); }
   @Post('me/charges/:allocationId/acknowledge') @RequirePermission('dashboard.view') @Audited('ChargeForm', 'ACKNOWLEDGE')
   ack(@Param('allocationId') id: string, @CurrentUser() u: SessionUser) { return this.svc.acknowledge(id, u); }
 }

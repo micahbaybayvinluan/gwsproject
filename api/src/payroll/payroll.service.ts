@@ -12,11 +12,13 @@ import { toDateOnly, todayManila } from '../common/manila';
 import { D, ZERO, round2 } from '../common/money';
 import type { SessionUser } from '../common/request-context';
 import Decimal from 'decimal.js';
+import { randomUUID } from 'crypto';
 
 /** §11 Payroll & HR. Per-employee lines visible to HR_STAFF / ACCOUNTING_HEAD / EXTERNAL_AUDITOR / ADMIN; others see totals only. */
 @Injectable()
 export class PayrollService {
-  constructor(private prisma: PrismaService, private posting: PostingService, private accounts: AccountsService, private notify: NotificationsService, private audit: AuditService, md: MasterDataApprovals) {
+  constructor(private prisma: PrismaService, private posting: PostingService, private accounts: AccountsService, private notify: NotificationsService, private audit: AuditService, private md: MasterDataApprovals) {
+    md.registerKind('EmployeeIdChange', { label: 'Staff ID number change', apply: async (p) => { const x = p as { employeeId: string; newNo: string; reason: string }; return this.applyIdChange(x.employeeId, x.newNo); }, link: () => '/payroll' });
     md.registerKind('Employee', { label: 'Employee', apply: async (p, by) => this.createEmployee(p as never, await md.sessionUserOf(by)), link: () => '/payroll' });
   }
 
@@ -24,9 +26,70 @@ export class PayrollService {
   employees(active = true) { return this.prisma.db.employee.findMany({ where: { active }, include: { location: { select: { code: true, name: true } }, loans: { where: { active: true } }, user: { select: { id: true, username: true, fullName: true } } }, orderBy: { fullName: 'asc' } }); }
   /** Franchise associates are paid by their franchise owner, never by company payroll. */
   async assertCompanyLocation(locationId?: string | null) { if (locationId) { const loc = await this.prisma.db.location.findUnique({ where: { id: locationId } }); if (loc?.type === 'FRANCHISE') throw new BadRequestException('Franchise associates are paid by their franchise owner (Franchise Portal), not company payroll'); } }
-  async createEmployee(data: Prisma.EmployeeUncheckedCreateInput, user: SessionUser) { await this.assertCompanyLocation(data.locationId as string | null | undefined); const e = await this.prisma.db.employee.create({ data: { ...data, createdBy: user.id } }); await this.audit.log({ action: 'CREATE', entityType: 'Employee', entityId: e.id, after: e }); await this.notify.toRoles(['HR_STAFF'], { type: 'EMPLOYEE_CREATED', title: `New employee record: ${e.fullName} (${e.employeeNo}) added by ${user.fullName}`, link: '/payroll' }); return e; }
+  /** The next staff number, GWS-0001, GWS-0002, ... (owner request 2026-10-16: the company ID card has no number, so the system numbers the staff). */
+  async nextEmployeeNo() {
+    const rows = await this.prisma.db.employee.findMany({ where: { employeeNo: { startsWith: 'GWS-' } }, select: { employeeNo: true } });
+    const max = rows.reduce((m, r) => { const n = /^GWS-(\d+)$/.exec(r.employeeNo); return n ? Math.max(m, Number(n[1])) : m; }, 0);
+    return `GWS-${String(max + 1).padStart(4, '0')}`;
+  }
+  async createEmployee(data: Prisma.EmployeeUncheckedCreateInput, user: SessionUser) {
+    await this.assertCompanyLocation(data.locationId as string | null | undefined);
+    let e; const typed = String(data.employeeNo ?? '').trim();
+    for (let i = 0; ; i++) {
+      try { e = await this.prisma.db.employee.create({ data: { ...data, employeeNo: typed || (await this.nextEmployeeNo()), createdBy: user.id } }); break; }
+      catch (err) { if (!typed && i < 5 && (err as { code?: string }).code === 'P2002') continue; if ((err as { code?: string }).code === 'P2002') throw new BadRequestException(`The staff number ${typed} is already used`); throw err; }
+    }
+    await this.audit.log({ action: 'CREATE', entityType: 'Employee', entityId: e.id, after: e });
+    await this.notify.toRoles(['HR_STAFF'], { type: 'EMPLOYEE_CREATED', title: `New employee record: ${e.fullName} (${e.employeeNo}) added by ${user.fullName}`, link: '/payroll' });
+    return e;
+  }
+  /** Changing the staff ID number: HR asks, the Owner approves (owner request 2026-10-16). The linked login's Company ID follows. */
+  async requestIdChange(id: string, newNo: string, reason: string, user: SessionUser) {
+    const emp = await this.prisma.db.employee.findUnique({ where: { id }, select: { id: true, fullName: true, employeeNo: true } }); if (!emp) throw new NotFoundException();
+    const no = newNo.trim(); if (!no) throw new BadRequestException('Type the new staff ID number');
+    if (no === emp.employeeNo) throw new BadRequestException('That is already the staff ID number');
+    await this.assertIdFree(no, id);
+    return this.md.submit('EmployeeIdChange', { employeeId: id, newNo: no, reason }, user, { name: emp.fullName, from: emp.employeeNo, to: no, reason }, () => this.applyIdChange(id, no, user.id));
+  }
+  private async assertIdFree(no: string, employeeId: string) {
+    const clash = await this.prisma.db.employee.findFirst({ where: { employeeNo: no, id: { not: employeeId } }, select: { fullName: true } });
+    if (clash) throw new BadRequestException(`${no} already belongs to ${clash.fullName}`);
+    const emp = await this.prisma.db.employee.findUnique({ where: { id: employeeId }, select: { userId: true } });
+    const u = await this.prisma.db.user.findFirst({ where: { idNumber: no, ...(emp?.userId ? { id: { not: emp.userId } } : {}) }, select: { fullName: true } });
+    if (u) throw new BadRequestException(`${no} is already the Company ID of ${u.fullName}`);
+  }
+  async applyIdChange(employeeId: string, newNo: string, actorId?: string) {
+    await this.assertIdFree(newNo, employeeId);
+    const before = await this.prisma.db.employee.findUniqueOrThrow({ where: { id: employeeId } });
+    const after = await this.prisma.db.$transaction(async (tx) => {
+      const e = await tx.employee.update({ where: { id: employeeId }, data: { employeeNo: newNo } });
+      if (before.userId) await tx.user.update({ where: { id: before.userId }, data: { idNumber: newNo } });
+      return e;
+    });
+    await this.audit.log({ action: 'UPDATE', entityType: 'Employee', entityId: employeeId, before: { employeeNo: before.employeeNo }, after: { employeeNo: newNo }, userId: actorId });
+    return after;
+  }
   async updateEmployee(id: string, data: Prisma.EmployeeUncheckedUpdateInput) { const before = await this.prisma.db.employee.findUniqueOrThrow({ where: { id } }); const after = await this.prisma.db.employee.update({ where: { id }, data }); await this.audit.log({ action: 'UPDATE', entityType: 'Employee', entityId: id, before, after }); return after; }
   linkableUsers() { return this.prisma.db.user.findMany({ where: { active: true }, select: { id: true, username: true, fullName: true, idNumber: true, role: { select: { name: true } }, employee: { select: { id: true } } }, orderBy: { fullName: 'asc' } }); }
+  loansOf(employeeId?: string) { return this.prisma.db.employeeLoan.findMany({ where: { employeeId: employeeId || undefined }, include: { employee: { select: { fullName: true, employeeNo: true } } }, orderBy: [{ active: 'desc' }, { createdAt: 'desc' }] }); }
+  /** Change a loan / cash advance instalment, or close it (owner request 2026-10-16: HR encodes loans on the employee page). */
+  async updateLoan(id: string, patch: { perPeriod?: number; active?: boolean; note?: string }) {
+    const before = await this.prisma.db.employeeLoan.findUniqueOrThrow({ where: { id } });
+    const after = await this.prisma.db.employeeLoan.update({ where: { id }, data: { perPeriod: patch.perPeriod !== undefined ? D(patch.perPeriod).toFixed(2) : undefined, active: patch.active } });
+    await this.audit.log({ action: 'UPDATE', entityType: 'EmployeeLoan', entityId: id, before, after });
+    return after;
+  }
+  /** Everything about one employee for HR: profile, loans, charges (with how much is already deducted), NTEs, memos and the next-payroll note. */
+  async employeeDetail(id: string) {
+    const e = await this.prisma.db.employee.findUnique({ where: { id }, include: { location: { select: { id: true, code: true, name: true } }, user: { select: { id: true, username: true, fullName: true, idNumber: true } }, loans: { orderBy: [{ active: 'desc' }, { createdAt: 'desc' }] }, chargeAllocations: { include: { chargeForm: { select: { id: true, controlNo: true, kind: true, reason: true, totalAmount: true, finalizedByHrAt: true, locationId: true, payrollDeductionSchedule: true } } }, orderBy: { id: 'desc' } } } });
+    if (!e) throw new NotFoundException();
+    const ntes = await this.prisma.db.nte.findMany({ where: { employeeId: id }, orderBy: { createdAt: 'desc' }, select: { id: true, nteNo: true, subject: true, status: true, issuedOn: true, replyDueOn: true, decision: true } });
+    const memos = e.userId ? await this.prisma.db.memoRecipient.findMany({ where: { userId: e.userId }, include: { memo: { select: { id: true, memoNo: true, subject: true, memoDate: true, status: true } } }, orderBy: { memo: { memoDate: 'desc' } }, take: 50 }) : [];
+    const pending = await this.prisma.db.approvalRequest.findMany({ where: { type: 'MASTER_DATA_NEW', status: 'PENDING', summary: { path: ['kind'], equals: 'EmployeeIdChange' } }, select: { id: true, summary: true } });
+    const idChangePending = pending.map((r) => r.summary as { employeeId?: string; _payload?: { employeeId?: string; newNo?: string }; to?: string }).find((x) => x._payload?.employeeId === id);
+    return { ...e, ntes, memos: memos.map((m) => ({ ...m.memo, acknowledgedAt: m.acknowledgedAt })), idChangePending: idChangePending ? { to: idChangePending._payload?.newNo ?? idChangePending.to } : null,
+      chargeAllocations: e.chargeAllocations.map((a) => ({ id: a.id, amount: a.amount, deductedToDate: a.deductedToDate, balance: D(a.amount).minus(a.deductedToDate).toFixed(2), acknowledgedAt: a.acknowledgedAt, form: a.chargeForm })) };
+  }
   addLoan(data: { employeeId: string; kind: string; principal: number; perPeriod: number }) { return this.prisma.db.employeeLoan.create({ data: { ...data, principal: D(data.principal).toFixed(2), balance: D(data.principal).toFixed(2), perPeriod: D(data.perPeriod).toFixed(2) } }); }
 
   // ── Contribution tables (editable config) ──
@@ -120,13 +183,28 @@ export class PayrollService {
       return run;
     });
   }
-  async updateLine(runId: string, lineId: string, patch: { basic?: number; overtime?: number; incentives?: number; otherDeductions?: number }) {
+  /**
+   * Edit a draft line. The government contribution shares can be typed by HR (owner request 2026-10-16: they depend on the pay actually earned);
+   * a typed line keeps them. Without typed shares, a changed basic recomputes them from the contribution tables (monthly equivalent of the basic);
+   * `resetContributions` goes back to the table figures.
+   */
+  async updateLine(runId: string, lineId: string, patch: { basic?: number; overtime?: number; incentives?: number; otherDeductions?: number; sssEe?: number; sssEr?: number; phicEe?: number; phicEr?: number; hdmfEe?: number; hdmfEr?: number; resetContributions?: boolean }) {
     const run = await this.prisma.db.payrollRun.findUniqueOrThrow({ where: { id: runId } });
     if (run.status !== 'DRAFT') throw new BadRequestException('Run is not editable');
-    const l = await this.prisma.db.payrollLine.findUniqueOrThrow({ where: { id: lineId } });
+    const l = await this.prisma.db.payrollLine.findUniqueOrThrow({ where: { id: lineId }, include: { employee: { select: { payFrequency: true } } } });
     const n = { basic: D(patch.basic ?? l.basic), overtime: D(patch.overtime ?? l.overtime), incentives: D(patch.incentives ?? l.incentives), other: D(patch.otherDeductions ?? l.otherDeductions) };
-    const netPay = computeNetPay({ basic: n.basic, overtime: n.overtime, incentives: n.incentives, thirteenth: 0, sssEe: l.sssEe, sssEr: 0, phicEe: l.phicEe, phicEr: 0, hdmfEe: l.hdmfEe, hdmfEr: 0, sssLoan: 0, hdmfLoan: 0, advances: l.loans, chargeDeductions: l.chargeDeductions }).minus(n.other);
-    return this.prisma.db.payrollLine.update({ where: { id: lineId }, data: { basic: n.basic.toFixed(2), overtime: n.overtime.toFixed(2), incentives: n.incentives.toFixed(2), otherDeductions: n.other.toFixed(2), thirteenthMonthAccrual: round2(n.basic.div(12)).toFixed(2), netPay: netPay.toFixed(2) } });
+    const keys = ['sssEe', 'sssEr', 'phicEe', 'phicEr', 'hdmfEe', 'hdmfEr'] as const;
+    let c = { sssEe: D(l.sssEe), sssEr: D(l.sssEr), phicEe: D(l.phicEe), phicEr: D(l.phicEr), hdmfEe: D(l.hdmfEe), hdmfEr: D(l.hdmfEr) }; let edited = l.contributionsEdited;
+    const typed = keys.some((k) => patch[k] !== undefined);
+    if (typed) { for (const k of keys) if (patch[k] !== undefined) c[k] = round2(D(patch[k]!)); edited = true; }
+    else if (patch.resetContributions || (patch.basic !== undefined && !edited)) {
+      const ppm = l.employee.payFrequency === 'MONTHLY' ? 1 : l.employee.payFrequency === 'WEEKLY' ? 4 : 2;
+      const t = await this.contributions(n.basic.mul(ppm), run.periodTo);
+      c = { sssEe: round2(t.sssEe.div(ppm)), sssEr: round2(t.sssEr.div(ppm)), phicEe: round2(t.phicEe.div(ppm)), phicEr: round2(t.phicEr.div(ppm)), hdmfEe: round2(t.hdmfEe.div(ppm)), hdmfEr: round2(t.hdmfEr.div(ppm)) };
+      if (patch.resetContributions) edited = false;
+    }
+    const netPay = computeNetPay({ basic: n.basic, overtime: n.overtime, incentives: n.incentives, thirteenth: 0, sssEe: c.sssEe, sssEr: 0, phicEe: c.phicEe, phicEr: 0, hdmfEe: c.hdmfEe, hdmfEr: 0, sssLoan: 0, hdmfLoan: 0, advances: l.loans, chargeDeductions: l.chargeDeductions }).minus(n.other);
+    return this.prisma.db.payrollLine.update({ where: { id: lineId }, data: { basic: n.basic.toFixed(2), overtime: n.overtime.toFixed(2), incentives: n.incentives.toFixed(2), otherDeductions: n.other.toFixed(2), thirteenthMonthAccrual: round2(n.basic.div(12)).toFixed(2), sssEe: c.sssEe.toFixed(2), sssEr: c.sssEr.toFixed(2), phicEe: c.phicEe.toFixed(2), phicEr: c.phicEr.toFixed(2), hdmfEe: c.hdmfEe.toFixed(2), hdmfEr: c.hdmfEr.toFixed(2), contributionsEdited: edited, netPay: netPay.toFixed(2) } });
   }
   /** HR finalizes → R13 posts; loans/charge balances reduced. */
   async finalize(runId: string, user: SessionUser) {

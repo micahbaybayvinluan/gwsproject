@@ -174,9 +174,27 @@ export class ImportsService {
     for (const o of out) await this.prisma.db.beginningBalance.upsert({ where: { fiscalYear_accountId: { fiscalYear: year, accountId: o.accountId } }, create: { fiscalYear: year, ...o, debit: D(o.debit).toFixed(2), credit: D(o.credit).toFixed(2), createdBy: user.id }, update: { debit: D(o.debit).toFixed(2), credit: D(o.credit).toFixed(2) } });
     return { imported: out.length, errors };
   }
+  /**
+   * Employees from Excel: one row per person. A blank EmployeeNo gets the next GWS-0001 style number by itself (owner request 2026-10-16: the company ID card has no number);
+   * an existing number updates that person (name, branch, position, basic, and any government number or bank account still blank). Franchise staff are not company payroll.
+   */
   async employees(buf: Buffer, user: SessionUser) {
     const { rows } = await this.xlsx.read(buf); let n = 0; const errors: string[] = [];
-    for (const [i, r] of rows.entries()) { try { const loc = r.LocationCode ? await this.prisma.db.location.findUnique({ where: { code: String(r.LocationCode) } }) : null; await this.prisma.db.employee.upsert({ where: { employeeNo: String(r.EmployeeNo) }, create: { employeeNo: String(r.EmployeeNo), fullName: String(r.FullName), locationId: loc?.id, position: r.Position ? String(r.Position) : null, basicRate: D(r.BasicRate as number).toFixed(2), payFrequency: r.PayFrequency ? String(r.PayFrequency) : 'SEMI_MONTHLY', sssNo: r.SSS ? String(r.SSS) : null, phicNo: r.PHIC ? String(r.PHIC) : null, hdmfNo: r.HDMF ? String(r.HDMF) : null, bankAccount: r.BankAccount ? String(r.BankAccount) : null, createdBy: user.id }, update: { fullName: String(r.FullName), locationId: loc?.id, position: r.Position ? String(r.Position) : undefined, basicRate: D(r.BasicRate as number).toFixed(2) } }); n++; } catch (e) { errors.push(`Row ${i + 2}: ${(e as Error).message}`); } }
+    const nextNo = async () => { const all = await this.prisma.db.employee.findMany({ where: { employeeNo: { startsWith: 'GWS-' } }, select: { employeeNo: true } }); const max = all.reduce((m, r) => { const x = /^GWS-(\d+)$/.exec(r.employeeNo); return x ? Math.max(m, Number(x[1])) : m; }, 0); return `GWS-${String(max + 1).padStart(4, '0')}`; };
+    for (const [i, r] of rows.entries()) {
+      try {
+        if (!r.FullName) throw new Error('FullName is required');
+        const loc = r.LocationCode ? await this.prisma.db.location.findUnique({ where: { code: String(r.LocationCode) } }) : null;
+        if (r.LocationCode && !loc) throw new Error(`Unknown LocationCode ${r.LocationCode}`);
+        if (loc?.type === 'FRANCHISE') throw new Error('Franchise staff are paid by their franchise owner, not company payroll');
+        const typed = r.EmployeeNo ? String(r.EmployeeNo).trim() : '';
+        const found = typed ? await this.prisma.db.employee.findUnique({ where: { employeeNo: typed } }) : null;
+        const common = { fullName: String(r.FullName), locationId: loc?.id, position: r.Position ? String(r.Position) : null, basicRate: D((r.BasicRate as number) ?? 0).toFixed(2), payFrequency: r.PayFrequency && ['MONTHLY', 'SEMI_MONTHLY', 'WEEKLY'].includes(String(r.PayFrequency)) ? String(r.PayFrequency) : 'SEMI_MONTHLY', sssNo: r.SSS ? String(r.SSS) : null, phicNo: r.PHIC ? String(r.PHIC) : null, hdmfNo: r.HDMF ? String(r.HDMF) : null, bankAccount: r.BankAccount ? String(r.BankAccount) : null };
+        if (found) await this.prisma.db.employee.update({ where: { id: found.id }, data: { fullName: common.fullName, locationId: loc?.id, position: common.position ?? undefined, basicRate: common.basicRate, sssNo: found.sssNo ?? common.sssNo, phicNo: found.phicNo ?? common.phicNo, hdmfNo: found.hdmfNo ?? common.hdmfNo, bankAccount: found.bankAccount ?? common.bankAccount } });
+        else await this.prisma.db.employee.create({ data: { ...common, employeeNo: typed || (await nextNo()), createdBy: user.id } });
+        n++;
+      } catch (e) { errors.push(`Row ${i + 2}: ${(e as Error).message}`); }
+    }
     return { imported: n, errors };
   }
   /** §15.4 Open AR: each row becomes an opening AR entry for the Owner's approval (owner request 2026-09-29), like the form on AR & Collections. */

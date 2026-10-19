@@ -1327,6 +1327,8 @@ model Notification {
   title     String
   body      String?
   link      String?
+  /// what a button on the notification needs (owner request 2026-10-19), e.g. { hrNoticeId } for Create NTE
+  data      Json?
   readAt    DateTime? @map("read_at")
   emailedAt DateTime? @map("emailed_at")
   createdAt DateTime  @default(now()) @map("created_at")
@@ -1937,7 +1939,7 @@ model HrNotice {
 /// Notice to Explain to one employee (owner request 2026-10-16): numbered, printed on the letterhead, with the employee's reply and HR's decision.
 model Nte {
   id           String    @id @default(uuid())
-  nteNo        String    @unique @map("nte_no")
+  nteNo        String?   @unique @map("nte_no") // numbered when issued; a DRAFT made from an HR notice has none yet
   employeeId   String    @map("employee_id")
   employeeName String    @map("employee_name")
   locationId   String?   @map("location_id")
@@ -1947,7 +1949,7 @@ model Nte {
   incidentDate DateTime? @map("incident_date") @db.Date
   issuedOn     DateTime  @map("issued_on") @db.Date
   replyDueOn   DateTime  @map("reply_due_on") @db.Date
-  status       String    @default("ISSUED") // ISSUED | REPLIED | DECIDED | VOIDED
+  status       String    @default("ISSUED") // DRAFT | ISSUED | REPLIED | DECIDED | VOIDED
   reply        String?
   repliedOn    DateTime? @map("replied_on")
   repliedBy    String?   @map("replied_by")

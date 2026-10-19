@@ -1,3 +1,4 @@
+import { personLabel } from '@/lib/utils';
 import { DeleteDraft } from '@/components/DeleteDraft';
 import { locLabel } from '@/lib/utils';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -48,7 +49,7 @@ export function InspectionFormPage() {
         <Field label="Branch"><Select value={h.locationId} onChange={(e) => setH({ ...h, locationId: e.target.value, staffOnDutyEmployeeId: '' })}><option value="">—</option>{locations.data?.filter((l) => ['BRANCH', 'WAREHOUSE', 'FRANCHISE'].includes(l.type)).map((l) => <option key={l.id} value={l.id}>{locLabel(l)}</option>)}</Select></Field>
         <Field label="Date"><Input type="date" value={h.inspectionDate} onChange={(e) => setH({ ...h, inspectionDate: e.target.value })} /></Field>
         <Field label="Name of inspector"><Input value={me?.fullName ?? ''} disabled /></Field>
-        <Field label="Name of staff on duty"><Select value={h.staffOnDutyEmployeeId} onChange={(e) => setH({ ...h, staffOnDutyEmployeeId: e.target.value })}><option value="">— pick or type below —</option>{staff.data?.map((s) => <option key={s.id} value={s.id}>{s.fullName}</option>)}</Select>{!h.staffOnDutyEmployeeId && <Input className="mt-1" placeholder="Name (if not in the list)" value={h.staffOnDutyName} onChange={(e) => setH({ ...h, staffOnDutyName: e.target.value })} />}</Field>
+        <Field label="Name of staff on duty"><Select value={h.staffOnDutyEmployeeId} onChange={(e) => setH({ ...h, staffOnDutyEmployeeId: e.target.value })}><option value="">— pick or type below —</option>{staff.data?.map((s) => <option key={s.id} value={s.id}>{personLabel(s)}</option>)}</Select>{!h.staffOnDutyEmployeeId && <Input className="mt-1" placeholder="Name (if not in the list)" value={h.staffOnDutyName} onChange={(e) => setH({ ...h, staffOnDutyName: e.target.value })} />}</Field>
       </div>
     </Card>
     <Card title={`Please check the boxes below (${answered} of ${items.length})`}>

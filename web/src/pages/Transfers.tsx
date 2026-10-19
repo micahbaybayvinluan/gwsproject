@@ -1,6 +1,6 @@
 import { BranchRequestsCard, MyStockRequests } from '@/components/BranchRequests';
 import { BatchChooser, batchText, loadBatches, type BatchOpt } from '@/components/BatchPicker';
-import { locLabel } from '@/lib/utils';
+import { locLabel, personLabel } from '@/lib/utils';
 import { ApprovalTimeline } from '@/components/ApprovalTimeline';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
@@ -207,7 +207,7 @@ function DiscrepancyPanel({ diff, transferId, fromName, fromId, toName, onChange
         <Button variant="outline" onClick={() => owner.mutate('LOST_COMPANY')}>Lost: company expense</Button>
         <Button variant="danger" onClick={() => setCharge(!charge)}>Lost: charge to staff…</Button>
       </div>
-      {charge && <div className="mt-2 flex flex-wrap items-center gap-3">{staff.data?.map((e) => <label key={e.id} className="inline-flex items-center gap-1 text-sm"><input type="checkbox" checked={staffIds.includes(e.id)} onChange={(ev) => setStaffIds(ev.target.checked ? [...staffIds, e.id] : staffIds.filter((x) => x !== e.id))} />{e.fullName}</label>)}<Button size="sm" variant="danger" disabled={!staffIds.length} onClick={() => owner.mutate('LOST_CHARGE')}>Charge the ticked staff</Button></div>}
+      {charge && <div className="mt-2 flex flex-wrap items-center gap-3">{staff.data?.map((e) => <label key={e.id} className="inline-flex items-center gap-1 text-sm"><input type="checkbox" checked={staffIds.includes(e.id)} onChange={(ev) => setStaffIds(ev.target.checked ? [...staffIds, e.id] : staffIds.filter((x) => x !== e.id))} />{personLabel(e)}</label>)}<Button size="sm" variant="danger" disabled={!staffIds.length} onClick={() => owner.mutate('LOST_CHARGE')}>Charge the ticked staff</Button></div>}
     </div>}
     <ErrorBox error={decide.error ?? owner.error} />
     {diff.outcomeLabel && <p className="mt-3 text-sm font-semibold text-emerald-800">{diff.outcomeLabel}</p>}

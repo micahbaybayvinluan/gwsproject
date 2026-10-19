@@ -3,7 +3,7 @@ import { PrismaService } from '../common/prisma.service';
 import type { RoleKey } from '../common/permissions';
 import nodemailer from 'nodemailer';
 
-export interface Notify { type: string; title: string; body?: string; link?: string }
+export interface Notify { type: string; title: string; body?: string; link?: string; /** what a button on the notification needs (owner request 2026-10-19) */ data?: import('@prisma/client').Prisma.InputJsonValue }
 
 /** §12 notifications: in-app bell + optional daily email digest. */
 @Injectable()

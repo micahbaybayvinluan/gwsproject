@@ -1,3 +1,4 @@
+import { afterHrNotice } from '../nte/nte-drafts';
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService, Tx } from '../common/prisma.service';
@@ -153,7 +154,7 @@ export class ClosingService implements OnModuleInit {
     const docs = await Promise.all(mine.map(async (m) => ({ controlNo: (m.before as { controlNo?: string }).controlNo ?? '', documentType: m.documentType, reason: m.reason, at: m.createdAt.toISOString() })));
     const details = { staffUserId: user.id, staffName: user.fullName, branch: loc.name, month, countInMonth: count, inARow, recommendReferral: refer, edits: docs } as Prisma.InputJsonValue;
     const title = `Post-close edits by ${user.fullName} (${loc.name}), ${month}`;
-    await this.prisma.db.hrNotice.upsert({
+    const notice = await this.prisma.db.hrNotice.upsert({
       where: { dedupeKey: `POST_CLOSE_EDITS:${user.id}:${month}` },
       create: { kind: 'POST_CLOSE_EDITS', dedupeKey: `POST_CLOSE_EDITS:${user.id}:${month}`, locationId: loc.id, title, details, staffIds: [{ id: user.id, name: user.fullName }] as Prisma.InputJsonValue },
       update: { title, details },
@@ -164,7 +165,7 @@ export class ClosingService implements OnModuleInit {
       title: refer ? `${user.fullName} (${loc.name}): ${count} post-close edit${count === 1 ? '' : 's'} in ${month}${inARow ? ', 3 days in a row' : ''} — flagged; HR is advised to refer it to the Owner (negligence of duty)` : `Post-close edit asked by ${user.fullName} (${loc.name}) on ${what} (${count} this month)`,
       body: `Reason: ${reason}`,
     };
-    await this.notify.toRoles(['HR_STAFF'], { ...n, link: '/hr-notices' });
+    await afterHrNotice(this.prisma, this.notify, notice.id, { type: n.type, title: n.title, body: n.body, roles: ['HR_STAFF'] });
     await this.notify.toRoles(['HEAD_AUDITOR'], { ...n, link: '/approvals?type=POST_CLOSE_EDIT' });
   }
   listEdits(user: SessionUser) { return this.prisma.db.postCloseEdit.findMany({ where: user.locationScoped ? { locationId: { in: user.locationIds } } : {}, orderBy: { createdAt: 'desc' }, take: 200 }); }

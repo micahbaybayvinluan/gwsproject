@@ -14,7 +14,7 @@ interface Detail {
   chargeAllocations: { id: string; amount: string; deductedToDate: string; balance: string; acknowledgedAt: string | null; form: { id: string; controlNo: string; kind: string; reason: string | null; totalAmount: string; finalizedByHrAt: string | null } }[];
   ntes: { id: string; nteNo: string; subject: string; status: string; issuedOn: string; replyDueOn: string; decision: string | null }[];
   memos: { id: string; memoNo: string; subject: string; memoDate: string; status: string; acknowledgedAt: string | null }[];
-  idChangePending: { to?: string } | null;
+  idChangePending: { to?: string } | null; editPending?: { change: string } | null;
 }
 const LOAN_KIND: Record<string, string> = { SSS_LOAN: 'SSS loan', HDMF_LOAN: 'Pag-IBIG loan', VALE: 'Vale', ADVANCE: 'Cash advance' };
 
@@ -27,7 +27,8 @@ export function EmployeePage() {
   const d = q.data;
   const [f, setF] = useState<Record<string, string> | null>(null);
   const form = f ?? (d ? { fullName: d.fullName, position: d.position ?? '', basicRate: String(Number(d.basicRate)), payFrequency: d.payFrequency, sssNo: d.sssNo ?? '', phicNo: d.phicNo ?? '', hdmfNo: d.hdmfNo ?? '', bankAccount: d.bankAccount ?? '', locationId: d.locationId ?? '' } : {});
-  const save = useMutation({ mutationFn: () => api.patch(`/api/payroll/employees/${id}`, { fullName: form.fullName, position: form.position || undefined, basicRate: Number(form.basicRate), payFrequency: form.payFrequency, sssNo: form.sssNo || undefined, phicNo: form.phicNo || undefined, hdmfNo: form.hdmfNo || undefined, bankAccount: form.bankAccount || undefined, locationId: form.locationId || null }), onSuccess: () => { setF(null); refresh(); } });
+  const [saveMsg, setSaveMsg] = useState('');
+  const save = useMutation({ mutationFn: () => api.patch<{ pending?: boolean; message?: string } | null>(`/api/payroll/employees/${id}`, { fullName: form.fullName, position: form.position || undefined, basicRate: Number(form.basicRate), payFrequency: form.payFrequency, sssNo: form.sssNo || undefined, phicNo: form.phicNo || undefined, hdmfNo: form.hdmfNo || undefined, bankAccount: form.bankAccount || undefined, locationId: form.locationId || null }), onSuccess: (r) => { setF(null); setSaveMsg(r && (r as { pending?: boolean }).pending ? 'Your change to the name, position, branch or monthly basic was sent to the Owner. It shows here once approved.' : 'Saved.'); refresh(); } });
   const setActive = useMutation({ mutationFn: (active: boolean) => api.patch(`/api/payroll/employees/${id}`, { active }), onSuccess: refresh });
   const [newNo, setNewNo] = useState(''); const [why, setWhy] = useState(''); const [idMsg, setIdMsg] = useState('');
   const idChange = useMutation({ mutationFn: () => api.post<{ pending?: boolean; message?: string }>(`/api/payroll/employees/${id}/id-number`, { employeeNo: newNo, reason: why }), onSuccess: (r) => { setIdMsg(r.pending ? (r.message ?? 'Sent to the Owner for approval.') : 'The staff ID number was changed.'); setNewNo(''); setWhy(''); refresh(); } });
@@ -54,8 +55,10 @@ export function EmployeePage() {
         <Field label="Pag-IBIG no."><Input value={form.hdmfNo} disabled={!manage} onChange={(e) => set('hdmfNo', e.target.value)} /></Field>
       </div>
       {manage && <div className="mt-3 flex flex-wrap gap-2"><Button disabled={save.isPending || !form.fullName || f === null} onClick={() => save.mutate()}>Save the profile</Button><Button variant="outline" onClick={() => setActive.mutate(!d.active)}>{d.active ? 'Set as inactive (left the company)' : 'Set as active again'}</Button></div>}
+      {d.editPending && <p className="mt-2 rounded-lg bg-amber-50 p-2 text-sm text-amber-900" data-testid="edit-pending">Waiting for the Owner: {d.editPending.change}</p>}
+      {saveMsg && <p className="mt-1 text-sm text-emerald-700">{saveMsg}</p>}
       <ErrorBox error={save.error ?? setActive.error} />
-      <p className="mt-2 text-xs text-slate-500">The government contributions of each payroll run are worked out from the monthly basic pay above (SSS, PhilHealth and Pag-IBIG tables); HR can still type the shares of one payroll line when they differ.</p>
+      <p className="mt-2 text-xs text-slate-500">A change to the name, position, branch or monthly basic is approved by the Owner (the Owner's own change applies at once). The government contributions of each payroll run are worked out from the monthly basic pay above (SSS, PhilHealth and Pag-IBIG tables); HR can still type the shares of one payroll line when they differ.</p>
     </Card>
 
     <Card title="Staff ID number">

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query, Res } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Put, Query, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import { z } from 'zod';
 import { Audited, CurrentUser, RequirePermission } from '../common/decorators';
@@ -20,6 +20,9 @@ export class NteController {
   @Get('ntes') @RequirePermission('hr.notice') list(@Query('status') status?: string, @Query('employeeId') employeeId?: string) { return this.svc.list({ status, employeeId }); }
   @Post('ntes') @RequirePermission('hr.notice') @Audited('Nte', 'CREATE') create(@Body(Z(Create)) dto: z.infer<typeof Create>, @CurrentUser() u: SessionUser) { return this.svc.create(dto, u); }
   @Post('hr-notices/:id/issue-nte') @RequirePermission('hr.notice') @Audited('HrNotice', 'ISSUE_NTE') fromNotice(@Param('id') id: string, @Body(Z(FromNotice)) dto: z.infer<typeof FromNotice>, @CurrentUser() u: SessionUser) { return this.svc.issueFromNotice(id, dto, u); }
+  @Get('hr-notices/:id/people') @RequirePermission('hr.notice') noticeView(@Param('id') id: string) { return this.svc.noticeView(id); }
+  @Post('ntes/:id/issue') @RequirePermission('hr.notice') @Audited('Nte', 'ISSUE') issue(@Param('id') id: string, @Body(Z(z.object({ details: z.string().trim().max(8000).optional(), replyDueOn: Day.nullable().optional() }))) dto: { details?: string; replyDueOn?: string | null }, @CurrentUser() u: SessionUser) { return this.svc.issueDraft(id, dto, u); }
+  @Put('ntes/:id') @RequirePermission('hr.notice') @Audited('Nte', 'EDIT_DRAFT') editDraft(@Param('id') id: string, @Body(Z(z.object({ subject: z.string().trim().min(3).max(200).optional(), details: z.string().trim().min(5).max(8000).optional(), replyDueOn: Day.nullable().optional() }))) dto: { subject?: string; details?: string; replyDueOn?: string | null }) { return this.svc.updateDraft(id, dto); }
   @Get('me/ntes') @RequirePermission('dashboard.view') mine(@CurrentUser() u: SessionUser) { return this.svc.mine(u); }
   @Get('ntes/:id') @RequirePermission('hr.notice') get(@Param('id') id: string) { return this.svc.get(id); }
   @Post('ntes/:id/reply') @RequirePermission('dashboard.view') @Audited('Nte', 'REPLY') reply(@Param('id') id: string, @Body(Z(Reply)) dto: z.infer<typeof Reply>, @CurrentUser() u: SessionUser) { return this.svc.reply(id, dto.reply, u); }

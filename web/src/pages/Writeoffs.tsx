@@ -1,4 +1,4 @@
-import { locLabel } from '@/lib/utils';
+import { locLabel, personLabel } from '@/lib/utils';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { api, fmtDate, peso } from '@/lib/api';
@@ -28,7 +28,7 @@ export function WriteoffsPage() {
         <div className="text-sm font-medium">Who bears the loss?</div>
         <label className="mr-4 inline-flex items-center gap-2 text-sm"><input type="radio" checked={chargeTo === 'COMPANY'} onChange={() => setChargeTo('COMPANY')} /> Expensed by the company</label>
         <label className="inline-flex items-center gap-2 text-sm"><input type="radio" checked={chargeTo === 'STAFF'} onChange={() => setChargeTo('STAFF')} /> Charged to staff</label>
-        {chargeTo === 'STAFF' && <div className="mt-2 flex flex-wrap gap-3">{staff.data?.length ? staff.data.map((e) => <label key={e.id} className="inline-flex items-center gap-1 text-sm"><input type="checkbox" checked={staffIds.includes(e.id)} onChange={(ev) => setStaffIds(ev.target.checked ? [...staffIds, e.id] : staffIds.filter((x) => x !== e.id))} />{e.fullName}</label>) : <span className="text-xs text-slate-500">No staff recorded for this location (HR adds employees under Payroll).</span>}</div>}
+        {chargeTo === 'STAFF' && <div className="mt-2 flex flex-wrap gap-3">{staff.data?.length ? staff.data.map((e) => <label key={e.id} className="inline-flex items-center gap-1 text-sm"><input type="checkbox" checked={staffIds.includes(e.id)} onChange={(ev) => setStaffIds(ev.target.checked ? [...staffIds, e.id] : staffIds.filter((x) => x !== e.id))} />{personLabel(e)}</label>) : <span className="text-xs text-slate-500">No staff recorded for this location (HR adds employees under Payroll).</span>}</div>}
         {chargeTo === 'STAFF' && <p className="mt-1 text-xs text-slate-500">On approval a charge form is created for HR, split equally among the staff ticked; they are notified and it is deducted from payroll.</p>}
       </div>
       <Button className="mt-3" disabled={!lines.length || m.isPending || (chargeTo === 'STAFF' && !staffIds.length)} onClick={() => m.mutate()}>Submit write-off</Button><ErrorBox error={m.error} />

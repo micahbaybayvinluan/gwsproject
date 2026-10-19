@@ -5,7 +5,9 @@ import { api, fmtDate, peso, today } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { Badge, Button, Card, Empty, ErrorBox, Field, Input, Modal, Select, Stat } from '@/components/ui/primitives';
 import { Searchable } from '@/components/Searchable';
-import { NtePanel } from '@/pages/Nte';
+import { NteNoticeModal, NtePanel } from '@/pages/Nte';
+import { NewChargeFormCard } from '@/pages/HrExtra';
+import { personLabel } from '@/lib/utils';
 import { Segmented } from '@/components/ui/widgets';
 
 interface Day { businessDate: string; toDeposit: string; deposited: string; outstanding: string; dueDate: string; daysLeft: number; status: 'DEPOSITED' | 'OPEN' | 'DUE_TODAY' | 'OVERDUE'; extension: { status: string; requestedUntil: string; reason: string } | null }
@@ -64,7 +66,7 @@ export function CashOnHandPage() {
   </div>;
 }
 
-interface Notice { id: string; kind: string; title: string; status: 'OPEN' | 'NTE_ISSUED' | 'REFERRED' | 'CLOSED'; note: string | null; createdAt: string; details: { outstanding?: string; businessDate?: string; dueDate?: string; transferId?: string; items?: string; outcomeLabel?: string; adjustmentForms?: string[]; staffName?: string; role?: string; countIn30Days?: number; recommendReferral?: boolean; countInMonth?: number; inARow?: boolean; month?: string; branch?: string; edits?: { controlNo: string; documentType: string; reason: string; at: string }[] } | null; staffIds: { id: string; name: string }[] | null }
+interface Notice { id: string; kind: string; locationId?: string | null; staffIds?: { id: string; name: string; position?: string | null; employeeId?: string | null }[] | null; ntes?: { id: string; nteNo: string | null; status: string; employeeName: string }[]; title: string; status: 'OPEN' | 'NTE_ISSUED' | 'REFERRED' | 'CLOSED'; note: string | null; createdAt: string; details: { controlNo?: string; chargeFormId?: string; chargeFormNo?: string; chargeFormIds?: string[]; chargeFormNos?: string[]; summary?: string; ambiguous?: boolean; outstanding?: string; businessDate?: string; dueDate?: string; transferId?: string; items?: string; outcomeLabel?: string; adjustmentForms?: string[]; staffName?: string; role?: string; countIn30Days?: number; recommendReferral?: boolean; countInMonth?: number; inARow?: boolean; month?: string; branch?: string; edits?: { controlNo: string; documentType: string; reason: string; at: string }[] } | null}
 
 /** HR: notices that need action, e.g. a Notice to Explain for cash not deposited on time. */
 export function HrNoticesPage() {
@@ -72,7 +74,7 @@ export function HrNoticesPage() {
   return <div className="space-y-4"><div className="flex items-center gap-3"><Segmented value={view} onChange={setView} options={[['notices', 'Notices (what may need an NTE)'], ['ntes', 'NTEs issued']]} /></div>{view === 'ntes' ? <NtePanel /> : <HrNotices />}</div>;
 }
 function HrNotices() {
-  const qc = useQueryClient(); const [status, setStatus] = useState('OPEN'); const [nteFor, setNteFor] = useState<Notice | null>(null); const [pick, setPick] = useState<string[]>([]); const [notes, setNotes] = useState<Record<string, string>>({});
+  const qc = useQueryClient(); const [status, setStatus] = useState('OPEN'); const [nteFor, setNteFor] = useState<string | null>(null); const [chargeFor, setChargeFor] = useState<Notice | null>(null); const [notes, setNotes] = useState<Record<string, string>>({});
   const q = useQuery({ queryKey: ['hr-notices', status], queryFn: () => api.get<Notice[]>(`/api/hr-notices${status ? `?status=${status}` : ''}`) });
   const upd = useMutation({ mutationFn: (x: { id: string; status: string }) => api.put(`/api/hr-notices/${x.id}`, { status: x.status, note: notes[x.id] }), onSuccess: () => void qc.invalidateQueries({ queryKey: ['hr-notices'] }) });
   return <div className="space-y-4">
@@ -81,22 +83,19 @@ function HrNotices() {
       {n.kind === 'POST_CLOSE_EDITS' ? <div className="space-y-2 text-sm"><div className="grid gap-2 md:grid-cols-3"><div><div className="text-xs uppercase text-slate-500">Staff</div>{n.details?.staffName} · {n.details?.branch}</div><div><div className="text-xs uppercase text-slate-500">Post-close edits in {n.details?.month}</div><span className={n.details?.recommendReferral ? 'font-bold text-red-700' : ''}>{n.details?.countInMonth}</span>{n.details?.inARow ? <span className="ml-1 text-red-700">· 3 days in a row</span> : null}</div><div><div className="text-xs uppercase text-slate-500">Advice</div>{n.details?.recommendReferral ? <span className="font-semibold text-red-700">Flagged: refer to the Owner (negligence of duty)</span> : 'Monitor; flagged at 3 in a month or 3 days in a row'}</div></div>
         <ul className="list-disc pl-5 text-xs text-slate-600">{(n.details?.edits ?? []).map((e, i) => <li key={i}>{new Date(e.at).toLocaleDateString()} · {e.documentType.replace(/Doc$/, '')} {e.controlNo} · {e.reason}</li>)}</ul></div>
       : n.kind === 'TRANSFER_DISCREPANCY' ? <div className="grid gap-2 text-sm md:grid-cols-4"><div><div className="text-xs uppercase text-slate-500">Difference</div>{n.details?.items}</div><div><div className="text-xs uppercase text-slate-500">Decision</div>{n.details?.outcomeLabel}{n.details?.adjustmentForms?.length ? ` (${n.details.adjustmentForms.join(', ')})` : ''}</div><div><div className="text-xs uppercase text-slate-500">Staff</div>{n.details?.staffName} · {n.details?.role}</div><div><div className="text-xs uppercase text-slate-500">Cases in 30 days</div>{n.details?.countIn30Days}{n.details?.transferId ? <> · <a className="text-brand underline" href={`/transfers/${n.details.transferId}`}>open transfer</a></> : null}</div></div> :
-      <div className="grid gap-2 text-sm md:grid-cols-4"><div><div className="text-xs uppercase text-slate-500">Amount not deposited</div>{peso(n.details?.outstanding ?? 0)}</div><div><div className="text-xs uppercase text-slate-500">Sales day</div>{n.details?.businessDate ? fmtDate(n.details.businessDate) : '—'}</div><div><div className="text-xs uppercase text-slate-500">Was due</div>{n.details?.dueDate ? fmtDate(n.details.dueDate) : '—'}</div><div><div className="text-xs uppercase text-slate-500">Staff on duty</div>{n.staffIds?.map((s) => s.name).join(', ') || '—'}</div></div>}
+      <div className="grid gap-2 text-sm md:grid-cols-4"><div><div className="text-xs uppercase text-slate-500">Amount not deposited</div>{peso(n.details?.outstanding ?? 0)}</div><div><div className="text-xs uppercase text-slate-500">Sales day</div>{n.details?.businessDate ? fmtDate(n.details.businessDate) : '—'}</div><div><div className="text-xs uppercase text-slate-500">Was due</div>{n.details?.dueDate ? fmtDate(n.details.dueDate) : '—'}</div><div><div className="text-xs uppercase text-slate-500">{n.details?.ambiguous ? 'Everyone concerned (choose who)' : 'Handled the cash'}</div>{n.staffIds?.map((s) => personLabel(s)).join(', ') || '—'}</div></div>}
+      {(!!n.ntes?.length || !!n.details?.chargeFormNos?.length) && <div className="mt-2 flex flex-wrap items-center gap-2 text-xs" data-testid="notice-links">{n.ntes?.filter((x) => x.status !== 'VOIDED').map((x) => <Badge key={x.id} tone={x.status === 'DRAFT' ? 'slate' : 'green'}>{x.nteNo ?? 'NTE draft'} · {x.employeeName}</Badge>)}{n.details?.chargeFormIds?.map((id, i) => <Link key={id} to={`/charge-forms/${id}`} className="text-brand underline">charge form {n.details?.chargeFormNos?.[i]}</Link>)}</div>}
       <div className="mt-3 flex flex-wrap items-end gap-2"><Field label="HR note" className="flex-1"><Input value={notes[n.id] ?? n.note ?? ''} onChange={(e) => setNotes({ ...notes, [n.id]: e.target.value })} placeholder="e.g. NTE served on …, reply received …" /></Field>
-        {n.status === 'OPEN' && !!n.staffIds?.length && <Button onClick={() => { setNteFor(n); setPick(n.staffIds!.length === 1 ? [n.staffIds![0].id] : []); }} data-testid="issue-nte">Issue an NTE…</Button>}
+        {n.status !== 'CLOSED' && <Button onClick={() => setNteFor(n.id)} data-testid="issue-nte">Generate NTE…</Button>}
+        {n.kind === 'COUNT_DISCREPANCY' && n.details?.chargeFormId && <Link to={`/charge-forms/${n.details.chargeFormId}`}><Button variant="outline">Open charge form {n.details.chargeFormNo}</Button></Link>}
+        {['TRANSFER_DISCREPANCY', 'CASH_DEPOSIT_OVERDUE'].includes(n.kind) && n.status !== 'CLOSED' && <Button variant="outline" onClick={() => setChargeFor(n)} data-testid="notice-charge">Create a charge form…</Button>}
         {n.status !== 'NTE_ISSUED' && <Button variant="outline" onClick={() => upd.mutate({ id: n.id, status: 'NTE_ISSUED' })}>I served the NTE on paper (mark issued)</Button>}
         {n.status === 'OPEN' && <Button variant={n.details?.recommendReferral ? 'danger' : 'outline'} onClick={() => upd.mutate({ id: n.id, status: 'REFERRED' })}>Refer to the Owner</Button>}
         {n.status !== 'CLOSED' && <Button onClick={() => upd.mutate({ id: n.id, status: 'CLOSED' })}>Close</Button>}
         {n.status === 'CLOSED' && <Button variant="ghost" onClick={() => upd.mutate({ id: n.id, status: 'OPEN' })}>Reopen</Button>}</div>
     </Card>) : <Card><Empty>No notices.</Empty></Card>}
     <ErrorBox error={upd.error} />
-    {nteFor && <Modal title={`Issue an NTE: ${nteFor.title}`} onClose={() => setNteFor(null)} wide><div className="space-y-3"><p className="text-sm text-slate-600">Tick who must explain. One numbered NTE is made for each person, with this notice's details, and the person is told.</p>
-      <div className="space-y-1">{nteFor.staffIds!.map((p) => <label key={p.id} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={pick.includes(p.id)} onChange={(e) => setPick(e.target.checked ? [...pick, p.id] : pick.filter((x) => x !== p.id))} />{p.name}</label>)}</div>
-      {pick.length > 0 && <NteFromNotice notice={nteFor} userIds={pick} onClose={() => setNteFor(null)} />}</div></Modal>}
+    {nteFor && <NteNoticeModal noticeId={nteFor} onClose={() => setNteFor(null)} />}
+    {chargeFor && <Modal title={`Charge form: ${chargeFor.title}`} onClose={() => setChargeFor(null)} wide><NewChargeFormCard startOpen prefill={{ locationId: chargeFor.locationId ?? undefined, sourceType: chargeFor.kind === 'TRANSFER_DISCREPANCY' ? 'TRANSFER_DIFF' : 'CASH_SHORT', sourceQ: chargeFor.kind === 'TRANSFER_DISCREPANCY' ? chargeFor.details?.controlNo : chargeFor.details?.businessDate, noticeId: chargeFor.id }} onDone={() => setChargeFor(null)} /></Modal>}
   </div>;
-}
-function NteFromNotice({ notice, userIds, onClose }: { notice: Notice; userIds: string[]; onClose: () => void }) {
-  const qc = useQueryClient(); const [details, setDetails] = useState(''); const [due, setDue] = useState('');
-  const go = useMutation({ mutationFn: () => api.post(`/api/hr-notices/${notice.id}/issue-nte`, { userIds, details: details || undefined, replyDueOn: due || null }), onSuccess: () => { void qc.invalidateQueries({ queryKey: ['hr-notices'] }); void qc.invalidateQueries({ queryKey: ['ntes'] }); onClose(); } });
-  return <div className="space-y-2"><Field label="Extra words for the NTE (optional; blank = the notice details)"><textarea className="min-h-20 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm" value={details} onChange={(e) => setDetails(e.target.value)} /></Field><Field label="Reply due by (default 5 days)"><Input type="date" value={due} onChange={(e) => setDue(e.target.value)} /></Field><ErrorBox error={go.error} /><Button disabled={go.isPending} onClick={() => go.mutate()} data-testid="nte-from-notice">Issue {userIds.length} NTE{userIds.length > 1 ? 's' : ''}</Button></div>;
 }

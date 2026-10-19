@@ -74,6 +74,11 @@ export class DashboardController {
       if (u.permissions.has('discrepancy.view') || u.permissions.has('count.create')) out.openDiscrepancies = await this.prisma.db.discrepancyCase.count({ where: { status: 'OPEN', countDoc: { locationId: locWhere } } });
     }
     if (u.roleKey === 'HR_STAFF' || u.permissions.has('charge_form.finalize')) out.chargeFormsPending = await this.prisma.db.chargeForm.count({ where: { finalizedByHrAt: null, location: { type: { not: 'FRANCHISE' } } } }); // franchise charges are the franchise owner's, not HR's
+    // HR: what is waiting (owner request 2026-10-19): notices to act on, NTE drafts to issue, NTEs waiting for a reply or a decision
+    if (u.permissions.has('hr.notice')) {
+      const notices = await this.prisma.db.hrNotice.findMany({ where: { status: 'OPEN' }, orderBy: { createdAt: 'desc' }, take: 5, select: { id: true, kind: true, title: true } });
+      out.hrWaiting = { openNotices: await this.prisma.db.hrNotice.count({ where: { status: 'OPEN' } }), nteDrafts: await this.prisma.db.nte.count({ where: { status: 'DRAFT' } }), nteAwaitingReply: await this.prisma.db.nte.count({ where: { status: 'ISSUED' } }), nteAwaitingDecision: await this.prisma.db.nte.count({ where: { status: 'REPLIED' } }), latest: notices };
+    }
     // branch cash funds: every balance for Admin / auditors / Accounting (and the Field Auditor who checks them); own fund for branch staff
     if (['cashfund.view.all', 'cashfund.check', 'cashfund.use', 'cashfund.manage'].some((k) => u.permissions.has(k))) out.cashFunds = await this.cashFund.dashboard(u);
     // discrepancy countdown for branch staff: days left before an open case is charged (shown in bold red)

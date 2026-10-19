@@ -326,6 +326,12 @@ Waybill Report → **Choose waybill PDF files** (TikTok or Shopee labels) → pi
 145. **Loan or cash advance** (`hr.staff`): employee page → *Loans and cash advances* → add ₱3,000, ₱500 each payroll → create a payroll run: the line shows the ₱500 deduction.
 146. **Charges at the branch** (`hr.staff`, then a sales associate): Staff Charges → a charge form → allocate to an employee of the branch → *Finalize*. The branch associates are notified; My Pay & Charges → *Charges at my branch* lists it; the charged employee presses *Acknowledge*.
 147. **Edit the contributions** (`hr.staff`): Payroll → create a run → in the line type different SSS (EE) and employer share → net pay follows; press *back to the table* to restore. Payroll → *Contribution tables*: if one is missing press *Load the standard tables*.
+148. **Several names** (`hr.staff`, then `admin`): Payroll → Employees → *Add several names*: three rows with name, position, branch, monthly basic → send. `admin`: My Approvals → approve → three employees GWS-000n with positions.
+149. **Change a position** (`hr.staff`, then `admin`): Payroll → click an employee → change *Position* → Save: the page says it waits for the Owner; `admin` approves; the new position shows everywhere, e.g. `Ana Cruz · Cashier` in New charge form.
+150. **Draft NTE from a late deposit** (`admin` runs *Cash on hand → Send reminders* after a branch missed its deadline; then `hr.staff`): the bell shows *Create NTE*; the dashboard card *Waiting for HR* counts it. Press the button: the person(s) who handled the cash are named with the position → *Issue*. Before that nobody receives anything.
+151. **Actions in HR Notices** (`hr.staff`): HR Notices → *Generate NTE…*, *Create a charge form…*, *Refer to the Owner*, *Close*; the notice lists the NTEs and charge forms made from it.
+152. **Count discrepancy notice** (`hr.staff`): after a weekly count discrepancy passes its explanation deadline, HR Notices shows a *Count discrepancy* notice with the person who counted and the charge form of the case.
+153. **Link a charge** (`hr.staff`): Staff Charges → New charge form → *Linked to* → *Transfer difference* (or BO / expense / DR) → pick one: items fill at franchise price, the staff on the document are suggested → create. The *Linked to* column opens the document.
 
 ## Where the files come out
 

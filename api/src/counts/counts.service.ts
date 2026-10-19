@@ -1,3 +1,4 @@
+import { afterHrNotice } from '../nte/nte-drafts';
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../common/prisma.service';
 import { SequenceService } from '../common/sequence.service';
@@ -9,6 +10,7 @@ import { SettingsService } from '../common/settings.service';
 import { MasterService } from '../master/master.service';
 import { PostingService } from '../gl/posting.service';
 import { r11ChargeForm } from '../gl/posting-rules';
+import { ChargeSourcesService, SOURCE_STORE } from '../charges/charge-sources.service';
 import { ChargesService, KIND_LABEL } from '../charges/charges.service';
 import { RevisionsService } from '../revisions/revisions.service';
 import { toDateOnly, todayManila, addDays, dateStr } from '../common/manila';
@@ -28,7 +30,7 @@ export function sortCountLines<T extends { beginQty: number; systemQty: number; 
 /** §7.7 Actual inventory count → DiscrepancyCase (7-day window) → Final report + ChargeForm → HR allocation. */
 @Injectable()
 export class CountsService implements OnModuleInit {
-  constructor(private prisma: PrismaService, private seq: SequenceService, private stock: StockService, private approvals: ApprovalsService, private notify: NotificationsService, private audit: AuditService, private settings: SettingsService, private master: MasterService, private charges: ChargesService, private posting: PostingService, private revisions: RevisionsService) {}
+  constructor(private prisma: PrismaService, private seq: SequenceService, private stock: StockService, private approvals: ApprovalsService, private notify: NotificationsService, private audit: AuditService, private settings: SettingsService, private master: MasterService, private charges: ChargesService, private chargeSources: ChargeSourcesService, private posting: PostingService, private revisions: RevisionsService) {}
 
   onModuleInit() {
     this.approvals.register('DISCREPANCY_RESOLUTION', (req, outcome, actor) => this.onResolutionDecision(req.documentId, outcome, actor?.id ?? null));
@@ -298,6 +300,17 @@ export class CountsService implements OnModuleInit {
         });
         await this.notify.toRoles(['HR_STAFF', 'HEAD_AUDITOR', 'ADMIN'], { type: 'CHARGE_FORM_READY', title: `Charge form ${chargeForm.controlNo} ready for allocation (${c.countDoc.location.name})`, link: `/charge-forms/${chargeForm.id}` });
         await this.notify.toLocation(c.countDoc.locationId, { type: 'DISCREPANCY_FINAL', title: `Final discrepancy report generated for ${c.countDoc.controlNo}`, link: `/discrepancies/${c.id}` });
+        // HR is told too, with the staff concerned, so a Notice to Explain can be made (owner request 2026-10-19); franchise staff are not HR's
+        if (c.countDoc.location.type !== 'FRANCHISE') {
+          const weekly = c.countDoc.countType === 'WEEKLY';
+          const staff = await this.prisma.db.user.findMany({ where: weekly ? { id: c.countDoc.countedBy, active: true } : { active: true, role: { key: { in: ['SALES_ASSOCIATE', 'WAREHOUSE_ASSOCIATE'] } }, assignments: { some: { locationId: c.countDoc.locationId } } }, select: { id: true, fullName: true } });
+          const total = D(chargeForm.totalAmount).toFixed(2);
+          const key = `COUNT_DIFF:${c.id}`;
+          if (!(await this.prisma.db.hrNotice.findUnique({ where: { dedupeKey: key } }))) {
+            const hn = await this.prisma.db.hrNotice.create({ data: { kind: 'COUNT_DISCREPANCY', dedupeKey: key, locationId: c.countDoc.locationId, title: `Count difference ${c.countDoc.controlNo} at ${c.countDoc.location.name}`, details: { caseId: c.id, caseNo: c.caseNo, countControlNo: c.countDoc.controlNo, branch: c.countDoc.location.name, summary: `Shortage of ${shorts.length} item${shorts.length === 1 ? '' : 's'} charged at ₱${total} (charge form ${chargeForm.controlNo}).`, chargeFormId: chargeForm.id, chargeFormNo: chargeForm.controlNo, ambiguous: !weekly } as import('@prisma/client').Prisma.InputJsonValue, staffIds: staff.map((x) => ({ id: x.id, name: x.fullName })) as import('@prisma/client').Prisma.InputJsonValue } });
+            await afterHrNotice(this.prisma, this.notify, hn.id, { type: 'HR_NOTICE_COUNT', title: `Count difference at ${c.countDoc.location.name} (${c.countDoc.controlNo}): charge form ${chargeForm.controlNo} ₱${total}`, roles: ['HR_STAFF'] });
+          }
+        }
         n++;
       });
     }
@@ -311,27 +324,30 @@ export class CountsService implements OnModuleInit {
   async chargeForms(user: SessionUser, q: { kind?: string; status?: string } = {}) {
     if (user.roleKey === 'FIELD_AUDITOR') throw new ForbiddenException('The Field Auditor sees inventory only');
     const rows = await this.prisma.db.chargeForm.findMany({ where: { ...(user.locationScoped ? { locationId: { in: user.locationIds } } : {}), ...(user.roleKey === 'HR_STAFF' ? { location: { type: { not: 'FRANCHISE' } } } : {}), kind: (q.kind || undefined) as never, finalizedByHrAt: q.status === 'OPEN' ? null : q.status === 'FINALIZED' ? { not: null } : undefined }, include: { location: { select: { code: true, name: true } }, allocations: { include: { employee: { select: { fullName: true, employeeNo: true } } } } }, orderBy: { createdAt: 'desc' } });
-    return rows.map((r) => ({ ...this.hideAllocations(user, r), kindLabel: KIND_LABEL[r.kind] }));
+    return Promise.all(rows.map(async (r) => ({ ...this.hideAllocations(user, r), kindLabel: KIND_LABEL[r.kind], source: await this.chargeSources.describe(r.sourceType, r.sourceId) })));
   }
   async chargeForm(id: string, user?: SessionUser) {
     if (user?.roleKey === 'FIELD_AUDITOR') throw new ForbiddenException('The Field Auditor sees inventory only');
-    const cf = await this.prisma.db.chargeForm.findUnique({ where: { id }, include: { location: true, lines: { include: { product: { select: { sku: true, name: true } } } }, allocations: { include: { employee: { select: { id: true, employeeNo: true, fullName: true } } } } } });
+    const cf = await this.prisma.db.chargeForm.findUnique({ where: { id }, include: { location: true, lines: { include: { product: { select: { sku: true, name: true } } } }, allocations: { include: { employee: { select: { id: true, employeeNo: true, fullName: true, position: true } } } } } });
     if (!cf) throw new NotFoundException();
     if (user?.locationScoped && !user.locationIds.includes(cf.locationId)) throw new ForbiddenException();
     if (user?.roleKey === 'HR_STAFF' && cf.location.type === 'FRANCHISE') throw new ForbiddenException('Franchise staff charges are handled by the franchise owner');
-    const out = { ...cf, kindLabel: KIND_LABEL[cf.kind] };
+    const out = { ...cf, kindLabel: KIND_LABEL[cf.kind], source: await this.chargeSources.describe(cf.sourceType, cf.sourceId) };
     return user ? this.hideAllocations(user, out) : out;
   }
   /** Manual charge (lost equipment, uniform, unreturned item…): product lines at a given unit charge and/or amount-only lines; staff can be named up front. */
-  async createManualChargeForm(input: { locationId: string; reason: string; kind?: 'OTHER' | 'DAMAGED' | 'EXPIRED' | 'CASH_SHORTAGE'; lines: { productId?: string; description?: string; qty: number; unitCharge: number }[]; employeeIds?: string[] }, user: SessionUser) {
+  async createManualChargeForm(input: { locationId: string; reason: string; kind?: 'OTHER' | 'DAMAGED' | 'EXPIRED' | 'CASH_SHORTAGE'; lines: { productId?: string; description?: string; qty: number; unitCharge: number }[]; employeeIds?: string[]; source?: { type: string; id: string } | null; noticeId?: string | null }, user: SessionUser) {
+    const storeType = input.source ? SOURCE_STORE[input.source.type] : undefined; if (input.source && !storeType) throw new BadRequestException('Unknown source type');
     if (input.employeeIds?.length) await this.charges.assertEmployees(input.employeeIds);
     for (const l of input.lines) if (!l.productId && !l.description) throw new BadRequestException('Each line needs a product or a description');
     const cf = await this.prisma.db.$transaction(async (tx) => {
       const lines = [];
       for (const l of input.lines) lines.push({ productId: l.productId ?? null, description: l.description ?? null, qty: l.qty, unitCharge: l.unitCharge, batchCost: l.productId ? (await this.master.costFor(l.productId, todayManila(), tx)) ?? 0 : null });
-      return this.charges.create(tx, { kind: input.kind ?? 'OTHER', locationId: input.locationId, reason: input.reason, lines, employeeIds: input.employeeIds, createdBy: user.id });
+      return this.charges.create(tx, { kind: input.kind ?? 'OTHER', locationId: input.locationId, sourceType: storeType, sourceId: input.source?.id, reason: input.reason, lines, employeeIds: input.employeeIds, createdBy: user.id });
     });
     await this.charges.announce(cf.id);
+    // a charge made from an HR notice is remembered on the notice, so HR sees what came out of it (owner request 2026-10-19)
+    if (input.noticeId) { const n = await this.prisma.db.hrNotice.findUnique({ where: { id: input.noticeId } }); if (n) { const det = (n.details ?? {}) as Record<string, unknown>; const ids = Array.isArray(det.chargeFormIds) ? (det.chargeFormIds as string[]) : []; await this.prisma.db.hrNotice.update({ where: { id: n.id }, data: { details: { ...det, chargeFormIds: [...ids, cf.id], chargeFormNos: [...(Array.isArray(det.chargeFormNos) ? (det.chargeFormNos as string[]) : []), cf.controlNo] } as import('@prisma/client').Prisma.InputJsonValue } }); } }
     return this.chargeForm(cf.id, user);
   }
   async allocate(id: string, allocations: { employeeId: string; amount: number }[], schedule: { periods: number } | undefined, user: SessionUser) {

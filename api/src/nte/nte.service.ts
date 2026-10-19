@@ -7,6 +7,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { PdfService, type Letterhead, LETTERHEAD_KEY } from '../reports/pdf.service';
 import type { SessionUser } from '../common/request-context';
 import { dateStr, manilaDateStr, toDateOnly } from '../common/manila';
+import { noticeText } from './nte-drafts';
 
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 const longDate = (d: Date) => d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' }).toUpperCase();
@@ -40,15 +41,53 @@ export class NteService {
     return nte;
   }
 
-  /** One NTE per person for an HR notice (late deposit etc.): the notice details are prefilled, the notice becomes NTE_ISSUED. */
+  /** The notice with the people it concerns (name + position), their drafts and the NTEs already issued: what the Create NTE button shows. */
+  async noticeView(noticeId: string) {
+    const notice = await this.prisma.db.hrNotice.findUnique({ where: { id: noticeId } }); if (!notice) throw new NotFoundException('Unknown notice');
+    const people = ((notice.staffIds ?? []) as { id: string; name: string; employeeId?: string | null; position?: string | null }[]);
+    const emps = people.length ? await this.prisma.db.employee.findMany({ where: { userId: { in: people.map((p) => p.id) } }, select: { id: true, userId: true, position: true } }) : [];
+    const ntes = await this.prisma.db.nte.findMany({ where: { hrNoticeId: noticeId }, orderBy: { createdAt: 'asc' } });
+    return { notice: { id: notice.id, kind: notice.kind, title: notice.title, status: notice.status, details: notice.details, note: notice.note },
+      people: people.map((p) => { const e = emps.find((x) => x.userId === p.id); return { userId: p.id, name: p.name, employeeId: e?.id ?? null, position: e?.position ?? p.position ?? null }; }),
+      defaultText: noticeText(notice), ntes };
+  }
+
+  /** Edit the words or the reply date of a draft. */
+  async updateDraft(id: string, input: { subject?: string; details?: string; replyDueOn?: string | null }) {
+    const n = await this.get(id); if (n.status !== 'DRAFT') throw new BadRequestException('Only a draft can be edited');
+    return this.prisma.db.nte.update({ where: { id }, data: { subject: input.subject?.trim() || undefined, details: input.details?.trim() || undefined, replyDueOn: input.replyDueOn ? toDateOnly(input.replyDueOn) : undefined } });
+  }
+
+  /** HR reviews a draft and issues it: it gets its number and the employee is told. */
+  async issueDraft(id: string, input: { details?: string; replyDueOn?: string | null }, user: SessionUser) {
+    const d = await this.get(id); if (d.status !== 'DRAFT') throw new BadRequestException('This NTE is not a draft');
+    const issuedOn = toDateOnly(manilaDateStr()); const replyDueOn = input.replyDueOn ? toDateOnly(input.replyDueOn) : addDays(issuedOn, 5);
+    if (replyDueOn < issuedOn) throw new BadRequestException('The reply date cannot be before today');
+    const year = issuedOn.getUTCFullYear();
+    const nte = await this.prisma.db.$transaction(async (tx) => {
+      const n = await this.seq.next(tx, 'NTE', { locationId: String(year), year, prefix: 'NTE', pad: 3 }); const no = Number(/(\d+)$/.exec(n)![1]);
+      return tx.nte.update({ where: { id }, data: { nteNo: `NTE-${year}-${String(no).padStart(3, '0')}`, status: 'ISSUED', issuedOn, replyDueOn, details: input.details?.trim() || d.details, issuedBy: user.id } });
+    });
+    await this.audit.log({ action: 'UPDATE', entityType: 'Nte', entityId: id, before: { status: 'DRAFT' }, after: { status: 'ISSUED', nteNo: nte.nteNo }, userId: user.id });
+    const emp = await this.prisma.db.employee.findUnique({ where: { id: nte.employeeId }, select: { userId: true } });
+    if (emp?.userId) await this.notify.toUsers([emp.userId], { type: 'NTE_ISSUED', title: `Notice to Explain ${nte.nteNo}: ${nte.subject}`, body: `Please explain by ${dateStr(nte.replyDueOn)}. Open My Pay & Charges to read it and type your reply.`, link: '/my-hr' });
+    await this.notify.toRoles(['ADMIN'], { type: 'NTE_ISSUED_ADMIN', title: `${user.fullName} issued ${nte.nteNo} to ${nte.employeeName}: ${nte.subject}`, link: '/hr-notices' });
+    return nte;
+  }
+
+  /** One NTE per person for an HR notice: an existing draft is issued, otherwise a new one is made from the notice; the notice becomes NTE_ISSUED. */
   async issueFromNotice(noticeId: string, input: { userIds?: string[]; employeeIds?: string[]; details?: string; replyDueOn?: string | null }, user: SessionUser) {
     const notice = await this.prisma.db.hrNotice.findUnique({ where: { id: noticeId } }); if (!notice) throw new NotFoundException('Unknown notice');
     const emps = await this.prisma.db.employee.findMany({ where: { OR: [{ id: { in: input.employeeIds ?? [] } }, { userId: { in: input.userIds ?? [] } }] } });
     if (!emps.length) throw new BadRequestException('Choose at least one person. A person without an employee record cannot receive an NTE: add them under Payroll first (Employee ↔ account links).');
     const d = (notice.details ?? {}) as Record<string, unknown>;
-    const text = input.details?.trim() || `${notice.title}.${d.outstanding ? ` Outstanding: ₱${d.outstanding}.` : ''}\n\nPlease explain in writing why this happened.`;
+    const text = input.details?.trim() || noticeText(notice);
     const out = [];
-    for (const e of emps) out.push(await this.create({ employeeId: e.id, subject: notice.title, details: text, incidentDate: typeof d.businessDate === 'string' ? d.businessDate : null, replyDueOn: input.replyDueOn, hrNoticeId: notice.id }, user));
+    for (const e of emps) {
+      const draft = await this.prisma.db.nte.findFirst({ where: { hrNoticeId: notice.id, employeeId: e.id, status: 'DRAFT' } });
+      if (draft) out.push(await this.issueDraft(draft.id, { details: input.details, replyDueOn: input.replyDueOn }, user));
+      else out.push(await this.create({ employeeId: e.id, subject: notice.title, details: text, incidentDate: typeof d.businessDate === 'string' ? d.businessDate : null, replyDueOn: input.replyDueOn, hrNoticeId: notice.id }, user));
+    }
     await this.prisma.db.hrNotice.update({ where: { id: notice.id }, data: { status: 'NTE_ISSUED', resolvedAt: new Date(), resolvedBy: user.id, note: `${out.map((n) => n.nteNo).join(', ')} issued` } });
     return out;
   }
@@ -59,12 +98,13 @@ export class NteService {
   /** The employee's own NTEs (My Pay & Charges). */
   async mine(user: SessionUser) {
     const emp = await this.prisma.db.employee.findUnique({ where: { userId: user.id }, select: { id: true } });
-    return emp ? this.prisma.db.nte.findMany({ where: { employeeId: emp.id, status: { not: 'VOIDED' } }, orderBy: { createdAt: 'desc' } }) : [];
+    return emp ? this.prisma.db.nte.findMany({ where: { employeeId: emp.id, status: { notIn: ['VOIDED', 'DRAFT'] } }, orderBy: { createdAt: 'desc' } }) : [];
   }
 
   /** The reply: by the employee (own NTE) or typed by HR from the paper reply. */
   async reply(id: string, text: string, user: SessionUser) {
     const n = await this.get(id);
+    if (n.status === 'DRAFT') throw new BadRequestException('This NTE has not been issued yet');
     if (n.status === 'VOIDED' || n.status === 'DECIDED') throw new BadRequestException('This NTE is already closed');
     const isHr = user.permissions.has('hr.notice');
     if (!isHr) { const emp = await this.prisma.db.employee.findUnique({ where: { userId: user.id }, select: { id: true } }); if (!emp || emp.id !== n.employeeId) throw new ForbiddenException('This is not your NTE'); }
@@ -77,6 +117,7 @@ export class NteService {
   async decide(id: string, input: { decision: (typeof NTE_DECISIONS)[number]; note?: string }, user: SessionUser) {
     const n = await this.get(id);
     if (n.status === 'VOIDED') throw new BadRequestException('This NTE was cancelled');
+    if (n.status === 'DRAFT') throw new BadRequestException('Issue the NTE first');
     const upd = await this.prisma.db.nte.update({ where: { id }, data: { decision: input.decision, decisionNote: input.note?.trim() || null, decidedOn: new Date(), decidedBy: user.id, status: 'DECIDED' } });
     await this.audit.log({ action: 'UPDATE', entityType: 'Nte', entityId: id, before: { status: n.status }, after: { decision: input.decision }, userId: user.id });
     const emp = await this.prisma.db.employee.findUnique({ where: { id: n.employeeId }, select: { userId: true } });
@@ -109,9 +150,10 @@ export class NteService {
       .void{color:#b91c1c;font-weight:700;text-align:center;border:2px solid #b91c1c;padding:4px;margin-bottom:10px}
     </style></head><body>
       <div class="lh">${logo}<div class="a">${esc(lh.address ?? '')}</div><div class="c">${esc(lh.contact ?? '')}</div></div>
+      ${n.status === 'DRAFT' ? '<div class="void">DRAFT: not issued yet</div>' : ''}
       ${n.status === 'VOIDED' ? `<div class="void">CANCELLED — ${esc(n.voidReason ?? '')}</div>` : ''}
       <h2>NOTICE TO EXPLAIN</h2>
-      <div class="meta"><div><div>TO: ${esc(n.employeeName.toUpperCase())}${emp?.position ? ` (${esc(emp.position)})` : ''}</div><div>BRANCH: ${esc(emp?.location?.name ?? 'Head Office')}</div><div>FROM: HUMAN RESOURCES</div><div>RE: ${esc(n.subject)}</div><div>DATE: ${longDate(n.issuedOn)}</div></div><div>${esc(n.nteNo)}</div></div>
+      <div class="meta"><div><div>TO: ${esc(n.employeeName.toUpperCase())}${emp?.position ? ` (${esc(emp.position)})` : ''}</div><div>BRANCH: ${esc(emp?.location?.name ?? 'Head Office')}</div><div>FROM: HUMAN RESOURCES</div><div>RE: ${esc(n.subject)}</div><div>DATE: ${longDate(n.issuedOn)}</div></div><div>${esc(n.nteNo ?? 'DRAFT')}</div></div>
       ${para(n.details)}
       <p>You are given until <b>${longDate(n.replyDueOn)}</b> to explain in writing why no disciplinary action should be taken against you. Failure to explain by that date will be taken as a waiver of your right to be heard.</p>
       <div class="box"><div class="t">EMPLOYEE'S REPLY${n.repliedOn ? ` (received ${longDate(n.repliedOn)})` : ''}</div>${n.reply ? para(n.reply) : ''}</div>
@@ -119,6 +161,6 @@ export class NteService {
       <div class="sigs"><div class="sig"><div class="line"></div><div class="nm">Human Resources</div><div class="ti">Issued by</div></div><div class="sig"><div class="line"></div><div class="nm">${esc(n.employeeName)}</div><div class="ti">Received by (signature over printed name, date)</div></div></div>
     </body></html>`;
     const out = await this.pdf.render(html);
-    return { ...out, fileName: `${n.nteNo}.${out.ext}` };
+    return { ...out, fileName: `${n.nteNo ?? 'NTE-draft'}.${out.ext}` };
   }
 }

@@ -1,5 +1,5 @@
 import { PostCloseEditCard } from '@/components/PostCloseEditCard';
-import { locLabel } from '@/lib/utils';
+import { locLabel, personLabel } from '@/lib/utils';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
@@ -84,7 +84,7 @@ function ShortagesCard({ locationId }: { locationId?: string }) {
     {!short.length ? <p className="text-sm text-slate-500">No cash shortages recorded.</p> : <Searchable><table className="w-full text-sm"><thead className="text-left text-xs text-slate-500"><tr><th>Day</th><th>Branch</th><th className="num">Expected</th><th className="num">Counted</th><th className="num">Short</th><th /></tr></thead><tbody>{short.map((c) => <tr key={c.id} className="border-t"><td className="py-1">{c.businessDate.slice(0, 10)}</td><td>{c.location.name}</td><td className="num">{peso(c.expectedCash)}</td><td className="num">{peso(c.countedCash)}</td><td className="num font-semibold text-red-700">{peso(Math.abs(Number(c.cashVariance)))}</td><td className="text-right">{c.chargeFormId ? <Badge tone="green">charged</Badge> : <Button size="sm" variant="outline" onClick={() => { setSel(c); setEmp(new Set()); }}>Charge to staff…</Button>}</td></tr>)}</tbody></table></Searchable>}
     {sel && <div className="mt-3 rounded border border-slate-200 p-3">
       <p className="mb-2 text-sm">Charge {peso(Math.abs(Number(sel.cashVariance)))} ({sel.location.name}, {sel.businessDate.slice(0, 10)}) to the staff on duty, split equally:</p>
-      <div className="flex flex-wrap gap-3">{staff.data?.map((e) => <label key={e.id} className="flex items-center gap-1 text-sm"><input type="checkbox" checked={emp.has(e.id)} onChange={(ev) => { const n = new Set(emp); if (ev.target.checked) n.add(e.id); else n.delete(e.id); setEmp(n); }} />{e.fullName}</label>)}{staff.data?.length === 0 && <span className="text-sm text-slate-500">No employee records for this branch yet (HR → Employees).</span>}</div>
+      <div className="flex flex-wrap gap-3">{staff.data?.map((e) => <label key={e.id} className="flex items-center gap-1 text-sm"><input type="checkbox" checked={emp.has(e.id)} onChange={(ev) => { const n = new Set(emp); if (ev.target.checked) n.add(e.id); else n.delete(e.id); setEmp(n); }} />{personLabel(e)}</label>)}{staff.data?.length === 0 && <span className="text-sm text-slate-500">No employee records for this branch yet (HR → Employees).</span>}</div>
       <div className="mt-2 flex gap-2"><Button disabled={!emp.size || m.isPending} onClick={() => m.mutate()}>Create charge form</Button><Button variant="outline" onClick={() => setSel(null)}>Cancel</Button></div>
     </div>}
     {m.data && <p className="mt-2 text-sm text-emerald-700">Charge form {m.data.controlNo} created. HR and the staff were notified.</p>}

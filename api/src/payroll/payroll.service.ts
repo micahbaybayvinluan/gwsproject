@@ -19,6 +19,8 @@ import { randomUUID } from 'crypto';
 export class PayrollService {
   constructor(private prisma: PrismaService, private posting: PostingService, private accounts: AccountsService, private notify: NotificationsService, private audit: AuditService, private md: MasterDataApprovals) {
     md.registerKind('EmployeeIdChange', { label: 'Staff ID number change', apply: async (p) => { const x = p as { employeeId: string; newNo: string; reason: string }; return this.applyIdChange(x.employeeId, x.newNo); }, link: () => '/payroll' });
+    md.registerKind('EmployeeEdit', { label: 'Employee change (name, position, branch, basic pay)', apply: async (p) => { const x = p as { employeeId: string; changes: Record<string, unknown> }; return this.applyEmployeeEdit(x.employeeId, x.changes); }, link: () => '/payroll' });
+    md.registerKind('EmployeeBatch', { label: 'New employees (several names)', apply: async (p, by) => { const x = p as { rows: Prisma.EmployeeUncheckedCreateInput[] }; const u = await md.sessionUserOf(by); let first: { id: string } | null = null; for (const r of x.rows) { const e = await this.createEmployee(r, u); first = first ?? e; } return first!; }, link: () => '/payroll' });
     md.registerKind('Employee', { label: 'Employee', apply: async (p, by) => this.createEmployee(p as never, await md.sessionUserOf(by)), link: () => '/payroll' });
   }
 
@@ -69,6 +71,47 @@ export class PayrollService {
     await this.audit.log({ action: 'UPDATE', entityType: 'Employee', entityId: employeeId, before: { employeeNo: before.employeeNo }, after: { employeeNo: newNo }, userId: actorId });
     return after;
   }
+  /** Fields whose change waits for the Owner when HR makes it (owner request 2026-10-19). Government numbers, bank, pay frequency and active stay direct. */
+  static readonly OWNER_FIELDS = ['fullName', 'position', 'locationId', 'basicRate'] as const;
+  async requestEmployeeEdit(id: string, patch: Record<string, unknown>, user: SessionUser) {
+    const emp = await this.prisma.db.employee.findUnique({ where: { id }, include: { location: { select: { name: true } } } }); if (!emp) throw new NotFoundException();
+    if (patch.locationId) await this.assertCompanyLocation(patch.locationId as string);
+    const cur: Record<string, unknown> = { fullName: emp.fullName, position: emp.position ?? undefined, locationId: emp.locationId ?? null, basicRate: Number(emp.basicRate) };
+    const guarded: Record<string, unknown> = {}; const direct: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(patch)) {
+      if (v === undefined) continue;
+      if ((PayrollService.OWNER_FIELDS as readonly string[]).includes(k)) { if (String(cur[k] ?? '') !== String(v ?? '')) guarded[k] = v; } else direct[k] = v;
+    }
+    if (user.roleKey === 'ADMIN') return this.updateEmployee(id, { ...direct, ...this.toDb(guarded) });
+    let updated = emp; if (Object.keys(direct).length) updated = (await this.updateEmployee(id, direct as never)) as typeof emp;
+    if (!Object.keys(guarded).length) return updated;
+    const label: Record<string, string> = { fullName: 'name', position: 'position', locationId: 'branch', basicRate: 'monthly basic' };
+    const locName = async (v: unknown) => (v ? (await this.prisma.db.location.findUnique({ where: { id: String(v) }, select: { name: true } }))?.name ?? '' : 'Office');
+    const parts: string[] = [];
+    for (const [k, v] of Object.entries(guarded)) parts.push(k === 'locationId' ? `${label[k]}: ${emp.location?.name ?? 'Office'} → ${await locName(v)}` : `${label[k]}: ${k === 'basicRate' ? Number(emp.basicRate).toFixed(2) : String((emp as never)[k] ?? '—')} → ${String(v ?? '—')}`);
+    return this.md.submit('EmployeeEdit', { employeeId: id, changes: guarded }, user, { name: emp.fullName, change: parts.join('; ') }, async () => emp);
+  }
+  private toDb(c: Record<string, unknown>): Prisma.EmployeeUncheckedUpdateInput { const d: Record<string, unknown> = { ...c }; if ('basicRate' in d) d.basicRate = Number(d.basicRate).toFixed(2); return d as Prisma.EmployeeUncheckedUpdateInput; }
+  /** The Owner approved: apply the change; the linked login's name follows a rename so the two do not drift. */
+  async applyEmployeeEdit(employeeId: string, changes: Record<string, unknown>) {
+    if (changes.locationId) await this.assertCompanyLocation(changes.locationId as string);
+    const before = await this.prisma.db.employee.findUniqueOrThrow({ where: { id: employeeId } });
+    const after = await this.prisma.db.$transaction(async (tx) => {
+      const e = await tx.employee.update({ where: { id: employeeId }, data: this.toDb(changes) });
+      if (typeof changes.fullName === 'string' && before.userId) await tx.user.update({ where: { id: before.userId }, data: { fullName: changes.fullName } });
+      return e;
+    });
+    await this.audit.log({ action: 'UPDATE', entityType: 'Employee', entityId: employeeId, before, after });
+    return after;
+  }
+  /** Several names at once: one request for the Owner; the employees (GWS-0001...) are created when it is approved. */
+  async requestBatch(rows: { fullName: string; position?: string; locationId?: string | null; basicRate: number }[], user: SessionUser) {
+    const clean = rows.filter((r) => r.fullName.trim());
+    if (!clean.length) throw new BadRequestException('Type at least one name');
+    for (const r of clean) await this.assertCompanyLocation(r.locationId);
+    const data = clean.map((r) => ({ fullName: r.fullName.trim(), position: r.position?.trim() || null, locationId: r.locationId || null, basicRate: Number(r.basicRate || 0).toFixed(2) })) as unknown as Prisma.EmployeeUncheckedCreateInput[];
+    return this.md.submit('EmployeeBatch', { rows: data }, user, { name: `${clean.length} employees: ${clean.slice(0, 4).map((r) => r.fullName.trim() + (r.position ? ` (${r.position.trim()})` : '')).join(', ')}${clean.length > 4 ? '…' : ''}` }, async () => { let first: { id: string } | null = null; for (const r of data) { const e = await this.createEmployee(r, user); first = first ?? e; } return first!; });
+  }
   async updateEmployee(id: string, data: Prisma.EmployeeUncheckedUpdateInput) { const before = await this.prisma.db.employee.findUniqueOrThrow({ where: { id } }); const after = await this.prisma.db.employee.update({ where: { id }, data }); await this.audit.log({ action: 'UPDATE', entityType: 'Employee', entityId: id, before, after }); return after; }
   linkableUsers() { return this.prisma.db.user.findMany({ where: { active: true }, select: { id: true, username: true, fullName: true, idNumber: true, role: { select: { name: true } }, employee: { select: { id: true } } }, orderBy: { fullName: 'asc' } }); }
   loansOf(employeeId?: string) { return this.prisma.db.employeeLoan.findMany({ where: { employeeId: employeeId || undefined }, include: { employee: { select: { fullName: true, employeeNo: true } } }, orderBy: [{ active: 'desc' }, { createdAt: 'desc' }] }); }
@@ -86,8 +129,9 @@ export class PayrollService {
     const ntes = await this.prisma.db.nte.findMany({ where: { employeeId: id }, orderBy: { createdAt: 'desc' }, select: { id: true, nteNo: true, subject: true, status: true, issuedOn: true, replyDueOn: true, decision: true } });
     const memos = e.userId ? await this.prisma.db.memoRecipient.findMany({ where: { userId: e.userId }, include: { memo: { select: { id: true, memoNo: true, subject: true, memoDate: true, status: true } } }, orderBy: { memo: { memoDate: 'desc' } }, take: 50 }) : [];
     const pending = await this.prisma.db.approvalRequest.findMany({ where: { type: 'MASTER_DATA_NEW', status: 'PENDING', summary: { path: ['kind'], equals: 'EmployeeIdChange' } }, select: { id: true, summary: true } });
+    const pendingEdit = (await this.prisma.db.approvalRequest.findMany({ where: { type: 'MASTER_DATA_NEW', status: 'PENDING', summary: { path: ['kind'], equals: 'EmployeeEdit' } }, select: { summary: true } })).map((r) => r.summary as { _payload?: { employeeId?: string }; change?: string }).find((x) => x._payload?.employeeId === id);
     const idChangePending = pending.map((r) => r.summary as { employeeId?: string; _payload?: { employeeId?: string; newNo?: string }; to?: string }).find((x) => x._payload?.employeeId === id);
-    return { ...e, ntes, memos: memos.map((m) => ({ ...m.memo, acknowledgedAt: m.acknowledgedAt })), idChangePending: idChangePending ? { to: idChangePending._payload?.newNo ?? idChangePending.to } : null,
+    return { ...e, ntes, memos: memos.map((m) => ({ ...m.memo, acknowledgedAt: m.acknowledgedAt })), editPending: pendingEdit ? { change: pendingEdit.change ?? '' } : null, idChangePending: idChangePending ? { to: idChangePending._payload?.newNo ?? idChangePending.to } : null,
       chargeAllocations: e.chargeAllocations.map((a) => ({ id: a.id, amount: a.amount, deductedToDate: a.deductedToDate, balance: D(a.amount).minus(a.deductedToDate).toFixed(2), acknowledgedAt: a.acknowledgedAt, form: a.chargeForm })) };
   }
   addLoan(data: { employeeId: string; kind: string; principal: number; perPeriod: number }) { return this.prisma.db.employeeLoan.create({ data: { ...data, principal: D(data.principal).toFixed(2), balance: D(data.principal).toFixed(2), perPeriod: D(data.perPeriod).toFixed(2) } }); }

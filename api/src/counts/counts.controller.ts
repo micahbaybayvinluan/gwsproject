@@ -11,7 +11,7 @@ const Revision = z.object({ reason: z.string().min(3), lines: z.array(z.object({
 const Explain = z.object({ explanation: z.string().min(5) });
 const Resolve = z.object({ mode: z.enum(['ADJUST', 'RESOLVED']), note: z.string().min(1) });
 const Alloc = z.object({ allocations: z.array(z.object({ employeeId: z.string().uuid(), amount: z.number().positive() })).min(1), schedule: z.object({ periods: z.number().int().positive() }).optional() });
-const Manual = z.object({ locationId: z.string().uuid(), reason: z.string().min(1), kind: z.enum(['OTHER', 'DAMAGED', 'EXPIRED', 'CASH_SHORTAGE']).optional(), employeeIds: z.array(z.string().uuid()).optional(), lines: z.array(z.object({ productId: z.string().uuid().optional(), description: z.string().optional(), qty: z.number().int().positive(), unitCharge: z.number().nonnegative() })).min(1) });
+const Manual = z.object({ source: z.object({ type: z.string().max(40), id: z.string().uuid() }).nullable().optional(), noticeId: z.string().uuid().nullable().optional(), locationId: z.string().uuid(), reason: z.string().min(1), kind: z.enum(['OTHER', 'DAMAGED', 'EXPIRED', 'CASH_SHORTAGE']).optional(), employeeIds: z.array(z.string().uuid()).optional(), lines: z.array(z.object({ productId: z.string().uuid().optional(), description: z.string().optional(), qty: z.number().int().positive(), unitCharge: z.number().nonnegative() })).min(1) });
 const Finalize = z.object({ periods: z.number().int().positive().max(24).optional() });
 
 @Controller('api/counts')

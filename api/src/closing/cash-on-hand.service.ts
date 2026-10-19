@@ -1,3 +1,4 @@
+import { afterHrNotice } from '../nte/nte-drafts';
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
@@ -128,16 +129,37 @@ export class CashOnHandService implements OnModuleInit {
       for (const d of due.filter((x) => x.status === 'OVERDUE' && x.extension?.status !== 'PENDING')) {
         const key = `CASH_DEPOSIT_OVERDUE:${l.id}:${d.businessDate}:${d.dueDate}`;
         if (await this.prisma.db.hrNotice.findUnique({ where: { dedupeKey: key } })) continue;
-        const staff = await this.prisma.db.user.findMany({ where: { active: true, role: { key: 'SALES_ASSOCIATE' }, assignments: { some: { locationId: l.id } } }, select: { id: true, fullName: true } });
-        await this.prisma.db.hrNotice.create({ data: { kind: 'CASH_DEPOSIT_OVERDUE', dedupeKey: key, locationId: l.id, title: `${b.location.name}: cash sales of ${d.businessDate} not deposited by ${d.dueDate}`, details: { businessDate: d.businessDate, dueDate: d.dueDate, outstanding: d.outstanding, extension: d.extension } as Prisma.InputJsonValue, staffIds: staff.map((s) => ({ id: s.id, name: s.fullName })) as Prisma.InputJsonValue } });
-        await this.notify.toRoles(['HR_STAFF', 'ADMIN'], { type: 'HR_NOTICE_NTE', title: `Notice to Explain needed: ${b.location.name} did not deposit ₱${d.outstanding} of ${d.businessDate} sales by ${d.dueDate}`, body: staff.length ? `Staff on duty: ${staff.map((s) => s.fullName).join(', ')}` : undefined, link: '/hr-notices' });
+        const handled = await this.cashHandlers(l.id, d.businessDate);
+        const staff = handled.length ? handled : await this.prisma.db.user.findMany({ where: { active: true, role: { key: 'SALES_ASSOCIATE' }, assignments: { some: { locationId: l.id } } }, select: { id: true, fullName: true } });
+        const title = `${b.location.name}: cash sales of ${d.businessDate} not deposited by ${d.dueDate}`;
+        const notice = await this.prisma.db.hrNotice.create({ data: { kind: 'CASH_DEPOSIT_OVERDUE', dedupeKey: key, locationId: l.id, title, details: { businessDate: d.businessDate, dueDate: d.dueDate, outstanding: d.outstanding, extension: d.extension, branch: b.location.name, ambiguous: !handled.length } as Prisma.InputJsonValue, staffIds: staff.map((s) => ({ id: s.id, name: s.fullName })) as Prisma.InputJsonValue } });
+        await afterHrNotice(this.prisma, this.notify, notice.id, { type: 'HR_NOTICE_NTE', title: `Notice to Explain needed: ${b.location.name} did not deposit ₱${d.outstanding} of ${d.businessDate} sales by ${d.dueDate}`, body: handled.length ? `Handled the cash that day: ${handled.map((s) => s.fullName).join(', ')}. NTE draft${handled.length > 1 ? 's are' : ' is'} ready.` : `Could not tell who handled the cash: choose from ${staff.map((s) => s.fullName).join(', ')}.` });
         notices++;
       }
     }
     return { reminders, notices };
   }
 
-  listNotices(status?: string) { return this.prisma.db.hrNotice.findMany({ where: { status: status || undefined }, orderBy: { createdAt: 'desc' }, take: 300 }); }
+  /** Who handled that day's cash at the branch: cashiers of the day's cash sales, who submitted the Daily Sales Report, who counted the cash, who made a partial deposit (staff assigned to the branch only). */
+  private async cashHandlers(locationId: string, businessDate: string) {
+    const day = new Date(`${businessDate}T00:00:00Z`);
+    const ids = new Set<string>();
+    const sales = await requestContext.runSystem(async () => await this.prisma.db.salesDoc.findMany({ where: { locationId, docDate: day, paymentMode: 'CASH', voidedAt: null }, select: { createdBy: true, preparedBy: true } }));
+    for (const x of sales) { if (x.createdBy) ids.add(x.createdBy); if (x.preparedBy) ids.add(x.preparedBy); }
+    const sub = await this.prisma.db.salesReportSubmission.findUnique({ where: { locationId_businessDate: { locationId, businessDate: day } }, select: { submittedBy: true } }); if (sub?.submittedBy) ids.add(sub.submittedBy);
+    const close = await this.prisma.db.dailyClose.findUnique({ where: { locationId_businessDate: { locationId, businessDate: day } }, select: { id: true } });
+    if (close) for (const a of await this.prisma.db.auditLog.findMany({ where: { action: 'CASH_COUNT', entityType: 'DailyClose', entityId: close.id }, select: { userId: true } })) if (a.userId) ids.add(a.userId);
+    for (const c of await this.prisma.db.cashDeposit.findMany({ where: { locationId, businessDate: day }, select: { createdBy: true } })) if (c.createdBy) ids.add(c.createdBy);
+    if (!ids.size) return [];
+    return this.prisma.db.user.findMany({ where: { id: { in: [...ids] }, active: true, assignments: { some: { locationId } }, role: { key: { in: ['SALES_ASSOCIATE', 'WAREHOUSE_ASSOCIATE', 'WAREHOUSE_IN_CHARGE'] } } }, select: { id: true, fullName: true } });
+  }
+
+  /** The notices with the NTEs made from them (number, status, who), so HR sees what was already done. */
+  async listNotices(status?: string) {
+    const rows = await this.prisma.db.hrNotice.findMany({ where: { status: status || undefined }, orderBy: { createdAt: 'desc' }, take: 300 });
+    const ntes = rows.length ? await this.prisma.db.nte.findMany({ where: { hrNoticeId: { in: rows.map((r) => r.id) } }, select: { id: true, hrNoticeId: true, nteNo: true, status: true, employeeName: true } }) : [];
+    return rows.map((r) => ({ ...r, ntes: ntes.filter((n) => n.hrNoticeId === r.id) }));
+  }
 
   async updateNotice(id: string, input: { status: 'NTE_ISSUED' | 'CLOSED' | 'OPEN' | 'REFERRED'; note?: string }, user: SessionUser) {
     const before = await this.prisma.db.hrNotice.findUnique({ where: { id } }); if (!before) throw new NotFoundException();

@@ -1,3 +1,4 @@
+import { afterHrNotice } from '../nte/nte-drafts';
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService, Tx } from '../common/prisma.service';
@@ -263,7 +264,7 @@ export class TransferDiscrepancyService implements OnModuleInit {
       update: {},
     });
     await this.prisma.db.transferDiscrepancy.update({ where: { id: recId }, data: { hrNoticeId: n.id } });
-    await this.notify.toRoles(['HR_STAFF', 'ADMIN'], { type: 'HR_NOTICE_TRANSFER', title: refer ? `${staffName}: ${count} transfer differences in 30 days (latest ${d.controlNo}) — HR is advised to refer this to the Owner` : `Transfer difference ${d.controlNo}: ${items} (${staffName}); the Owner decides any action`, link: '/hr-notices' });
+    await afterHrNotice(this.prisma, this.notify, n.id, { type: 'HR_NOTICE_TRANSFER', title: refer ? `${staffName}: ${count} transfer differences in 30 days (latest ${d.controlNo}) — HR is advised to refer this to the Owner` : `Transfer difference ${d.controlNo}: ${items} (${staffName}); the Owner decides any action` });
   }
 
   async get(transferId: string, user: SessionUser) {

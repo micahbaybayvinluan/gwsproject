@@ -3,10 +3,11 @@ import { useState } from 'react';
 import { api, fmtDate } from '@/lib/api';
 import { Badge, Button, Card, Empty, ErrorBox, Field, Input, Modal, Select } from '@/components/ui/primitives';
 import { Searchable } from '@/components/Searchable';
+import { personLabel } from '@/lib/utils';
 
-export interface Nte { id: string; nteNo: string; employeeId: string; employeeName: string; subject: string; details: string; issuedOn: string; replyDueOn: string; incidentDate: string | null; status: 'ISSUED' | 'REPLIED' | 'DECIDED' | 'VOIDED'; reply: string | null; repliedOn: string | null; decision: string | null; decisionNote: string | null; voidReason: string | null }
+export interface Nte { id: string; nteNo: string | null; employeeId: string; employeeName: string; subject: string; details: string; issuedOn: string; replyDueOn: string; incidentDate: string | null; status: 'DRAFT' | 'ISSUED' | 'REPLIED' | 'DECIDED' | 'VOIDED'; reply: string | null; repliedOn: string | null; decision: string | null; decisionNote: string | null; voidReason: string | null }
 const DECISIONS: [string, string][] = [['NO_ACTION', 'No action (explanation accepted)'], ['WARNING', 'Written warning'], ['SUSPENSION', 'Suspension'], ['CHARGE', 'Charge / salary deduction'], ['OTHER', 'Other']];
-const tone = (s: string) => (s === 'ISSUED' ? 'amber' : s === 'REPLIED' ? 'blue' : s === 'DECIDED' ? 'green' : 'red') as 'amber' | 'blue' | 'green' | 'red';
+const tone = (s: string) => (s === 'DRAFT' ? 'slate' : s === 'ISSUED' ? 'amber' : s === 'REPLIED' ? 'blue' : s === 'DECIDED' ? 'green' : 'red') as 'amber' | 'blue' | 'green' | 'red' | 'slate';
 const textarea = 'min-h-24 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-inset focus:outline-none focus:ring-2 focus:ring-brand/30';
 
 /** HR: write a Notice to Explain to one employee (owner request 2026-10-16). */
@@ -74,4 +75,32 @@ export function MyNtes() {
       <Button className="mt-2" size="sm" variant="outline" onClick={() => api.download(`/api/ntes/${n.id}/pdf`, `${n.nteNo}.pdf`)}>Print</Button>
     </div>)}</div>
   </Card>;
+}
+
+
+/**
+ * Create the NTE for an HR notice (owner request 2026-10-19): the people the notice names (name and position), their drafts already prefilled,
+ * and one button to issue. Opened from the Notifications page, the HR dashboard and HR Notices.
+ */
+export function NteNoticeModal({ noticeId, onClose }: { noticeId: string; onClose: () => void }) {
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: ['notice-people', noticeId], queryFn: () => api.get<{ notice: { id: string; kind: string; title: string; status: string; details: Record<string, unknown> | null }; people: { userId: string; name: string; employeeId: string | null; position: string | null }[]; defaultText: string; ntes: Nte[] }>(`/api/hr-notices/${noticeId}/people`) });
+  const [pick, setPick] = useState<string[] | null>(null); const [text, setText] = useState<string | null>(null); const [due, setDue] = useState('');
+  const d = q.data;
+  const drafts = d?.ntes.filter((n) => n.status === 'DRAFT') ?? []; const issued = d?.ntes.filter((n) => n.status !== 'DRAFT' && n.status !== 'VOIDED') ?? [];
+  const people = d?.people ?? []; const chosen = pick ?? (drafts.length ? people.filter((p) => drafts.some((x) => (x as unknown as { employeeId: string }).employeeId === p.employeeId)).map((p) => p.userId) : people.length === 1 ? [people[0].userId] : []);
+  const words = text ?? drafts[0]?.details ?? d?.defaultText ?? '';
+  const go = useMutation({ mutationFn: () => api.post(`/api/hr-notices/${noticeId}/issue-nte`, { userIds: chosen, details: words, replyDueOn: due || null }), onSuccess: () => { void qc.invalidateQueries(); onClose(); } });
+  return <Modal title={`Notice to Explain: ${d?.notice.title ?? ''}`} onClose={onClose} wide>
+    {!d ? <p className="text-sm text-slate-500">{q.error ? (q.error as Error).message : 'Loading…'}</p> : <div className="space-y-3" data-testid="nte-notice-modal">
+      {issued.length > 0 && <p className="rounded-lg bg-emerald-50 p-2 text-sm text-emerald-800">Already issued: {issued.map((n) => `${n.nteNo} (${n.employeeName})`).join(', ')}.</p>}
+      <div><div className="mb-1 text-xs font-semibold uppercase text-slate-500">Who must explain</div>
+        {people.length ? <div className="space-y-1">{people.map((p) => <label key={p.userId} className="flex items-center gap-2 text-sm"><input type="checkbox" disabled={!p.employeeId} checked={chosen.includes(p.userId)} onChange={(e) => setPick(e.target.checked ? [...chosen, p.userId] : chosen.filter((x) => x !== p.userId))} />{personLabel(p)}{!p.employeeId && <span className="text-xs text-red-700"> no employee record: add them under Payroll first</span>}{drafts.some((x) => (x as unknown as { employeeId: string }).employeeId === p.employeeId) && <Badge tone="slate">draft ready</Badge>}</label>)}</div> : <p className="text-sm text-slate-500">The notice names nobody: use "Issue an NTE to an employee" in NTEs issued.</p>}
+        {d.notice.details && (d.notice.details as { ambiguous?: boolean }).ambiguous && <p className="mt-1 text-xs text-amber-800">The system could not tell who was involved, so it lists everyone concerned: tick only those who must explain.</p>}</div>
+      <Field label="What the NTE says (you may change it)"><textarea className={textarea} value={words} onChange={(e) => setText(e.target.value)} /></Field>
+      <Field label="Reply due by (default 5 days)"><Input type="date" value={due} onChange={(e) => setDue(e.target.value)} /></Field>
+      <ErrorBox error={go.error} />
+      <div className="flex gap-2"><Button disabled={go.isPending || !chosen.length} onClick={() => go.mutate()} data-testid="nte-issue-notice">Issue {chosen.length || ''} NTE{chosen.length > 1 ? 's' : ''}</Button><Button variant="ghost" onClick={onClose}>Close</Button></div>
+    </div>}
+  </Modal>;
 }

@@ -471,6 +471,8 @@ You handle people: employees, accounts, pay, charges and notices. You have no ac
 
 1. **New employee** (Payroll → Employees → Add employee):
    - Choose a company branch (not a franchise). It waits for the Owner's approval.
+   - **Add several names:** *Add several names* → name, position, branch and monthly basic per row → one Owner approval.
+   - **Change a name, position, branch or monthly basic:** it waits for the Owner (the employee page says so). Government numbers, bank and active are saved at once.
 2. **User account:**
    1. Open the approved employee → **Create user account…**.
    2. Type the username and choose the role and branch. Email is optional.
@@ -484,9 +486,12 @@ You handle people: employees, accounts, pay, charges and notices. You have no ac
 5. **Staff Charges:**
    - Charges from discrepancies, write-offs and cash shortages arrive here automatically.
    - Split each one between the staff, set the pay periods and **Finalize**.
+   - **New charge form → Linked to:** choose the cause (count discrepancy, transfer difference, BO / write-off, expense, DR, …) and pick it from the list; items and staff are filled in and the **Linked to** column opens the document.
    - Print the Charge Form and the Salary Deduction Authorization.
-6. **HR Notices (NTE):** when a branch did not deposit its cash on time, a notice lists the amount, the dates and the staff on duty.
-   - Issue the NTE, then **Mark NTE issued**; **Close** it when settled.
+6. **HR Notices (NTE):** when a branch did not deposit its cash on time, a count discrepancy passes its deadline, or a transfer differs, you are notified and a notice lists the amount, the dates and the people concerned (name · position).
+   - The bell and the dashboard card **Waiting for HR** show **Create NTE**: an NTE draft is already prepared; read it and **Issue** (nothing reaches the employee before that).
+   - In the notice: **Generate NTE…**, **Create a charge form…**, **Refer to the Owner**, **Close**.
+   - When nobody can be named, you choose from the branch's associates.
 7. **Post-close edits:** each one a branch person asks for comes to HR Notices (one notice per person per month, with the list and the reasons). From the **third in a month, or three days in a row**, it is marked red: press **Refer to the Owner**.
 8. **Transfer differences:** every confirmed difference between a transfer form and what arrived comes to HR Notices with the person answerable (who prepared the form, or the receiver who miscounted) and how many cases they had in 30 days. The Owner decides any action.
    - From the **third** case of the same person in 30 days, the notice is marked in red: press **Refer to the Owner** for a more serious consideration.

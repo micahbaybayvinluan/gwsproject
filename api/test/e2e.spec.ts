@@ -3648,3 +3648,66 @@ describe('HR batch (owner request 2026-10-16): auto staff numbers, ID change wit
     const det = ok(await as('hr.staff').get(`/api/payroll/employees/${empLogin}/detail`)).body; expect(det.chargeAllocations.some((a: { form: { controlNo: string } }) => a.form.controlNo === cf.controlNo)).toBe(true);
   });
 });
+
+describe('HR batch 2 (owner request 2026-10-19): Owner-approved name/position edits and several names, draft NTE with a button from notices, charges linked to their source', () => {
+  const dayD = (n: number) => new Date(Date.now() + 8 * 3600e3 + n * 86400000).toISOString().slice(0, 10);
+  let csrUser = ''; let csrLoc = ''; let emp = ''; let closeId = ''; let noticeId = '';
+  const notes = async (u: string) => JSON.stringify(ok(await as(u).get('/api/notifications')).body);
+  it('setup: an employee with a position linked to the CSR login', async () => {
+    const me = ok(await as('sales.csr').get('/api/auth/me')).body; csrUser = me.id; csrLoc = me.locations[0].id;
+    await prisma.employee.updateMany({ where: { userId: csrUser }, data: { userId: null } });
+    emp = (await ownerApproves(ok(await as('hr.staff').post('/api/payroll/employees').send({ fullName: `Cashier Cruz ${run}`, position: 'Cashier', locationId: csrLoc, basicRate: 15000, userId: csrUser })))).id;
+  });
+  it('HR edits of name / position / branch / basic wait for the Owner; government numbers are direct; the Owner own edit applies at once', async () => {
+    const r = ok(await as('hr.staff').patch(`/api/payroll/employees/${emp}`).send({ position: 'Supervisor', fullName: `Cashier Reyes ${run}`, sssNo: '33-1234567-8' })).body;
+    expect(r.pending).toBe(true);
+    const e1 = await prisma.employee.findUniqueOrThrow({ where: { id: emp } }); expect(e1.position).toBe('Cashier'); expect(e1.sssNo).toBe('33-1234567-8');
+    const det = ok(await as('hr.staff').get(`/api/payroll/employees/${emp}/detail`)).body; expect(det.editPending.change).toContain('Supervisor');
+    ok(await as('admin').post(`/api/approvals/${r.approvalRequestId}/decide`).send({ decision: 'APPROVE' }));
+    const e2 = await prisma.employee.findUniqueOrThrow({ where: { id: emp } }); expect(e2.position).toBe('Supervisor'); expect(e2.fullName).toBe(`Cashier Reyes ${run}`);
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: csrUser } })).fullName).toBe(`Cashier Reyes ${run}`); // the login's name follows
+    await prisma.user.update({ where: { id: csrUser }, data: { fullName: 'Sales Associate – CSR' } }).catch(() => undefined);
+    const own = ok(await as('admin').patch(`/api/payroll/employees/${emp}`).send({ position: 'Store head' })).body; expect(own.position).toBe('Store head');
+    await as('sales.csr').patch(`/api/payroll/employees/${emp}`).send({ position: 'x' }).expect(403);
+  });
+  it('several names at once: one request, the Owner approves, the employees get GWS numbers with their positions', async () => {
+    const r = ok(await as('hr.staff').post('/api/payroll/employees/batch').send({ rows: [{ fullName: `Batch One ${run}`, position: 'Stock clerk', locationId: csrLoc, basicRate: 11000 }, { fullName: `Batch Two ${run}`, position: 'Rider', basicRate: 10000 }] })).body;
+    expect(r.pending).toBe(true); expect(await prisma.employee.count({ where: { fullName: { startsWith: 'Batch One' } } })).toBeGreaterThanOrEqual(0);
+    const before = await prisma.employee.count({ where: { fullName: `Batch One ${run}` } }); expect(before).toBe(0);
+    ok(await as('admin').post(`/api/approvals/${r.approvalRequestId}/decide`).send({ decision: 'APPROVE' }));
+    const made = await prisma.employee.findMany({ where: { fullName: { in: [`Batch One ${run}`, `Batch Two ${run}`] } } });
+    expect(made).toHaveLength(2); expect(made.every((m) => /^GWS-\d{4}$/.test(m.employeeNo))).toBe(true); expect(made.find((m) => m.fullName.startsWith('Batch One'))!.position).toBe('Stock clerk');
+    await as('sales.csr').post('/api/payroll/employees/batch').send({ rows: [{ fullName: 'x', basicRate: 1 }] }).expect(403);
+  });
+  it('a late-deposit notice names who handled the cash, makes a DRAFT NTE and tells HR with a button; HR reviews and issues it', async () => {
+    const nteNotesBefore = ((await notes('sales.csr')).match(/Notice to Explain/g) ?? []).length;
+    const close = await prisma.dailyClose.create({ data: { locationId: csrLoc, businessDate: new Date(`${dayD(-4)}T00:00:00Z`), closedAt: new Date(), totalCashDeposit: '1500.00', expectedCash: '1500.00', cashSales: '1500.00', cashVariance: '-300.00' } }); closeId = close.id;
+    await prisma.auditLog.create({ data: { action: 'CASH_COUNT', entityType: 'DailyClose', entityId: close.id, userId: csrUser } });
+    ok(await as('admin').post('/api/cash-on-hand/remind'));
+    const notices = ok(await as('hr.staff').get('/api/hr-notices')).body as { id: string; kind: string; locationId: string; staffIds: { id: string; employeeId: string | null; position: string | null }[]; details: { ambiguous?: boolean }; ntes: { status: string; nteNo: string | null }[] }[];
+    const n = notices.find((x) => x.kind === 'CASH_DEPOSIT_OVERDUE' && x.locationId === csrLoc)!; noticeId = n.id; expect(n).toBeTruthy();
+    expect(n.details.ambiguous).toBe(false); expect(n.staffIds.map((s) => s.id)).toEqual([csrUser]); expect(n.staffIds[0].position).toBe('Store head');
+    expect(n.ntes).toHaveLength(1); expect(n.ntes[0].status).toBe('DRAFT'); expect(n.ntes[0].nteNo).toBeNull();
+    const hrNotes = ok(await as('hr.staff').get('/api/notifications')).body as { type: string; data: { hrNoticeId?: string } | null }[]; expect(hrNotes.some((x) => x.type === 'HR_NOTICE_NTE' && x.data?.hrNoticeId === noticeId)).toBe(true);
+    const dash = ok(await as('hr.staff').get('/api/dashboard')).body; expect(dash.hrWaiting.nteDrafts).toBeGreaterThanOrEqual(1); expect(dash.hrWaiting.openNotices).toBeGreaterThanOrEqual(1);
+    const view = ok(await as('hr.staff').get(`/api/hr-notices/${noticeId}/people`)).body; expect(view.people[0].position).toBe('Store head'); expect(view.ntes[0].status).toBe('DRAFT'); expect(view.defaultText).toContain('not deposited');
+    expect(((await notes('sales.csr')).match(/Notice to Explain/g) ?? []).length).toBe(nteNotesBefore); // nothing reaches the employee by itself
+    await as('sales.csr').get(`/api/hr-notices/${noticeId}/people`).expect(403);
+    const issued = ok(await as('hr.staff').post(`/api/hr-notices/${noticeId}/issue-nte`).send({ userIds: [csrUser] })).body as { id: string; nteNo: string; status: string }[];
+    expect(issued).toHaveLength(1); expect(issued[0].nteNo).toMatch(/^NTE-\d{4}-\d{3}$/); expect(issued[0].status).toBe('ISSUED'); expect(issued[0].id).toBe(n.ntes.length ? (await prisma.nte.findFirstOrThrow({ where: { hrNoticeId: noticeId } })).id : issued[0].id);
+    expect(await prisma.nte.count({ where: { hrNoticeId: noticeId } })).toBe(1); // the draft was issued, not duplicated
+    expect(await notes('sales.csr')).toContain('NTE_ISSUED');
+  });
+  it('charges: the automatic list of sources per branch, a charge linked to the cash shortage, the notice remembers it, and the link shows on the form and the list', async () => {
+    await as('sales.csr').get(`/api/charge-sources?locationId=${csrLoc}&type=CASH_SHORT`).expect(403);
+    const types = ok(await as('hr.staff').get('/api/charge-sources/types')).body as { key: string }[]; for (const k of ['COUNT_CASE', 'TRANSFER_DIFF', 'WRITEOFF', 'BO_PULLOUT', 'CASH_SHORT', 'EXPENSE', 'SALE', 'RECEIVING', 'REPLACEMENT', 'ECOM_RETURN', 'AR_OVERDUE']) expect(types.map((t) => t.key)).toContain(k);
+    for (const t of types) expect((await as('hr.staff').get(`/api/charge-sources?locationId=${csrLoc}&type=${t.key}`)).status).toBe(200);
+    const list = ok(await as('hr.staff').get(`/api/charge-sources?locationId=${csrLoc}&type=CASH_SHORT`)).body as { id: string; amount: number }[];
+    const src = list.find((x) => x.id === closeId)!; expect(src.amount).toBe(300);
+    const cf = ok(await as('hr.staff').post('/api/charge-forms').send({ kind: 'CASH_SHORTAGE', locationId: csrLoc, reason: 'Cash short on the close', employeeIds: [emp], source: { type: 'CASH_SHORT', id: closeId }, noticeId, lines: [{ description: 'Cash shortage', qty: 1, unitCharge: 300 }] })).body;
+    expect(cf.source.label).toBe('Cash shortage'); expect(cf.sourceType).toBe('DailyClose'); expect(cf.sourceId).toBe(closeId);
+    const all = ok(await as('hr.staff').get('/api/charge-forms')).body as { id: string; source: { label: string } | null }[]; expect(all.find((x) => x.id === cf.id)!.source!.label).toBe('Cash shortage');
+    const notices = ok(await as('hr.staff').get('/api/hr-notices')).body as { id: string; details: { chargeFormIds?: string[] } }[]; expect(notices.find((x) => x.id === noticeId)!.details.chargeFormIds).toContain(cf.id);
+    const bad = await as('hr.staff').post('/api/charge-forms').send({ kind: 'OTHER', locationId: csrLoc, reason: 'x', employeeIds: [emp], source: { type: 'NOPE', id: closeId }, lines: [{ description: 'x', qty: 1, unitCharge: 1 }] }); expect(bad.status).toBe(400);
+  });
+});

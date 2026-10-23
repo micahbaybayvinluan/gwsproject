@@ -73,7 +73,7 @@ async function resetTransactionalData() {
   await prisma.$executeRawUnsafe(`TRUNCATE replacement_receipts, replacement_tickets, franchise_shipping_charges, form_numbers_released, ecom_waybills, ecom_waybill_hints, franchise_payments, franchise_ar_adjustments, franchise_ar_extensions, franchise_invoices, memo_recipients, memos, six_pack_stickers, six_pack_redemptions CASCADE`);
   await prisma.$executeRawUnsafe(`TRUNCATE outlet_changes, outlet_shares, itinerary_claims, itinerary_stops, itineraries, agent_consignment_limits, outlets, sales_areas CASCADE`);
   await prisma.$executeRawUnsafe(`TRUNCATE campaign_recipients, campaigns, message_opt_outs, members CASCADE`);
-  await prisma.$executeRawUnsafe(`TRUNCATE ntes, franchise_dr_receipts, stock_request_lines, stock_requests, franchise_order_lines, franchise_orders, franchise_availability_lines, franchise_availabilities, promo_items, promos, customer_contacts, customer_follow_ups, replacement_payments, purchase_order_rows, purchase_order_lines, purchase_orders CASCADE`);
+  await prisma.$executeRawUnsafe(`TRUNCATE card_remittances, ntes, franchise_dr_receipts, stock_request_lines, stock_requests, franchise_order_lines, franchise_orders, franchise_availability_lines, franchise_availabilities, promo_items, promos, customer_contacts, customer_follow_ups, replacement_payments, purchase_order_rows, purchase_order_lines, purchase_orders CASCADE`);
   await prisma.$executeRawUnsafe(`TRUNCATE member_vouchers, member_points_entries, member_notes, member_offers, survey_items, survey_responses, survey_invites, lost_sales, reservations, stock_alert_requests, member_auto_messages CASCADE`);
   await prisma.$executeRawUnsafe(`UPDATE consignment_agreements SET agent_key = NULL, agent_name = NULL, outlet_id = NULL`);
   await prisma.$executeRawUnsafe(`UPDATE locations SET credit_hold = false, credit_hold_note = NULL`);
@@ -3709,5 +3709,116 @@ describe('HR batch 2 (owner request 2026-10-19): Owner-approved name/position ed
     const all = ok(await as('hr.staff').get('/api/charge-forms')).body as { id: string; source: { label: string } | null }[]; expect(all.find((x) => x.id === cf.id)!.source!.label).toBe('Cash shortage');
     const notices = ok(await as('hr.staff').get('/api/hr-notices')).body as { id: string; details: { chargeFormIds?: string[] } }[]; expect(notices.find((x) => x.id === noticeId)!.details.chargeFormIds).toContain(cf.id);
     const bad = await as('hr.staff').post('/api/charge-forms').send({ kind: 'OTHER', locationId: csrLoc, reason: 'x', employeeIds: [emp], source: { type: 'NOPE', id: closeId }, lines: [{ description: 'x', qty: 1, unitCharge: 1 }] }); expect(bad.status).toBe(400);
+  });
+});
+
+describe('Editable online-platform income, editable card amount and card remittance to the bank (owner request 2026-10-23)', () => {
+  let west = '', prod = '', bank = '';
+  const today = () => new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);
+  const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(64)]);
+  const cardSale = async (n: number, extra: Record<string, unknown> = {}) => {
+    const accts = ok(await as('sales.westave').get(`/api/accounts/payment?locationId=${west}`)).body as { id: string }[];
+    const up = ok(await as('sales.westave').post(`/api/attachments/SalesDoc/${crypto.randomUUID()}`).attach('file', png, { filename: 'slip.png', contentType: 'image/png' }));
+    return as('sales.westave').post('/api/sales').send({ channel: 'WALK_IN', paymentMode: 'CREDIT_CARD', drSiNo: `CD${n}-${run}`, paymentAccountId: accts[0].id, proofOfPaymentAttachmentId: up.body.id, cardMid: 'M9', cardSlipNo: `S${n}`, cardApprovalCode: `A${n}`, cardBatchNo: 'B9', lines: [{ productId: prod, qty: 1 }], ...extra });
+  };
+  const voucherLines = async (saleId: string) => (await prisma.journalVoucher.findMany({ where: { sourceDocumentType: 'SalesDoc', sourceDocumentId: saleId, rule: 'R3' }, include: { lines: { include: { account: { select: { title: true } } } } }, orderBy: [{ postedAt: "asc" }, { voucherNo: "asc" }] }));
+  beforeAll(async () => {
+    west = (await prisma.location.findUniqueOrThrow({ where: { code: 'WESTAVE' } })).id;
+    const cats = ok(await as('admin').get('/api/categories')).body as { id: string; accountingClass: string }[];
+    prod = ok(await as('admin').post('/api/products').send({ name: `CARD Whey ${run}`, categoryId: cats.find((c) => c.accountingClass === 'SUPPLEMENT')!.id, prices: { RETAIL: 1000 }, cost: 500 })).body.id;
+    ok(await as('admin').put('/api/pricing/ecom').send({ rows: [{ productId: prod, tier: 'TIKTOK', price: 1199.5 }] }));
+    const batch = await prisma.batch.create({ data: { productId: prod, batchNo: `CD-${run}`, receivedRef: 'TEST', unitCost: '500.00' } });
+    await prisma.stockLedger.create({ data: { locationId: west, productId: prod, batchId: batch.id, qtyDelta: 30, movementType: 'RECEIVE', documentType: 'OpeningStock', documentId: batch.id, unitCost: '500.00', businessDate: new Date(`${today()}T00:00:00Z`) } });
+    await prisma.stockBalance.create({ data: { locationId: west, productId: prod, batchId: batch.id, qty: 30 } });
+    ok(await as('admin').put('/api/settings').send({ 'gl.auto_posting_enabled': true }));
+    ok(await as('admin').post('/api/accounts/ensure-global'));
+    bank = (await prisma.account.findFirstOrThrow({ where: { paymentAccountType: 'BANK', active: true } })).id;
+  });
+
+  it('a waybill order takes a typed SRP and typed fees instead of the price list and the rates; blank goes back; income follows', async () => {
+    ok(await as('admin').put('/api/ecommerce-waybills/rates/TIKTOK').send({ commissionPct: 5, transactionPct: 2, affiliatePct: 0, shippingPerOrder: 30 }));
+    const w = await prisma.ecomWaybill.create({ data: { platform: 'TIKTOK', orderId: `OV-${run}`, qty: 2, productId: prod } });
+    const find = async () => (ok(await as('ecomm.assoc').get('/api/ecommerce-waybills?platform=TIKTOK')).body.rows as { id: string; srp: number; commission: number; transactionFee: number; shippingFee: number; otherFee: number; fees: number; income: number; edited: boolean }[]).find((x) => x.id === w.id)!;
+    let r = await find(); expect(r.srp).toBe(2399); expect(r.income).toBe(2201.07); expect(r.edited).toBe(false);
+    await as('sales.westave').patch(`/api/ecommerce-waybills/${w.id}`).send({ override: { unitPrice: 1150 } }).expect(403);
+    ok(await as('ecomm.assoc').patch(`/api/ecommerce-waybills/${w.id}`).send({ override: { unitPrice: 1150, commission: 200, otherFee: 20 }, overrideNote: 'platform raised the commission' }));
+    r = await find(); expect(r.edited).toBe(true); expect(r.srp).toBe(2300); expect(r.commission).toBe(200); expect(r.transactionFee).toBe(46); expect(r.shippingFee).toBe(30); expect(r.otherFee).toBe(20); expect(r.fees).toBe(296); expect(r.income).toBe(2004);
+    ok(await as('ecomm.assoc').patch(`/api/ecommerce-waybills/${w.id}`).send({ override: null }));
+    r = await find(); expect(r.edited).toBe(false); expect(r.income).toBe(2201.07);
+    expect((await prisma.auditLog.count({ where: { action: 'ECOM_WAYBILL_OVERRIDE', entityId: w.id } }))).toBe(2);
+  });
+
+  it('a draft payout order can be corrected (a fee, or the payout itself); a posted one cannot', async () => {
+    const amounts = { grossSales: 2000, sellerDiscounts: 100, commission: 152, transactionFee: 42.56, shippingFee: 40, affiliateFee: 0, otherFees: 0, refunds: 0, withholdingTax: 10, payout: 1655.44, adjustments: 0 };
+    const details = [{ orderId: `PO-${run}`, ecomOrderId: null, kind: 'UNKNOWN', included: true, amounts }];
+    const st = await prisma.ecomSettlement.create({ data: { controlNo: `T-EP-${run}`, platform: 'TIKTOK', docDate: new Date(`${today()}T00:00:00Z`), orders: 1, grossSales: '2000', sellerDiscounts: '100', commission: '152', transactionFee: '42.56', shippingFee: '40', withholdingTax: '10', payout: '1655.44', filePayout: '1655.44', details } });
+    const url = `/api/ecommerce/settlements/${st.id}/orders/PO-${run}`;
+    await as('sales.westave').patch(url).send({ commission: 200 }).expect(403);
+    let r = ok(await as('ecomm.assoc').patch(url).send({ commission: 200 })).body;
+    expect(r.details[0].amounts.payout).toBe(1607.44); expect(r.details[0].amounts.adjustments).toBe(0); expect(Number(r.payout)).toBe(1607.44); expect(Number(r.commission)).toBe(200);
+    r = ok(await as('ecomm.assoc').patch(url).send({ payout: 1600 })).body;
+    expect(r.details[0].amounts.payout).toBe(1600); expect(r.details[0].amounts.adjustments).toBe(-7.44); expect(Number(r.payout)).toBe(1600); expect(r.details[0].edits).toHaveLength(2);
+    await prisma.ecomSettlement.update({ where: { id: st.id }, data: { status: 'POSTED' } });
+    await as('ecomm.assoc').patch(url).send({ commission: 10 }).expect(400);
+  });
+
+  it('a card sale may be charged a different amount (reason needed); the difference goes to Other Income - Card Surcharge / Rounding; the report shows it', async () => {
+    const noReason = await cardSale(1, { cardAmount: 1050 }); expect(noReason.status).toBe(400); expect(JSON.stringify(noReason.body)).toContain('CARD_REASON');
+    const sale = ok(await cardSale(1, { cardAmount: 1050, cardAdjustReason: 'terminal surcharge' })).body;
+    const full = ok(await as('sales.westave').get(`/api/sales/${sale.id}`)).body;
+    const total = Number(full.grandTotal); expect(Number(full.cardAmount)).toBe(1050); expect(Number(full.amountPaid)).toBe(1050); expect(total).toBeLessThan(1050);
+    const vs = await voucherLines(sale.id); expect(vs).toHaveLength(1);
+    const lines = vs[0].lines.map((l) => ({ t: l.account.title, d: Number(l.debit), c: Number(l.credit) }));
+    expect(lines.find((l) => l.t.startsWith('AR - Credit Card'))!.d).toBe(1050);
+    expect(Math.round(lines.find((l) => l.t === 'Other Income - Card Surcharge / Rounding')!.c * 100) / 100).toBe(Math.round((1050 - total) * 100) / 100);
+    const dsr = ok(await as('admin').get(`/api/reports/daily-sales?locationId=${west}&date=${today()}`)).body;
+    expect(Number(dsr.creditCard.adjustment)).toBeGreaterThan(0); expect(Number(dsr.creditCard.charged)).toBeGreaterThan(Number(dsr.creditCard.total));
+  });
+
+  it('Accounting corrects the card amount afterwards: the sale entry is reversed and posted again; others cannot', async () => {
+    const sale = (await prisma.salesDoc.findFirstOrThrow({ where: { drSiNo: `CD1-${run}` } }));
+    await as('sales.westave').post(`/api/sales/${sale.id}/card-amount`).send({ amount: 1060, reason: 'x1' }).expect(403);
+    const total = Number(sale.grandTotal);
+    ok(await as('acct.assoc').post(`/api/sales/${sale.id}/card-amount`).send({ amount: total, reason: 'slip shows the exact total' }));
+    let again = await prisma.salesDoc.findUniqueOrThrow({ where: { id: sale.id } }); expect(again.cardAmount).toBeNull(); expect(Number(again.amountPaid)).toBe(total);
+    let vs = await voucherLines(sale.id); expect(vs.length).toBe(3); expect(vs.filter((v) => v.isReversal)).toHaveLength(1);
+    expect(vs[2].lines.some((l) => l.account.title.startsWith('Other Income - Card'))).toBe(false);
+    ok(await as('acct.assoc').post(`/api/sales/${sale.id}/card-amount`).send({ amount: total + 20, reason: 'bank slip' }));
+    again = await prisma.salesDoc.findUniqueOrThrow({ where: { id: sale.id } }); expect(Number(again.cardAmount)).toBe(Math.round((total + 20) * 100) / 100);
+    vs = await voucherLines(sale.id); expect(vs.length).toBe(5);
+    expect((await prisma.auditLog.count({ where: { action: 'CARD_AMOUNT_CORRECTED', entityId: sale.id } }))).toBe(2);
+  });
+
+  it('card remittance: Accounting types the net the bank credited, the fee is worked out and shared per sale, the Accounting Head approves, then Bank + MDR / AR - Credit Card are posted', async () => {
+    const s2 = ok(await cardSale(2)).body; const s3 = ok(await cardSale(3)).body;
+    const d1 = await prisma.salesDoc.findFirstOrThrow({ where: { drSiNo: `CD1-${run}` } });
+    await as('sales.westave').get('/api/card-remittances/waiting').expect(403);
+    const waiting = ok(await as('acct.assoc').get(`/api/card-remittances/waiting?locationId=${west}`)).body;
+    for (const id of [d1.id, s2.id, s3.id]) expect(waiting.rows.some((r: { id: string }) => r.id === id)).toBe(true);
+    const amt = (id: string) => Number(waiting.rows.find((r: { id: string }) => r.id === id).amount);
+    const gross = Math.round((amt(d1.id) + amt(s2.id)) * 100) / 100; const net = Math.round((gross - 60) * 100) / 100;
+    const bad = await as('acct.assoc').post('/api/card-remittances').send({ bankAccountId: bank, receivedOn: today(), salesDocIds: [d1.id, s2.id], netAmount: gross + 1 }); expect(bad.status).toBe(400);
+    const rem = ok(await as('acct.assoc').post('/api/card-remittances').send({ bankAccountId: bank, receivedOn: today(), batchRef: 'BATCH-9', salesDocIds: [d1.id, s2.id], netAmount: net, fees: { [d1.id]: 40 } })).body;
+    expect(Number(rem.grossAmount)).toBe(gross); expect(Number(rem.feeAmount)).toBe(60); expect(Number(rem.netAmount)).toBe(net); expect(rem.controlNo).toContain('-CR-');
+    const fees = Object.fromEntries((rem.lines as { salesDocId: string; fee: string }[]).map((l) => [l.salesDocId, Number(l.fee)])); expect(fees[d1.id]).toBe(40); expect(fees[s2.id]).toBe(20);
+    // held by the remittance: not waiting any more, not correctable, not in a second remittance
+    expect(ok(await as('acct.assoc').get(`/api/card-remittances/waiting?locationId=${west}`)).body.rows.some((r: { id: string }) => r.id === d1.id)).toBe(false);
+    await as('acct.assoc').post(`/api/sales/${d1.id}/card-amount`).send({ amount: 1000, reason: 'late' }).expect(400);
+    await as('acct.assoc').post('/api/card-remittances').send({ bankAccountId: bank, receivedOn: today(), salesDocIds: [s2.id], netAmount: 100 }).expect(400);
+    ok(await as('acct.assoc').post(`/api/card-remittances/${rem.id}/submit`));
+    const req = await prisma.approvalRequest.findFirstOrThrow({ where: { type: 'CARD_REMITTANCE', documentId: rem.id, status: 'PENDING' } });
+    await as('sales.westave').post(`/api/approvals/${req.id}/decide`).send({ decision: 'APPROVE' }).expect(403);
+    ok(await as('acct.head').post(`/api/approvals/${req.id}/decide`).send({ decision: 'APPROVE' }));
+    const posted = ok(await as('acct.assoc').get(`/api/card-remittances/${rem.id}`)).body; expect(posted.status).toBe('POSTED');
+    const jv = await prisma.journalVoucher.findFirstOrThrow({ where: { sourceDocumentType: 'CardRemittance', sourceDocumentId: rem.id }, include: { lines: { include: { account: { select: { id: true, title: true } } } } } });
+    const dr = (t: (x: { id: string; title: string }) => boolean) => jv.lines.filter((l) => t(l.account)).reduce((n, l) => n + Number(l.debit), 0);
+    const cr = jv.lines.filter((l) => l.account.title.startsWith('AR - Credit Card')).reduce((n, l) => n + Number(l.credit), 0);
+    expect(Math.round(dr((a) => a.id === bank) * 100) / 100).toBe(net); expect(dr((a) => a.title.startsWith('MDR - Credit Card'))).toBe(60); expect(Math.round(cr * 100) / 100).toBe(gross);
+    const sold = await prisma.salesDoc.findUniqueOrThrow({ where: { id: s2.id } }); expect(sold.cardRemittanceId).toBe(rem.id); expect(Number(sold.cardFee)).toBe(20);
+    // a draft can be deleted: its sale returns to the waiting list
+    const draft = ok(await as('acct.assoc').post('/api/card-remittances').send({ bankAccountId: bank, receivedOn: today(), salesDocIds: [s3.id], netAmount: 100 })).body;
+    ok(await as('acct.assoc').delete(`/api/card-remittances/${draft.id}`));
+    expect(ok(await as('acct.assoc').get(`/api/card-remittances/waiting?locationId=${west}`)).body.rows.some((r: { id: string }) => r.id === s3.id)).toBe(true);
+    const dash = ok(await as('acct.assoc').get('/api/dashboard')).body; expect(dash.cardWaiting.count).toBeGreaterThanOrEqual(1);
   });
 });

@@ -100,6 +100,7 @@ export const GLOBAL_ACCOUNTS: { key: string; code?: string; title: string; class
   { key: 'SSS_PHIC_EXPENSE', title: 'SSS/Philhealth and HDMF Expense', class: 'DIRECT_COST' },
   { key: 'HDMF_EXPENSE', title: 'SSS/Philhealth and HDMF Expense', class: 'DIRECT_COST' },
   { key: 'MDR_CREDIT_CARD', title: 'MDR - Credit Card (3.5%)', class: 'OPEX' },
+  { key: 'OTHER_INCOME_CARD_ADJUSTMENT', title: 'Other Income - Card Surcharge / Rounding', class: 'OTHER_INCOME' },
   { key: 'DEPRECIATION_EXPENSE', title: 'Depreciation Expense', class: 'OPEX' },
   { key: 'CAPITAL', code: '5000', title: 'Capital - GWS & PROTHIN', class: 'EQUITY' },
   { key: 'RETAINED_EARNINGS', code: '5005', title: 'Retained Earnings', class: 'EQUITY' },

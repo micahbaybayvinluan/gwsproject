@@ -79,6 +79,12 @@ export class DashboardController {
       const notices = await this.prisma.db.hrNotice.findMany({ where: { status: 'OPEN' }, orderBy: { createdAt: 'desc' }, take: 5, select: { id: true, kind: true, title: true } });
       out.hrWaiting = { openNotices: await this.prisma.db.hrNotice.count({ where: { status: 'OPEN' } }), nteDrafts: await this.prisma.db.nte.count({ where: { status: 'DRAFT' } }), nteAwaitingReply: await this.prisma.db.nte.count({ where: { status: 'ISSUED' } }), nteAwaitingDecision: await this.prisma.db.nte.count({ where: { status: 'REPLIED' } }), latest: notices };
     }
+    // Accounting: card sales the bank has not credited yet (owner request 2026-10-23)
+    if (u.permissions.has('card.remit')) {
+      const open = await this.prisma.db.salesDoc.findMany({ where: { paymentMode: 'CREDIT_CARD', voidedAt: null, cardRemittanceId: null }, select: { grandTotal: true, cardAmount: true, docDate: true } });
+      const alertDays = await this.settings.get<number>('card.remit_alert_days'); const cutoff = new Date(Date.now() - alertDays * 86400000);
+      out.cardWaiting = { count: open.length, total: open.reduce((t, x) => t + Number(x.cardAmount ?? x.grandTotal), 0).toFixed(2), late: open.filter((x) => x.docDate < cutoff).length, alertDays };
+    }
     // branch cash funds: every balance for Admin / auditors / Accounting (and the Field Auditor who checks them); own fund for branch staff
     if (['cashfund.view.all', 'cashfund.check', 'cashfund.use', 'cashfund.manage'].some((k) => u.permissions.has(k))) out.cashFunds = await this.cashFund.dashboard(u);
     // discrepancy countdown for branch staff: days left before an open case is charged (shown in bold red)

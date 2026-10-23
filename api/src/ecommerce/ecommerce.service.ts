@@ -20,9 +20,10 @@ import { D, round2 } from '../common/money';
 import type { SessionUser } from '../common/request-context';
 import { requestContext } from '../common/request-context';
 import {
-  AMOUNT_KEYS, type Amounts, isPlatform, parseAds, parseOrders, parseSettlement, type Platform, PLATFORMS, PLATFORM_INFO, readSheets, TEMPLATES, zeroAmounts,
+  AMOUNT_KEYS, type Amounts, deductions, isPlatform, parseAds, parseOrders, parseSettlement, type Platform, PLATFORMS, PLATFORM_INFO, readSheets, TEMPLATES, zeroAmounts,
 } from './ecom-files';
 import { suggestProducts } from './ecom-match';
+import { EcomWaybillsService } from './ecom-waybills.service';
 
 type Kind = 'SALE' | 'MONEY_ONLY' | 'NOT_SHIPPED' | 'ALREADY_SETTLED' | 'UNKNOWN';
 interface DetailRow { orderId: string; ecomOrderId: string | null; kind: Kind; included: boolean; amounts: Amounts; trackingNo?: string | null }
@@ -62,7 +63,7 @@ export class EcommerceService implements OnModuleInit {
   constructor(
     private prisma: PrismaService, private seq: SequenceService, private stock: StockService, private approvals: ApprovalsService, private notify: NotificationsService,
     private audit: AuditService, private settings: SettingsService, private master: MasterService, private transfers: TransfersService, private posting: PostingService,
-    private accounts: AccountsService, private xlsx: XlsxService,
+    private accounts: AccountsService, private xlsx: XlsxService, private waybills: EcomWaybillsService,
   ) {}
 
   onModuleInit() {
@@ -325,11 +326,35 @@ export class EcommerceService implements OnModuleInit {
     const fees = D(s.commission).plus(s.transactionFee).plus(s.shippingFee).plus(s.affiliateFee).plus(s.otherFees).minus(s.adjustments);
     const counts = details.reduce<Record<string, number>>((m, d) => { m[d.kind] = (m[d.kind] ?? 0) + 1; return m; }, {});
     const canCost = user.permissions.has('cost.view');
+    // what the waybill report expected for each order, so a changed fee is spotted (owner request 2026-10-23)
+    const exp = details.length ? await this.waybills.list({ platform: s.platform, orderIds: details.map((d) => d.orderId) }) : null;
+    const expected = new Map((exp?.rows ?? []).filter((r) => r.income != null).map((r) => [r.orderId, r.income as number]));
+    for (const d of details) (d as DetailRow & { expectedIncome?: number | null }).expectedIncome = expected.get(d.orderId) ?? null;
     return {
       ...s, costOfSales: canCost ? s.costOfSales : undefined, details, counts,
       netSales: D(s.grossSales).minus(s.sellerDiscounts).toFixed(2), totalFees: fees.toFixed(2),
       check: { computed: D(s.grossSales).minus(s.sellerDiscounts).minus(fees).minus(s.refunds).minus(s.withholdingTax).toFixed(2), payout: s.payout, notInBatch: D(s.filePayout).minus(s.payout).toFixed(2) },
     };
+  }
+  /**
+   * Type over what the platform file said for one order of a DRAFT / REJECTED payout (owner request 2026-10-23): a fee, the discount, the payout itself.
+   * Without a typed payout, the payout follows the new figures; with one, "adjustments" takes the difference so the posted entry still equals the money received.
+   */
+  async editSettlementOrder(id: string, orderId: string, patch: Partial<Amounts>, user: SessionUser) {
+    const s = await this.prisma.db.ecomSettlement.findUniqueOrThrow({ where: { id } });
+    if (!['DRAFT', 'REJECTED'].includes(s.status)) throw new BadRequestException('Only a draft (or a rejected payout) can be edited');
+    const details = s.details as unknown as (DetailRow & { edits?: unknown[] })[];
+    const d = details.find((x) => x.orderId === orderId);
+    if (!d) throw new NotFoundException('Order not in this payout');
+    const before = { ...d.amounts };
+    for (const k of [...AMOUNT_KEYS, 'payout'] as const) { const v = patch[k]; if (v == null) continue; if (!Number.isFinite(v)) throw new BadRequestException(`${k}: a number`); if (k !== 'payout' && v < 0) throw new BadRequestException(`${k}: cannot be negative`); d.amounts[k] = round2(v).toNumber(); }
+    if (patch.payout == null) d.amounts.payout = round2(d.amounts.grossSales - deductions(d.amounts) + before.adjustments).toNumber();
+    d.amounts.adjustments = round2(d.amounts.payout - (d.amounts.grossSales - deductions(d.amounts))).toNumber();
+    d.edits = [...(d.edits ?? []), { by: user.id, at: new Date().toISOString(), before, after: { ...d.amounts } }];
+    const totals = this.totals(details);
+    await this.prisma.db.ecomSettlement.update({ where: { id }, data: { ...totals, details: details as unknown as Prisma.InputJsonValue } });
+    await this.audit.log({ action: 'ECOM_SETTLEMENT_EDIT', entityType: 'EcomSettlement', entityId: id, before: { orderId, ...before }, after: { orderId, ...d.amounts } });
+    return this.settlement(id, user);
   }
   async deleteSettlement(id: string) {
     const s = await this.prisma.db.ecomSettlement.findUniqueOrThrow({ where: { id } });

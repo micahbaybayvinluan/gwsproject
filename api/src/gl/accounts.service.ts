@@ -110,6 +110,14 @@ export class AccountsService {
     };
   }
 
+  /** One company-wide account by its GLOBAL_ACCOUNTS key, created when the chart does not have it yet (so a posting is never skipped for it). */
+  async ensureGlobal(key: string, actorId: string, tx: Tx | null = null) {
+    const g = GLOBAL_ACCOUNTS.find((x) => x.key === key); if (!g) throw new BadRequestException(`Unknown account key ${key}`);
+    const db = (tx ?? this.prisma.db) as Tx;
+    const found = await db.account.findFirst({ where: { OR: [...(g.code ? [{ code: g.code }] : []), { title: g.title }] } });
+    return found ?? this.create({ code: g.code, title: g.title, class: g.class, entryScope: 'MAIN', paymentAccountType: g.paymentAccountType ?? null }, actorId, tx);
+  }
+
   async ensureGlobalAccounts(actorId: string) {
     let n = 0;
     for (const g of GLOBAL_ACCOUNTS) {

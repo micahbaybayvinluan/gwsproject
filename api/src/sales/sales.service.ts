@@ -11,6 +11,7 @@ import { AuditService } from '../common/audit.service';
 import { SettingsService } from '../common/settings.service';
 import { AttachmentsService } from '../attachments/attachments.service';
 import { PostingService } from '../gl/posting.service';
+import { AccountsService } from '../gl/accounts.service';
 import { r3r4Sale, r4Collection, r8ConsigneeSale } from '../gl/posting-rules';
 import { toDateOnly, todayManila, addDays, dateStr, daysBetween } from '../common/manila';
 import { D, round2, sum, ZERO } from '../common/money';
@@ -30,7 +31,7 @@ import { PromosService } from '../promos/promos.service';
 export interface SalesLineInput { productId: string; qty: number; unitPrice?: number | null; batchId?: string | null; exactBatch?: boolean; isFreebie?: boolean; lineRemarks?: string; priceTier?: string; /** ticked by the associate: sold at the promo price (counted against the promo, owner request 2026-10-15); false = not a promo sale */ promo?: boolean | null }
 export interface SalesInput {
   locationId?: string; docDate?: string; channel: SalesChannel; channelSub?: string | null; customerId?: string | null; agentId?: string | null; outletId?: string | null; memberId?: string | null; voucherCode?: string | null; riderId?: string | null; customerName?: string | null; customerPhone?: string | null; customerEmail?: string | null; drSiNo: string;
-  paymentMode: PaymentMode; paymentAccountId?: string | null; proofOfPaymentAttachmentId?: string | null; cardMid?: string; cardSlipNo?: string; cardApprovalCode?: string; cardBatchNo?: string;
+  paymentMode: PaymentMode; paymentAccountId?: string | null; proofOfPaymentAttachmentId?: string | null; cardMid?: string; cardSlipNo?: string; cardApprovalCode?: string; cardBatchNo?: string; cardAmount?: number | null; cardAdjustReason?: string | null;
   deliveryFee?: number; riderIncentive?: number; incentive?: { amount: number; payee: string; kind?: 'SALES' | 'RIDER' } | null; sixPackSticker?: boolean; franchiseShipping?: { mode: 'NONE' | 'TO_FOLLOW' | 'AMOUNT'; amount?: number; courier?: string; reference?: string }; shippingFee?: number; shippingExpense?: number; marketplaceCharges?: number; dueDate?: string | null; pdcBank?: string; pdcChequeNo?: string; pdcDate?: string | null; notes?: string;
   lines: SalesLineInput[];
 }
@@ -43,7 +44,7 @@ export type AmendInput = { lines: SalesLineInput[]; notes?: string | null; dueDa
 
 @Injectable()
 export class SalesService implements OnModuleInit {
-  constructor(private prisma: PrismaService, private seq: SequenceService, private stock: StockService, private approvals: ApprovalsService, private master: MasterService, private notify: NotificationsService, private audit: AuditService, private settings: SettingsService, private attachments: AttachmentsService, private posting: PostingService, private closing: ClosingService, private scope: ScopeService, private expenses: ExpensesService, private followUps: CustomerFollowUpsService, private outlets: OutletsService, private agentMonitor: MonitorService, private sixPack: SixPackService, private franchiseShipping: FranchiseShippingService, private loyalty: LoyaltyService, private promos: PromosService, private franchiseDr: FranchiseDrService) {}
+  constructor(private prisma: PrismaService, private seq: SequenceService, private stock: StockService, private approvals: ApprovalsService, private master: MasterService, private notify: NotificationsService, private audit: AuditService, private settings: SettingsService, private attachments: AttachmentsService, private posting: PostingService, private closing: ClosingService, private scope: ScopeService, private expenses: ExpensesService, private followUps: CustomerFollowUpsService, private outlets: OutletsService, private agentMonitor: MonitorService, private sixPack: SixPackService, private franchiseShipping: FranchiseShippingService, private loyalty: LoyaltyService, private promos: PromosService, private franchiseDr: FranchiseDrService, private accounts: AccountsService) {}
 
   onModuleInit() {
     this.approvals.register('SPECIAL_PRICE', (req, outcome) => this.onSpecialPriceDecision(req.documentId, outcome));
@@ -197,12 +198,19 @@ export class SalesService implements OnModuleInit {
       }
       const deliveryFee = D(input.deliveryFee ?? 0), shippingFee = D(input.shippingFee ?? 0);
       const grandTotal = round2(productTotal.plus(deliveryFee).plus(shippingFee));
+      // credit card: what the terminal really charged when it is not the total (surcharge / rounding); a reason is needed (owner request 2026-10-23)
+      let cardAmount: ReturnType<typeof D> | null = null;
+      if (input.paymentMode === 'CREDIT_CARD' && input.cardAmount != null) {
+        const typed = round2(D(input.cardAmount));
+        if (typed.lte(0)) throw new BadRequestException('The amount charged on the card must be more than zero');
+        if (!typed.equals(grandTotal)) { if (!input.cardAdjustReason?.trim()) throw new BadRequestException({ message: `The card was charged ${typed.toFixed(2)} but the total is ${grandTotal.toFixed(2)}: type the reason`, code: 'CARD_REASON' }); cardAmount = typed; }
+      }
       const created = await tx.salesDoc.create({
         data: {
           controlNo, docDate, locationId, channel: input.channel, channelSub: input.channelSub ?? null, customerId: input.customerId ?? null, agentId: input.agentId ?? null, outletId: input.outletId ?? null, memberId: input.memberId ?? null, voucherId: voucher?.id ?? null, voucherDiscount: voucherDiscount.toFixed(2), riderId: input.riderId ?? null, customerName: input.customerName ?? null, customerPhone: input.customerPhone || null, customerEmail: input.customerEmail || null, drSiNo: input.drSiNo.trim(),
-          paymentMode: input.paymentMode, paymentAccountId: input.paymentAccountId ?? null, proofOfPaymentAttachmentId: input.proofOfPaymentAttachmentId ?? null, cardMid: input.cardMid, cardSlipNo: input.cardSlipNo, cardApprovalCode: input.cardApprovalCode, cardBatchNo: input.cardBatchNo,
+          paymentMode: input.paymentMode, paymentAccountId: input.paymentAccountId ?? null, proofOfPaymentAttachmentId: input.proofOfPaymentAttachmentId ?? null, cardMid: input.cardMid, cardSlipNo: input.cardSlipNo, cardApprovalCode: input.cardApprovalCode, cardBatchNo: input.cardBatchNo, cardAmount: cardAmount != null ? cardAmount.toFixed(2) : null, cardAdjustReason: cardAmount != null ? input.cardAdjustReason?.trim() || null : null,
           deliveryFee: deliveryFee.toFixed(2), riderIncentive: D(input.riderIncentive ?? 0).toFixed(2), shippingFee: shippingFee.toFixed(2), shippingExpense: D(input.shippingExpense ?? 0).toFixed(2), marketplaceCharges: D(input.marketplaceCharges ?? 0).toFixed(2),
-          productTotal: productTotal.toFixed(2), grandTotal: grandTotal.toFixed(2), amountPaid: input.paymentMode === 'AR_PDC' ? '0.00' : grandTotal.toFixed(2),
+          productTotal: productTotal.toFixed(2), grandTotal: grandTotal.toFixed(2), amountPaid: input.paymentMode === 'AR_PDC' ? '0.00' : (cardAmount ?? grandTotal).toFixed(2),
           dueDate: input.dueDate ? toDateOnly(input.dueDate) : null, pdcBank: input.pdcBank, pdcChequeNo: input.pdcChequeNo, pdcDate: input.pdcDate ? toDateOnly(input.pdcDate) : null, notes: input.notes,
           preparedBy: user.id, createdBy: user.id, specialPriceStatus: special ? 'PENDING' : null, status: 'POSTED',
           lines: { create: lineRows },
@@ -219,10 +227,11 @@ export class SalesService implements OnModuleInit {
       // ledger rows were keyed by controlNo before the doc existed; point them at the doc id
       await tx.stockLedger.updateMany({ where: { documentType: 'SalesDoc', documentId: controlNo }, data: { documentId: created.id } });
       // journal R3/R4 + R5
+      if (cardAmount && (await this.posting.enabled())) await this.accounts.ensureGlobal('OTHER_INCOME_CARD_ADJUSTMENT', user.id, tx);
       const counterparty = created.customer ? { type: created.customer.type, id: created.customer.id, locationId: null } : created.agent ? { type: 'AGENT', id: created.agent.id } : null;
       await this.posting.post(tx, { type: 'SalesDoc', id: created.id, date: docDate, name: created.customer?.name ?? created.customerName, createdBy: user.id }, (r) => r3r4Sale(r, {
         locationId, channel: created.channel, channelSub: created.channelSub, paymentMode: created.paymentMode, paymentAccountId: created.paymentAccountId, counterparty, drSiNo: created.drSiNo,
-        productTotal: created.productTotal, deliveryFee: created.deliveryFee, shippingFee: created.shippingFee, grandTotal: created.grandTotal,
+        productTotal: created.productTotal, deliveryFee: created.deliveryFee, shippingFee: created.shippingFee, grandTotal: created.grandTotal, cardAmount: created.cardAmount,
         costLines: created.lines.map((l) => ({ accountingClass: l.product.category.accountingClass, qty: l.qty, unitCost: l.unitCost, isConsignmentIn: l.batch.isConsignmentIn })),
       }));
       return created;
@@ -282,7 +291,7 @@ export class SalesService implements OnModuleInit {
     const drSiNo = input.drSiNo?.trim() || old.drSiNo;
     const base: SalesInput = { locationId: old.locationId, docDate: dateStr(old.docDate), channel: old.channel, channelSub: old.channelSub, customerId: old.customerId, agentId: old.agentId, riderId: old.riderId, customerName: old.customerName ?? undefined, drSiNo: old.drSiNo, paymentMode: old.paymentMode, paymentAccountId: old.paymentAccountId, proofOfPaymentAttachmentId: old.proofOfPaymentAttachmentId, deliveryFee: Number(old.deliveryFee), shippingFee: Number(old.shippingFee), pdcBank: old.pdcBank ?? undefined, pdcChequeNo: old.pdcChequeNo ?? undefined, pdcDate: old.pdcDate ? dateStr(old.pdcDate) : null, dueDate: old.dueDate ? dateStr(old.dueDate) : null, notes: old.notes ?? undefined, lines: [],
       // what the sale already carries stays as it was
-      outletId: old.outletId, memberId: old.memberId, customerPhone: old.customerPhone, customerEmail: old.customerEmail, cardMid: old.cardMid ?? undefined, cardSlipNo: old.cardSlipNo ?? undefined, cardApprovalCode: old.cardApprovalCode ?? undefined, cardBatchNo: old.cardBatchNo ?? undefined,
+      outletId: old.outletId, memberId: old.memberId, customerPhone: old.customerPhone, customerEmail: old.customerEmail, cardAmount: old.cardAmount != null ? Number(old.cardAmount) : undefined, cardAdjustReason: old.cardAdjustReason ?? undefined, cardMid: old.cardMid ?? undefined, cardSlipNo: old.cardSlipNo ?? undefined, cardApprovalCode: old.cardApprovalCode ?? undefined, cardBatchNo: old.cardBatchNo ?? undefined,
       shippingExpense: Number(old.shippingExpense), marketplaceCharges: Number(old.marketplaceCharges), riderIncentive: Number(old.riderIncentive), sixPackSticker: old.sixPackStickers > 0,
       incentive: D(old.incentiveAmount).gt(0) ? { amount: Number(old.incentiveAmount), payee: old.incentivePayee ?? '' } : null };
     const restore: SalesInput = { ...base, lines: old.lines.filter((l) => l.qty > 0).map((l) => ({ productId: l.productId, qty: l.qty, unitPrice: Number(l.unitPrice), batchId: l.batchId, exactBatch: true, isFreebie: l.isFreebie, priceTier: l.priceTier })) };
@@ -347,6 +356,40 @@ export class SalesService implements OnModuleInit {
   }
 
   /** Same-day edit by the associate (whole-document replace) or by auditors. Post-close → ClosingService.requestEdit. */
+  /**
+   * Accounting (or the Head Auditor) corrects the amount really charged on the card after the sale was saved (owner request 2026-10-23).
+   * The sale entry is reversed and posted again with the new amount; the difference from the total sits in Other Income - Card Surcharge / Rounding.
+   * Not possible once the sale has been cleared by a card remittance (correct it there).
+   */
+  async correctCardAmount(id: string, amount: number, reason: string, user: SessionUser) {
+    const doc = await requestContext.runSystem(async () => await this.get(id, user));
+    if (doc.voidedAt) throw new BadRequestException('This sale was voided');
+    if (doc.paymentMode !== 'CREDIT_CARD') throw new BadRequestException('Only a credit card sale has a card amount');
+    if (doc.cardRemittanceId) throw new BadRequestException('This card sale is already cleared by a card remittance: correct it in the remittance');
+    if (!reason.trim()) throw new BadRequestException('Type the reason');
+    const typed = round2(D(amount)); if (typed.lte(0)) throw new BadRequestException('The amount must be more than zero');
+    const total = D(doc.grandTotal); const nextCard = typed.equals(total) ? null : typed;
+    const before = { cardAmount: doc.cardAmount, reason: doc.cardAdjustReason };
+    await this.posting.assertPeriodOpen(null, doc.docDate);
+    await requestContext.runSystem(async () => {
+      await this.prisma.db.$transaction(async (tx) => {
+        await tx.salesDoc.update({ where: { id }, data: { cardAmount: nextCard ? nextCard.toFixed(2) : null, cardAdjustReason: nextCard ? reason.trim() : null, amountPaid: (nextCard ?? total).toFixed(2) } });
+        const all = await tx.journalVoucher.findMany({ where: { sourceDocumentType: 'SalesDoc', sourceDocumentId: id, rule: 'R3', isReversal: false, voidedAt: null }, include: { lines: true } });
+        const reversed = new Set((await tx.journalVoucher.findMany({ where: { reversesVoucherId: { in: all.map((v) => v.id) } }, select: { reversesVoucherId: true } })).map((v) => v.reversesVoucherId));
+        for (const v of all.filter((x) => !reversed.has(x.id))) {
+          const voucherNo = await this.posting.nextVoucherNo(tx, 'M', doc.docDate.getUTCFullYear());
+          await tx.journalVoucher.create({ data: { voucherNo, date: doc.docDate, book: v.book, reference: v.reference, remarks: `Reversal of ${v.voucherNo}: card amount corrected (${reason.trim()})`, name: v.name, isReversal: true, reversesVoucherId: v.id, sourceDocumentType: 'SalesDoc', sourceDocumentId: id, rule: 'R3', createdBy: user.id, lines: { create: v.lines.map((l, i) => ({ lineNo: i + 1, accountId: l.accountId, debit: l.credit, credit: l.debit, memo: l.memo })) } } });
+        }
+        if (nextCard && (await this.posting.enabled())) await this.accounts.ensureGlobal('OTHER_INCOME_CARD_ADJUSTMENT', user.id, tx);
+        const counterparty = doc.customer ? { type: doc.customer.type, id: doc.customer.id, locationId: null } : doc.agent ? { type: 'AGENT', id: doc.agent.id } : null;
+        if (all.length) await this.posting.post(tx, { type: 'SalesDoc', id, date: doc.docDate, name: doc.customer?.name ?? doc.customerName, createdBy: user.id }, (r) => r3r4Sale(r, { locationId: doc.locationId, channel: doc.channel, channelSub: doc.channelSub, paymentMode: doc.paymentMode, paymentAccountId: doc.paymentAccountId, counterparty, drSiNo: doc.drSiNo, productTotal: doc.productTotal, deliveryFee: doc.deliveryFee, shippingFee: doc.shippingFee, grandTotal: doc.grandTotal, cardAmount: nextCard ? nextCard.toFixed(2) : null, costLines: [] }));
+      });
+    });
+    await this.audit.log({ action: 'CARD_AMOUNT_CORRECTED', entityType: 'SalesDoc', entityId: id, before, after: { cardAmount: nextCard?.toFixed(2) ?? null, total: total.toFixed(2), reason: reason.trim() } });
+    await this.notify.toLocation(doc.locationId, { type: 'CARD_AMOUNT_CORRECTED', title: `Card amount of ${doc.drSiNo} corrected to ${typed.toFixed(2)} by ${user.fullName}`, body: reason.trim(), link: '/sales' }).catch(() => undefined);
+    return this.get(id, user);
+  }
+
   async void(id: string, reason: string, user: SessionUser, opts: { skipClosedCheck?: boolean } = {}) {
     const doc = await this.get(id, user);
     if (doc.voidedAt) throw new BadRequestException('Already voided');

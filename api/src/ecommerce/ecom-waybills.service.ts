@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
 import { AuditService } from '../common/audit.service';
 import { SettingsService } from '../common/settings.service';
@@ -11,7 +12,8 @@ import { PLATFORMS, PLATFORM_INFO, type Platform } from './ecom-files';
 
 const c2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 export interface FeeRates { commissionPct: number; transactionPct: number; affiliatePct: number; shippingPerOrder: number }
-export interface WaybillRow { id: string; platform: string; platformName: string; orderId: string; trackingNo: string | null; qty: number; weightG: number | null; rtsDate: string | null; uploaded: string; sourceFile: string | null; product: { id: string; sku: string; name: string } | null; guessed: boolean; unitSrp: number | null; priceFrom: string | null; srp: number | null; commission: number | null; transactionFee: number | null; affiliateFee: number | null; shippingFee: number | null; fees: number | null; income: number | null }
+export interface WaybillOverride { unitPrice: number | null; commission: number | null; transactionFee: number | null; affiliateFee: number | null; shippingFee: number | null; otherFee: number | null }
+export interface WaybillRow { id: string; platform: string; platformName: string; orderId: string; trackingNo: string | null; qty: number; weightG: number | null; rtsDate: string | null; uploaded: string; sourceFile: string | null; product: { id: string; sku: string; name: string } | null; guessed: boolean; unitSrp: number | null; priceFrom: string | null; srp: number | null; commission: number | null; transactionFee: number | null; affiliateFee: number | null; shippingFee: number | null; fees: number | null; income: number | null; otherFee: number | null; edited: boolean; override: WaybillOverride | null; rateUnitSrp: number | null; overrideNote: string | null }
 const ZERO_RATES: FeeRates = { commissionPct: 0, transactionPct: 0, affiliatePct: 0, shippingPerOrder: 0 };
 const rateKey = (p: string) => `ecom.waybill_rates.${p}`;
 
@@ -60,9 +62,9 @@ export class EcomWaybillsService {
     return { commissionPct: c2((sum('commission') / net) * 100), transactionPct: c2((sum('transactionFee') / net) * 100), affiliatePct: c2((sum('affiliateFee') / net) * 100), shippingPerOrder: orders ? c2(sum('shippingFee') / orders) : 0, basedOn: orders };
   }
 
-  async list(q: { platform?: string; from?: string; to?: string; onlyOpen?: boolean }) {
+  async list(q: { platform?: string; from?: string; to?: string; onlyOpen?: boolean; orderIds?: string[] }) {
     const from = q.from ? toDateOnly(q.from) : undefined; const to = q.to ? new Date(`${q.to}T23:59:59.999Z`) : undefined;
-    const rows = await this.prisma.db.ecomWaybill.findMany({ where: { platform: q.platform || undefined, createdAt: from || to ? { gte: from, lte: to } : undefined, productId: q.onlyOpen ? null : undefined }, orderBy: [{ createdAt: 'desc' }, { orderId: 'asc' }], take: 2000 });
+    const rows = await this.prisma.db.ecomWaybill.findMany({ where: { platform: q.platform || undefined, orderId: q.orderIds ? { in: q.orderIds } : undefined, createdAt: from || to ? { gte: from, lte: to } : undefined, productId: q.onlyOpen ? null : undefined }, orderBy: [{ createdAt: 'desc' }, { orderId: 'asc' }], take: 2000 });
     const products = await this.prisma.db.product.findMany({ where: { id: { in: [...new Set(rows.map((r) => r.productId).filter((x): x is string => !!x))] } }, select: { id: true, sku: true, name: true } });
     const rateOf = new Map<string, FeeRates>(); const today = todayManila();
     const out: WaybillRow[] = [];
@@ -74,24 +76,42 @@ export class EcomWaybillsService {
         const own = r.platform !== 'UNKNOWN' ? await this.master.priceFor(prod.id, r.platform, today) : null;
         if (own) { unit = Number(own); from2 = r.platform; } else { const retail = await this.master.priceFor(prod.id, 'RETAIL', today); if (retail) { unit = Number(retail); from2 = 'RETAIL'; } }
       }
+      const fo = (r.feeOverrides ?? {}) as Partial<Record<'commission' | 'transactionFee' | 'affiliateFee' | 'shippingFee' | 'otherFee', number>>;
+      const rateUnit = unit; const unitOv = r.unitPriceOverride != null ? Number(r.unitPriceOverride) : null;
+      if (unitOv != null) { unit = unitOv; from2 = 'EDITED'; }
       const srp = unit != null ? c2(unit * r.qty) : null;
-      const commission = srp != null ? c2((srp * rt.commissionPct) / 100) : null, transaction = srp != null ? c2((srp * rt.transactionPct) / 100) : null, affiliate = srp != null ? c2((srp * rt.affiliatePct) / 100) : null;
-      const shipping = srp != null ? c2(rt.shippingPerOrder) : null;
-      const fees = srp != null ? c2(commission! + transaction! + affiliate! + shipping!) : null;
+      const commission = srp != null ? (fo.commission ?? c2((srp * rt.commissionPct) / 100)) : null, transaction = srp != null ? (fo.transactionFee ?? c2((srp * rt.transactionPct) / 100)) : null, affiliate = srp != null ? (fo.affiliateFee ?? c2((srp * rt.affiliatePct) / 100)) : null;
+      const shipping = srp != null ? (fo.shippingFee ?? c2(rt.shippingPerOrder)) : null;
+      const other = srp != null ? (fo.otherFee ?? 0) : null;
+      const fees = srp != null ? c2(commission! + transaction! + affiliate! + shipping! + other!) : null;
+      const hasOv = unitOv != null || Object.values(fo).some((v) => v != null);
       out.push({ id: r.id, platform: r.platform, platformName: r.platform === 'UNKNOWN' ? 'Unknown' : PLATFORM_INFO[r.platform as Platform].name, orderId: r.orderId, trackingNo: r.trackingNo, qty: r.qty, weightG: r.weightG, rtsDate: r.rtsDate ? dateStr(r.rtsDate) : null, uploaded: dateStr(r.createdAt), sourceFile: r.sourceFile,
-        product: prod, guessed: r.guessed, unitSrp: unit, priceFrom: from2, srp, commission, transactionFee: transaction, affiliateFee: affiliate, shippingFee: shipping, fees, income: srp != null ? c2(srp - fees!) : null });
+        product: prod, guessed: r.guessed, unitSrp: unit, priceFrom: from2, srp, commission, transactionFee: transaction, affiliateFee: affiliate, shippingFee: shipping, otherFee: other, fees, income: srp != null ? c2(srp - fees!) : null,
+        edited: hasOv, rateUnitSrp: rateUnit, overrideNote: r.overrideNote, override: hasOv ? { unitPrice: unitOv, commission: fo.commission ?? null, transactionFee: fo.transactionFee ?? null, affiliateFee: fo.affiliateFee ?? null, shippingFee: fo.shippingFee ?? null, otherFee: fo.otherFee ?? null } : null });
     }
     const priced = out.filter((x) => x.srp != null);
     const sum = (f: (x: (typeof out)[number]) => number | null) => c2(priced.reduce((t, x) => t + (f(x) ?? 0), 0));
     const byPlatform = [...new Set(out.map((x) => x.platform))].map((p) => { const mine = priced.filter((x) => x.platform === p); const s = (f: (x: (typeof out)[number]) => number | null) => c2(mine.reduce((t, x) => t + (f(x) ?? 0), 0)); return { platform: p, name: out.find((x) => x.platform === p)!.platformName, waybills: out.filter((x) => x.platform === p).length, priced: mine.length, srp: s((x) => x.srp), fees: s((x) => x.fees), income: s((x) => x.income) }; });
     const rateRows = []; for (const p of PLATFORMS) rateRows.push({ platform: p, name: PLATFORM_INFO[p].name, rates: await this.rates(p), actual: await this.actualRates(p) });
-    return { rows: out, totals: { waybills: out.length, priced: priced.length, unassigned: out.length - priced.length, srp: sum((x) => x.srp), commission: sum((x) => x.commission), transactionFee: sum((x) => x.transactionFee), affiliateFee: sum((x) => x.affiliateFee), shippingFee: sum((x) => x.shippingFee), fees: sum((x) => x.fees), income: sum((x) => x.income) }, byPlatform, rates: rateRows };
+    return { rows: out, totals: { waybills: out.length, priced: priced.length, unassigned: out.length - priced.length, srp: sum((x) => x.srp), commission: sum((x) => x.commission), transactionFee: sum((x) => x.transactionFee), affiliateFee: sum((x) => x.affiliateFee), shippingFee: sum((x) => x.shippingFee), otherFee: sum((x) => x.otherFee), edited: out.filter((x) => x.edited).length, fees: sum((x) => x.fees), income: sum((x) => x.income) }, byPlatform, rates: rateRows };
   }
 
-  async update(id: string, input: { productId?: string | null; qty?: number }) {
+  async update(id: string, input: { productId?: string | null; qty?: number; override?: Partial<WaybillOverride> | null; overrideNote?: string | null }, user?: SessionUser) {
     const w = await this.prisma.db.ecomWaybill.findUnique({ where: { id } });
     if (!w) throw new NotFoundException();
-    const data: { productId?: string | null; qty?: number; guessed?: boolean } = {};
+    const data: { productId?: string | null; qty?: number; guessed?: boolean; unitPriceOverride?: number | null; feeOverrides?: Prisma.InputJsonValue | typeof Prisma.DbNull; overrideNote?: string | null; overriddenBy?: string | null; overriddenAt?: Date | null } = {};
+    if (input.override !== undefined) {
+      // a blank / null field goes back to the price list or the platform rate; null for all of them clears the edit
+      const o = input.override ?? {};
+      for (const [k, v] of Object.entries(o)) if (v != null && !(typeof v === 'number' && v >= 0 && v < 1e9)) throw new BadRequestException(`${k}: an amount from 0 up`);
+      const fees: Record<string, number> = {};
+      for (const k of ['commission', 'transactionFee', 'affiliateFee', 'shippingFee', 'otherFee'] as const) if (o[k] != null) fees[k] = c2(o[k]!);
+      data.unitPriceOverride = o.unitPrice != null ? c2(o.unitPrice) : null;
+      data.feeOverrides = Object.keys(fees).length ? fees : Prisma.DbNull;
+      const any = data.unitPriceOverride != null || Object.keys(fees).length > 0;
+      data.overrideNote = any ? (input.overrideNote?.trim() || null) : null; data.overriddenBy = any ? user?.id ?? null : null; data.overriddenAt = any ? new Date() : null;
+      await this.audit.log({ action: 'ECOM_WAYBILL_OVERRIDE', entityType: 'EcomWaybill', entityId: id, before: { unitPrice: w.unitPriceOverride, fees: w.feeOverrides }, after: { unitPrice: data.unitPriceOverride, fees, note: data.overrideNote } });
+    }
     if (input.qty != null) { if (!Number.isInteger(input.qty) || input.qty < 1 || input.qty > 999) throw new BadRequestException('Quantity is a whole number from 1'); data.qty = input.qty; }
     if (input.productId !== undefined) {
       if (input.productId) {
@@ -111,9 +131,9 @@ export class EcomWaybillsService {
     const r = await this.list({ ...q });
     const money = '#,##0.00';
     const buffer = await this.xlsx.workbook([
-      { name: 'Waybills', title: 'E-commerce waybill report', subtitle: [`Uploaded ${q.from ?? 'start'} to ${q.to ?? 'today'}${q.platform ? ` · ${q.platform}` : ''}`, 'SRP = the platform price list; fees at the platform rates; order income = SRP − fees'],
-        columns: [{ header: 'Platform', key: 'platformName', width: 12 }, { header: 'Order ID', key: 'orderId', width: 24 }, { header: 'Tracking', key: 'trackingNo', width: 20 }, { header: 'Product', key: 'product', width: 38 }, { header: 'Qty', key: 'qty', width: 6 }, { header: 'SRP each', key: 'unitSrp', width: 13, numFmt: money }, { header: 'SRP total', key: 'srp', width: 14, numFmt: money }, { header: 'Commission', key: 'commission', width: 13, numFmt: money }, { header: 'Transaction fee', key: 'transactionFee', width: 14, numFmt: money }, { header: 'Affiliate', key: 'affiliateFee', width: 12, numFmt: money }, { header: 'Shipping', key: 'shippingFee', width: 12, numFmt: money }, { header: 'Total fees', key: 'fees', width: 13, numFmt: money }, { header: 'Order income', key: 'income', width: 14, numFmt: money }, { header: 'Uploaded', key: 'uploaded', width: 12 }],
-        rows: r.rows.map((x) => ({ ...x, product: x.product ? `${x.product.name}${x.guessed ? ' (to confirm)' : ''}` : '(no product chosen)' })), totals: ['srp', 'commission', 'transactionFee', 'affiliateFee', 'shippingFee', 'fees', 'income'] },
+      { name: 'Waybills', title: 'E-commerce waybill report', subtitle: [`Uploaded ${q.from ?? 'start'} to ${q.to ?? 'today'}${q.platform ? ` · ${q.platform}` : ''}`, 'SRP = the platform price list; fees at the platform rates; an edited order uses the SRP and fees typed for it; order income = SRP − fees'],
+        columns: [{ header: 'Platform', key: 'platformName', width: 12 }, { header: 'Order ID', key: 'orderId', width: 24 }, { header: 'Tracking', key: 'trackingNo', width: 20 }, { header: 'Product', key: 'product', width: 38 }, { header: 'Qty', key: 'qty', width: 6 }, { header: 'SRP each', key: 'unitSrp', width: 13, numFmt: money }, { header: 'SRP total', key: 'srp', width: 14, numFmt: money }, { header: 'Commission', key: 'commission', width: 13, numFmt: money }, { header: 'Transaction fee', key: 'transactionFee', width: 14, numFmt: money }, { header: 'Affiliate', key: 'affiliateFee', width: 12, numFmt: money }, { header: 'Shipping', key: 'shippingFee', width: 12, numFmt: money }, { header: 'Other / voucher', key: 'otherFee', width: 13, numFmt: money }, { header: 'Total fees', key: 'fees', width: 13, numFmt: money }, { header: 'Order income', key: 'income', width: 14, numFmt: money }, { header: 'Uploaded', key: 'uploaded', width: 12 }],
+        rows: r.rows.map((x) => ({ ...x, product: x.product ? `${x.product.name}${x.guessed ? ' (to confirm)' : ''}${x.edited ? ' (price / fees edited)' : ''}` : '(no product chosen)' })), totals: ['srp', 'commission', 'transactionFee', 'affiliateFee', 'shippingFee', 'otherFee', 'fees', 'income'] },
     ]);
     return { buffer, fileName: `Waybill-report-${dateStr(todayManila())}.xlsx` };
   }

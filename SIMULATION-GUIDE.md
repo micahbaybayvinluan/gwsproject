@@ -332,6 +332,12 @@ Waybill Report → **Choose waybill PDF files** (TikTok or Shopee labels) → pi
 151. **Actions in HR Notices** (`hr.staff`): HR Notices → *Generate NTE…*, *Create a charge form…*, *Refer to the Owner*, *Close*; the notice lists the NTEs and charge forms made from it.
 152. **Count discrepancy notice** (`hr.staff`): after a weekly count discrepancy passes its explanation deadline, HR Notices shows a *Count discrepancy* notice with the person who counted and the charge form of the case.
 153. **Link a charge** (`hr.staff`): Staff Charges → New charge form → *Linked to* → *Transfer difference* (or BO / expense / DR) → pick one: items fill at franchise price, the staff on the document are suggested → create. The *Linked to* column opens the document.
+154. **Edit price & fees of an online order** (`ecomm.assoc`): Waybill Report → set the TikTok commission rate to 5% → on a row press *Edit price & fees* → type commission ₱200 and a voucher ₱20 → Save: the row says *edited by hand* and the income drops; press *Back to the price list and rates* to undo.
+155. **Correct a draft payout** (`ecomm.assoc`): E-commerce → TikTok → Payouts → upload a payout file → *Orders in the file* → *Edit* an order: change the commission → the payout follows; type the payout received → *other fees and adjustments* takes the difference. Send to Accounting.
+156. **Card amount at the counter** (`sales.westave`): New Sale → Credit card → fill the slip details → *Amount charged on the card* = total + ₱8.33 → the reason box appears (required) → review shows *Charged on the card* → save. Daily Sales Report shows *Card surcharge / rounding*.
+157. **Correct a card amount** (`acct.assoc`): open that sale → *Credit card amount* → type the real amount and the reason → *Correct the card amount*. Journal Entries show the reversal and the new entry.
+158. **Card remittance** (`acct.assoc`, then `acct.head`): Card Remittances → tick two card sales → bank account, date → type the net the bank credited (about 4% less) → the bank charge and % appear → Save → *Send to the Accounting Head*. `acct.head`: My Approvals → approve. Journal Entries: Dr bank, Dr MDR – Credit Card, Cr AR – Credit Card.
+159. **Draft remittance deleted** (`acct.assoc`): make a remittance, open it under *Remittances*, press *Delete*: its sales are back in *Card sales waiting for the bank*.
 
 ## Where the files come out
 

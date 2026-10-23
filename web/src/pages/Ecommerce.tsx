@@ -3,7 +3,7 @@ import { Fragment, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api, fmtDate, peso, today } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
-import { Badge, Button, Card, Empty, ErrorBox, Field, Input, Select, Stat } from '@/components/ui/primitives';
+import { Badge, Button, Card, Modal, Empty, ErrorBox, Field, Input, Select, Stat } from '@/components/ui/primitives';
 import { Searchable } from '@/components/Searchable';
 
 type P = 'TIKTOK' | 'SHOPEE' | 'LAZADA';
@@ -168,7 +168,7 @@ function PulloutView({ id, manage, onChange }: { id: string; manage: boolean; on
 }
 
 interface SettlementRow { id: string; controlNo: string; docDate: string; status: string; sourceFile: string | null; orders: number; grossSales: string; payout: string; filePayout: string }
-interface Settlement extends SettlementRow { sellerDiscounts: string; commission: string; transactionFee: string; shippingFee: string; affiliateFee: string; otherFees: string; adjustments: string; refunds: string; withholdingTax: string; netSales: string; totalFees: string; costOfSales?: string; counts: Record<string, number>; details: { orderId: string; kind: string; included: boolean; trackingNo?: string | null; amounts: Record<string, number> }[]; check: { computed: string; payout: string; notInBatch: string } }
+interface Settlement extends SettlementRow { sellerDiscounts: string; commission: string; transactionFee: string; shippingFee: string; affiliateFee: string; otherFees: string; adjustments: string; refunds: string; withholdingTax: string; netSales: string; totalFees: string; costOfSales?: string; counts: Record<string, number>; details: { orderId: string; kind: string; included: boolean; trackingNo?: string | null; amounts: Record<string, number>; expectedIncome?: number | null; edits?: unknown[] }[]; check: { computed: string; payout: string; notInBatch: string } }
 
 function PayoutsTab({ p, manage, initialOpen }: { p: P; manage: boolean; initialOpen: string | null }) {
   const pf = PLATFORMS.find((x) => x.key === p)!; const qc = useQueryClient();
@@ -205,6 +205,7 @@ function SettlementView({ id, manage, p }: { id: string; manage: boolean; p: P }
   const done = () => { void qc.invalidateQueries({ queryKey: ['ecom-settlement', id] }); void qc.invalidateQueries({ queryKey: ['ecom-settlements', p] }); };
   const submit = useMutation({ mutationFn: () => api.post(`/api/ecommerce/settlements/${id}/submit`), onSuccess: done });
   const del = useMutation({ mutationFn: () => api.delete(`/api/ecommerce/settlements/${id}`), onSuccess: done });
+  const [editing, setEditing] = useState<string | null>(null);
   const s = q.data; if (!s) return <p className="text-sm text-slate-500">Loading…</p>;
   const line = (label: string, v: string | number, strong = false, minus = false) => <tr className={strong ? 'border-t font-semibold' : ''}><td className="py-0.5">{label}</td><td className="text-right tabular-nums">{minus && Number(v) ? '− ' : ''}{peso(v)}</td></tr>;
   const ties = Math.abs(Number(s.check.computed) - Number(s.payout)) < 0.01;
@@ -238,11 +239,26 @@ function SettlementView({ id, manage, p }: { id: string; manage: boolean; p: P }
       </div>
     </div>
     <details><summary className="cursor-pointer text-sm font-semibold text-navy">Orders in the file ({s.details.length})</summary>
-      <Searchable><table className="mt-2 w-full text-xs [&_td]:px-2 [&_th]:px-2"><thead className="text-left text-slate-500"><tr><th>Order ID</th><th>What happens</th><th className="text-right">Gross</th><th className="text-right">Fees</th><th className="text-right">Refund</th><th className="text-right">Payout</th></tr></thead><tbody>{s.details.map((d) => {
+      <Searchable><table className="mt-2 w-full text-xs [&_td]:px-2 [&_th]:px-2"><thead className="text-left text-slate-500"><tr><th>Order ID</th><th>What happens</th><th className="text-right">Gross</th><th className="text-right">Fees</th><th className="text-right">Refund</th><th className="text-right">Payout</th><th className="text-right">Expected (waybill)</th><th /></tr></thead><tbody>{s.details.map((d) => {
         const a = d.amounts; const fees = a.commission + a.transactionFee + a.shippingFee + a.affiliateFee + a.otherFees - a.adjustments;
-        return <tr key={d.orderId} className={`border-t ${d.included ? '' : 'text-slate-400'}`}><td className="py-1 font-mono">{d.orderId}</td><td>{KIND[d.kind]}{d.kind === 'UNKNOWN' && d.included ? ' — booked, no stock' : d.kind === 'UNKNOWN' ? ' — skipped' : ''}</td><td className="text-right">{peso(a.grossSales)}</td><td className="text-right">{peso(fees)}</td><td className="text-right">{peso(a.refunds)}</td><td className="text-right">{peso(a.payout)}</td></tr>;
+        return <tr key={d.orderId} className={`border-t ${d.included ? '' : 'text-slate-400'}`}><td className="py-1 font-mono">{d.orderId}</td><td>{KIND[d.kind]}{d.kind === 'UNKNOWN' && d.included ? ' — booked, no stock' : d.kind === 'UNKNOWN' ? ' — skipped' : ''}</td><td className="text-right">{peso(a.grossSales)}</td><td className="text-right">{peso(fees)}</td><td className="text-right">{peso(a.refunds)}</td><td className="text-right">{peso(a.payout)}{d.edits?.length ? <div className="text-[10px] text-amber-700">edited</div> : null}</td><td className="text-right">{d.expectedIncome != null ? <span title="Order income worked out on the Waybill Report">{peso(d.expectedIncome)}{Math.abs(d.expectedIncome - a.payout) >= 0.01 && d.included && d.kind === 'SALE' ? <div className="text-[10px] text-amber-700">{(a.payout - d.expectedIncome > 0 ? '+' : '−') + peso(Math.abs(a.payout - d.expectedIncome))}</div> : null}</span> : '—'}</td><td>{manage && ['DRAFT', 'REJECTED'].includes(s.status) && d.included ? <button className="font-semibold text-brand underline" onClick={() => setEditing(d.orderId)}>Edit</button> : null}</td></tr>;
       })}</tbody></table></Searchable></details>
+    {editing && <EditPayoutOrder settlementId={id} order={s.details.find((d) => d.orderId === editing)!} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); done(); }} />}
   </div>;
+}
+
+/** Type over the figures the platform file gave for one order of a draft payout (owner request 2026-10-23). */
+function EditPayoutOrder({ settlementId, order, onClose, onSaved }: { settlementId: string; order: Settlement['details'][number]; onClose: () => void; onSaved: () => void }) {
+  const keys: [string, string][] = [['grossSales', 'Gross sales'], ['sellerDiscounts', 'Seller discounts & vouchers'], ['commission', 'Commission'], ['transactionFee', 'Transaction / payment fee'], ['shippingFee', 'Shipping fee'], ['affiliateFee', 'Affiliate commission'], ['otherFees', 'Other fees'], ['refunds', 'Refunds'], ['withholdingTax', 'Withholding tax']];
+  const [f, setF] = useState<Record<string, string>>(() => Object.fromEntries([...keys.map(([k]) => k), 'payout'].map((k) => [k, String(order.amounts[k] ?? 0)])));
+  const [typedPayout, setTypedPayout] = useState(false);
+  const save = useMutation({ mutationFn: () => api.patch(`/api/ecommerce/settlements/${settlementId}/orders/${encodeURIComponent(order.orderId)}`, Object.fromEntries(Object.entries(f).filter(([k]) => k !== 'payout' || typedPayout).map(([k, v]) => [k, Number(v)]))), onSuccess: onSaved });
+  return <Modal title={`Edit order ${order.orderId}`} onClose={onClose}>
+    <p className="mb-3 text-sm text-slate-600">Correct what the platform really took. Leave the payout alone and it follows your figures; type the payout to match the money received exactly.</p>
+    <div className="grid grid-cols-2 gap-3">{keys.map(([k, l]) => <Field key={k} label={l}><Input type="number" step="0.01" min={0} value={f[k]} onChange={(e) => setF({ ...f, [k]: e.target.value })} /></Field>)}<Field label="Payout received"><Input type="number" step="0.01" value={f.payout} onChange={(e) => { setTypedPayout(true); setF({ ...f, payout: e.target.value }); }} /></Field></div>
+    <ErrorBox error={save.error} />
+    <div className="mt-4 flex gap-2"><Button disabled={save.isPending} onClick={() => save.mutate()}>Save</Button><Button variant="outline" onClick={onClose}>Cancel</Button></div>
+  </Modal>;
 }
 
 interface ReturnRow { id: string; controlNo: string; platform: P; platformName: string; reason: string | null; notes: string | null; status: string; createdAt: string; receivedAt: string | null; writeoffId: string | null; lines: { productId: string; name?: string; qty: number; goodQty?: number; damagedQty?: number }[]; order: { orderId: string; trackingNo: string | null; status: string } | null }

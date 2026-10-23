@@ -1,13 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRef, useState } from 'react';
 import { api, peso, today } from '@/lib/api';
-import { Badge, Button, Card, Empty, ErrorBox, Field, Input, Select, Stat } from '@/components/ui/primitives';
+import { Badge, Button, Card, Modal, Empty, ErrorBox, Field, Input, Select, Stat } from '@/components/ui/primitives';
 import { Segmented } from '@/components/ui/widgets';
 import { Searchable } from '@/components/Searchable';
 
-interface Row { id: string; platform: string; platformName: string; orderId: string; trackingNo: string | null; qty: number; weightG: number | null; uploaded: string; product: { id: string; sku: string; name: string } | null; guessed: boolean; unitSrp: number | null; priceFrom: string | null; srp: number | null; commission: number | null; transactionFee: number | null; affiliateFee: number | null; shippingFee: number | null; fees: number | null; income: number | null }
+interface Row { id: string; platform: string; platformName: string; orderId: string; trackingNo: string | null; qty: number; weightG: number | null; uploaded: string; product: { id: string; sku: string; name: string } | null; guessed: boolean; unitSrp: number | null; priceFrom: string | null; srp: number | null; commission: number | null; transactionFee: number | null; affiliateFee: number | null; shippingFee: number | null; fees: number | null; income: number | null; otherFee: number | null; edited: boolean; rateUnitSrp: number | null; overrideNote: string | null; override: Ov | null }
+interface Ov { unitPrice: number | null; commission: number | null; transactionFee: number | null; affiliateFee: number | null; shippingFee: number | null; otherFee: number | null }
 interface Rates { commissionPct: number; transactionPct: number; affiliatePct: number; shippingPerOrder: number }
-interface Report { rows: Row[]; totals: { waybills: number; priced: number; unassigned: number; srp: number; fees: number; income: number; commission: number; transactionFee: number; affiliateFee: number; shippingFee: number }; byPlatform: { platform: string; name: string; waybills: number; priced: number; srp: number; fees: number; income: number }[]; rates: { platform: string; name: string; rates: Rates; actual: (Rates & { basedOn: number }) | null }[] }
+interface Report { rows: Row[]; totals: { otherFee: number; edited: number; waybills: number; priced: number; unassigned: number; srp: number; fees: number; income: number; commission: number; transactionFee: number; affiliateFee: number; shippingFee: number }; byPlatform: { platform: string; name: string; waybills: number; priced: number; srp: number; fees: number; income: number }[]; rates: { platform: string; name: string; rates: Rates; actual: (Rates & { basedOn: number }) | null }[] }
 interface Product { id: string; sku: string; name: string }
 const PLATFORMS: [string, string][] = [['', 'All'], ['TIKTOK', 'TikTok'], ['SHOPEE', 'Shopee'], ['LAZADA', 'Lazada']];
 const monthStart = () => `${today().slice(0, 7)}-01`;
@@ -45,12 +46,12 @@ export function EcomWaybillsPage() {
     </Card>
     {r && <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
       <Stat label="Waybills" value={r.totals.waybills} sub={r.totals.unassigned ? `${r.totals.unassigned} still need a product` : 'all have a product'} tone={r.totals.unassigned ? 'amber' : 'green'} />
-      <Stat label="SRP (total)" value={peso(r.totals.srp)} sub="platform price list" /><Stat label="Platform fees" value={peso(r.totals.fees)} sub={`commission ${peso(r.totals.commission)} · transaction ${peso(r.totals.transactionFee)} · affiliate ${peso(r.totals.affiliateFee)} · shipping ${peso(r.totals.shippingFee)}`} tone="amber" />
-      <Stat label="Total order income" value={peso(r.totals.income)} sub="SRP less fees" tone="green" /><Stat label="Fees as % of SRP" value={r.totals.srp ? `${((r.totals.fees / r.totals.srp) * 100).toFixed(2)}%` : '—'} />
+      <Stat label="SRP (total)" value={peso(r.totals.srp)} sub="platform price list" /><Stat label="Platform fees" value={peso(r.totals.fees)} sub={`commission ${peso(r.totals.commission)} · transaction ${peso(r.totals.transactionFee)} · affiliate ${peso(r.totals.affiliateFee)} · shipping ${peso(r.totals.shippingFee)}${r.totals.otherFee ? ` · other ${peso(r.totals.otherFee)}` : ''}`} tone="amber" />
+      <Stat label="Total order income" value={peso(r.totals.income)} sub={r.totals.edited ? `SRP less fees · ${r.totals.edited} order${r.totals.edited === 1 ? '' : 's'} edited by hand` : 'SRP less fees'} tone="green" /><Stat label="Fees as % of SRP" value={r.totals.srp ? `${((r.totals.fees / r.totals.srp) * 100).toFixed(2)}%` : '—'} />
     </div>}
     {r && r.byPlatform.length > 1 && <Card title="Per platform"><div className="overflow-x-auto"><div className="sticky-head"><table className="w-full text-sm"><thead className="text-left text-xs uppercase tracking-wide text-slate-500"><tr><th className="py-1">Platform</th><th className="num">Waybills</th><th className="num">With product</th><th className="num">SRP</th><th className="num">Fees</th><th className="num">Order income</th></tr></thead><tbody>{r.byPlatform.map((p) => <tr key={p.platform} className="border-t"><td className="py-1.5 font-medium">{p.name}</td><td className="num">{p.waybills}</td><td className="num">{p.priced}</td><td className="num">{peso(p.srp)}</td><td className="num">{peso(p.fees)}</td><td className="num font-semibold">{peso(p.income)}</td></tr>)}</tbody></table></div></div></Card>}
     <Card title="Waybills">
-      {q.isLoading ? <Empty>Loading…</Empty> : r?.rows.length ? <div className="overflow-x-auto"><Searchable><table className="w-full text-sm"><thead className="text-left text-xs uppercase tracking-wide text-slate-500"><tr><th className="py-1 pr-3">Platform</th><th className="pr-3">Order / tracking</th><th className="pr-3">Product</th><th className="pr-3">Qty</th><th className="num pr-3">SRP each</th><th className="num pr-3">SRP total</th><th className="num pr-3">Fees</th><th className="num pr-3">Order income</th><th /></tr></thead>
+      {q.isLoading ? <Empty>Loading…</Empty> : r?.rows.length ? <div className="overflow-x-auto"><Searchable><table className="w-full text-sm"><thead className="text-left text-xs uppercase tracking-wide text-slate-500"><tr><th className="py-1 pr-3">Platform</th><th className="pr-3">Order / tracking</th><th className="pr-3">Product</th><th className="pr-3">Qty</th><th className="num pr-3">SRP each</th><th className="num pr-3">SRP total</th><th className="num pr-3">Fees</th><th className="num pr-3">Order income</th><th /><th /></tr></thead>
         <tbody>{r.rows.map((x) => <WaybillRow key={x.id} row={x} onChanged={refresh} />)}</tbody></table></Searchable></div> : <Empty>No waybills yet: upload the labels above.</Empty>}
     </Card>
     {r && <Card title="Platform fee rates used"><p className="mb-3 text-sm text-slate-600">Fees are worked out at these rates on the SRP. “Use actual” copies what the platform really charged, from the payout files Accounting posted.</p>
@@ -59,7 +60,7 @@ export function EcomWaybillsPage() {
 }
 
 function WaybillRow({ row: x, onChanged }: { row: Row; onChanged: () => void }) {
-  const [edit, setEdit] = useState(false); const [search, setSearch] = useState('');
+  const [edit, setEdit] = useState(false); const [search, setSearch] = useState(''); const [price, setPrice] = useState(false);
   const prods = useQuery({ queryKey: ['wb-products', search], queryFn: () => api.get<Product[]>(`/api/products?search=${encodeURIComponent(search)}&take=8&ecomFirst=1`), enabled: edit && search.length >= 2 });
   const set = useMutation({ mutationFn: (b: { productId?: string | null; qty?: number }) => api.patch(`/api/ecommerce-waybills/${x.id}`, b), onSuccess: () => { setEdit(false); setSearch(''); onChanged(); } });
   const del = useMutation({ mutationFn: () => api.delete(`/api/ecommerce-waybills/${x.id}`), onSuccess: onChanged });
@@ -70,7 +71,8 @@ function WaybillRow({ row: x, onChanged }: { row: Row; onChanged: () => void }) 
       {prods.data && search.length >= 2 && <ul className="mt-1 max-h-48 overflow-auto rounded-2xl bg-white shadow-card">{prods.data.map((p) => <li key={p.id}><button className="w-full px-3 py-2 text-left text-sm hover:bg-slate-50" onClick={() => set.mutate({ productId: p.id })}>{p.name}<span className="ml-1 text-xs text-slate-500">{p.sku}</span></button></li>)}{!prods.data.length && <li className="px-3 py-2 text-xs text-slate-500">No product found.</li>}</ul>}</div>
       : <div><button className="text-left font-medium hover:underline" onClick={() => setEdit(true)} title="Change the product">{x.product.name}</button>{x.guessed && <div className="flex items-center gap-1"><Badge tone="amber">from the weight: confirm</Badge><button className="text-xs text-brand underline" onClick={() => set.mutate({ productId: x.product!.id })}>Confirm</button></div>}{x.priceFrom === 'RETAIL' && <div className="text-xs text-amber-700">no {x.platformName} price set: SRP used</div>}</div>}</td>
     <td className="pr-3"><Input className="w-16" type="number" min={1} value={x.qty} onChange={(e) => { const n = Number(e.target.value); if (n >= 1) set.mutate({ qty: n }); }} aria-label="Quantity" /></td>
-    <td className="num pr-3">{x.unitSrp != null ? peso(x.unitSrp) : '—'}</td><td className="num pr-3">{x.srp != null ? peso(x.srp) : '—'}</td><td className="num pr-3">{x.fees != null ? peso(x.fees) : '—'}</td><td className="num pr-3 font-semibold">{x.income != null ? peso(x.income) : '—'}</td>
+    <td className="num pr-3">{x.unitSrp != null ? peso(x.unitSrp) : '—'}</td><td className="num pr-3">{x.srp != null ? peso(x.srp) : '—'}</td><td className="num pr-3">{x.fees != null ? peso(x.fees) : '—'}</td><td className="num pr-3 font-semibold">{x.income != null ? peso(x.income) : '—'}{x.edited && <div className="text-xs font-normal text-amber-700">edited by hand</div>}</td>
+    <td className="pr-2">{x.srp != null || x.product ? <button className="whitespace-nowrap text-xs font-semibold text-brand underline" onClick={() => setPrice(true)}>Edit price &amp; fees</button> : null}{price && <PriceFeesModal row={x} onClose={() => setPrice(false)} onSaved={() => { setPrice(false); onChanged(); }} />}</td>
     <td><button className="text-xs text-slate-400 hover:text-brand" onClick={() => { if (window.confirm('Remove this waybill from the report?')) del.mutate(); }} aria-label="Remove">✕</button></td></tr>;
 }
 
@@ -85,4 +87,27 @@ function RatesForm({ p, onSaved }: { p: Report['rates'][number]; onSaved: () => 
     <div className="mt-2 flex flex-wrap gap-2"><Button size="sm" disabled={save.isPending} onClick={() => save.mutate()}>Save rates</Button>{p.actual && <Button size="sm" variant="outline" onClick={() => setF({ commissionPct: String(p.actual!.commissionPct), transactionPct: String(p.actual!.transactionPct), affiliatePct: String(p.actual!.affiliatePct), shippingPerOrder: String(p.actual!.shippingPerOrder) })}>Use actual ({p.actual.basedOn} paid orders)</Button>}</div>
     <ErrorBox error={save.error} />
   </div>;
+}
+
+/** Type over the SRP and each fee of one order when the platform changed something (owner request 2026-10-23); a blank box uses the price list / platform rate. */
+function PriceFeesModal({ row: x, onClose, onSaved }: { row: Row; onClose: () => void; onSaved: () => void }) {
+  const o = x.override;
+  const [f, setF] = useState({ unitPrice: o?.unitPrice != null ? String(o.unitPrice) : '', commission: o?.commission != null ? String(o.commission) : '', transactionFee: o?.transactionFee != null ? String(o.transactionFee) : '', affiliateFee: o?.affiliateFee != null ? String(o.affiliateFee) : '', shippingFee: o?.shippingFee != null ? String(o.shippingFee) : '', otherFee: o?.otherFee != null ? String(o.otherFee) : '' });
+  const [note, setNote] = useState(x.overrideNote ?? '');
+  const num = (v: string) => (v.trim() === '' ? null : Number(v));
+  const body = () => ({ override: { unitPrice: num(f.unitPrice), commission: num(f.commission), transactionFee: num(f.transactionFee), affiliateFee: num(f.affiliateFee), shippingFee: num(f.shippingFee), otherFee: num(f.otherFee) }, overrideNote: note || null });
+  const save = useMutation({ mutationFn: () => api.patch(`/api/ecommerce-waybills/${x.id}`, body()), onSuccess: onSaved });
+  const reset = useMutation({ mutationFn: () => api.patch(`/api/ecommerce-waybills/${x.id}`, { override: null }), onSuccess: onSaved });
+  const qty = x.qty; const unit = num(f.unitPrice) ?? x.rateUnitSrp; const srp = unit != null ? Math.round(unit * qty * 100) / 100 : null;
+  const set = (k: keyof typeof f, v: string) => setF({ ...f, [k]: v });
+  const fields: [keyof typeof f, string, number | null][] = [['unitPrice', `SRP each (list ${x.rateUnitSrp != null ? peso(x.rateUnitSrp) : 'none'})`, x.rateUnitSrp], ['commission', 'Commission ₱', x.commission], ['transactionFee', 'Transaction fee ₱', x.transactionFee], ['affiliateFee', 'Affiliate ₱', x.affiliateFee], ['shippingFee', 'Shipping ₱', x.shippingFee], ['otherFee', 'Voucher / other deduction ₱', x.otherFee]];
+  const preview = srp != null ? Math.round((srp - (['commission', 'transactionFee', 'affiliateFee', 'shippingFee', 'otherFee'] as const).reduce((t, k) => t + (num(f[k]) ?? (o?.[k] != null ? 0 : x[k] ?? 0)), 0)) * 100) / 100 : null;
+  return <Modal title={`Edit price & fees · ${x.orderId}`} onClose={onClose}>
+    <p className="mb-3 text-sm text-slate-600">Type what really applies to this order. A blank box uses the price list or the platform rate. Quantity {qty}.</p>
+    <div className="grid grid-cols-2 gap-3">{fields.map(([k, l, cur]) => <Field key={k} label={l}><Input type="number" step="0.01" min={0} placeholder={cur != null ? String(cur) : ''} value={f[k]} onChange={(e) => set(k, e.target.value)} /></Field>)}</div>
+    <Field label="Note (why)"><Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. platform raised the commission to 8%" /></Field>
+    <div className="mt-2 text-sm text-slate-600">SRP total <b>{srp != null ? peso(srp) : '—'}</b> · order income about <b>{preview != null ? peso(preview) : '—'}</b></div>
+    <ErrorBox error={save.error ?? reset.error} />
+    <div className="mt-4 flex flex-wrap gap-2"><Button disabled={save.isPending} onClick={() => save.mutate()}>Save</Button>{x.edited && <Button variant="outline" disabled={reset.isPending} onClick={() => reset.mutate()}>Back to the price list and rates</Button>}<Button variant="outline" onClick={onClose}>Cancel</Button></div>
+  </Modal>;
 }

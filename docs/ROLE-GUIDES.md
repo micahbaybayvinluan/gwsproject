@@ -23,6 +23,7 @@ You run one branch: sales, expenses, stock received and sent, the weekly count, 
 4. Payment details:
    - **Online (bank / GCash):** choose the account that received the money (for example **Gcash (GWS)**) and upload the screenshot.
    - **Credit card:** choose the account, then type MID, slip no., approval code and batch no., and upload the slip.
+   - **Amount charged on the card:** starts as the total; if the terminal charged another amount type it and the reason (surcharge, rounding).
    - **AR / PDC (credit):** choose the customer and the due date; add the cheque details if any.
    - **Delivery:** choose the rider and type the delivery fee.
 5. **Wheysted member:** if the customer is a member, scan their QR card (or type the member number, name or phone) under **Wheysted member**: the sale goes on their account and their details fill in. A new customer who wants to join: **+ New member** (name and mobile number). The member sees the purchase on their own member page.
@@ -412,6 +413,8 @@ You keep the books.
    1. Open the voucher and press **Edit entry**.
    2. Change the lines: they must balance, no negatives, and the period must be open.
    3. Give the reason. The maker, the source document's maker and the Owner are notified, and the change is logged.
+- **Card Remittances:** card sales wait here until the bank credits them. Tick them, choose the bank account, type the **net** the bank credited; the bank charge is worked out and shared per sale. Send it to the Accounting Head, who approves it and it posts Bank + MDR / AR – Credit Card.
+   - **Correct a card amount** on the sale page (Credit card amount) until the bank has cleared it.
 3. **Trial Balance**, **Periods & Opening** (request a period lock; the Owner approves) and **Inventory Cost**.
 4. **AR payments** entered by branches wait for you or the Accounting Associate in **My Approvals**. Each one shows the customer, the amount, how it was paid, the **account it was deposited to**, the invoices and the **proof of payment** (click the picture to enlarge it).
    - **Approve** when the money is in the account.
@@ -453,6 +456,7 @@ You accept **pull-outs endorsed as an expense** in My Approvals (booked at cost)
 1. **AR payments** entered by branches: approve or reject them in My Approvals.
 2. **Agent incentives:** approve them in My Approvals, and **Tag as released** on Agent Incentives once paid (mode, account, reference, date).
 3. **Opening AR (credit from before GWS-ERP):** AR & Collections → Opening AR → **+ Enter opening AR** for any branch (branch, customer, DR / SI, invoice date, due date, balance, PDC if any) → **Send for the Owner's approval**. Once approved it shows in the branch's AR.
+- **Card Remittances:** you enter the bank credit (tick the card sales, choose the bank account, type the **net amount** the bank credited); the bank charge is worked out and shared per sale; the Accounting Head approves. You can also correct a card amount on the sale page until the bank has cleared it.
 4. **Journal Vouchers:** view entries and correct them with **Edit entry** (balanced, no negatives, open period). The people involved and the Owner are notified.
 5. **Bank & Office:** record bank transactions and see balance-sheet account balances.
 6. **Payroll:** you see totals only. Record government contribution payments.
@@ -585,6 +589,8 @@ You see and can do everything. You are the final approver.
 Upload the platform's **To ship** export (no seller SKU needed): you get one pick list, product suggestions for new items, and can send it to the In-Charge right away; then upload the waybill PDFs. When you search for a product on the E-commerce pages, the products that have a **TikTok, Shopee or Lazada price come first**; those with no platform price are listed at the bottom.
 
 You run the online shops: **TikTok Shop, Shopee and Lazada**, each on its own tab. E-commerce has no stock of its own: every item comes from the Warehouse, and the Warehouse In-Charge approves each pull-out. You see selling prices and platform fees, never cost.
+
+**When a platform changes a price or a fee:** Waybill Report → **Edit price & fees** on that order (SRP each, commission, transaction, affiliate, shipping, voucher / other); the order income follows. In E-commerce → Payouts you can **Edit** an order of a draft payout (any fee, or the payout received) before sending it to Accounting.
 
 **Every morning: orders to ship → pull-out** (menu: E-commerce → choose the platform → 1. Orders → pull-out)
 1. In the platform's seller centre, open the orders **to ship** and **Export** them (Excel or CSV). A waybill list export works too.

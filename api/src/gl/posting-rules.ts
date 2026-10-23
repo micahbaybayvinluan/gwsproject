@@ -69,6 +69,8 @@ export interface SaleEvent {
   locationId: string; channel: string; channelSub?: string | null; paymentMode: 'CASH' | 'ONLINE' | 'CREDIT_CARD' | 'AR_PDC'; paymentAccountId?: string | null;
   counterparty: { type: string; id?: string | null; locationId?: string | null } | null; drSiNo: string;
   productTotal: Decimal.Value; deliveryFee: Decimal.Value; shippingFee: Decimal.Value; grandTotal: Decimal.Value;
+  /** credit card: what the terminal really charged when it is not the total (surcharge / rounding): the difference goes to Other Income - Card Surcharge / Rounding */
+  cardAmount?: Decimal.Value | null;
   costLines: CostLine[];
 }
 export function r3r4Sale(r: AccountResolver, e: SaleEvent): Entry[] {
@@ -79,7 +81,10 @@ export function r3r4Sale(r: AccountResolver, e: SaleEvent): Entry[] {
   else if (e.paymentMode === 'CREDIT_CARD') debitAcct = r.branch('AR_CREDIT_CARD', e.locationId);
   else if (e.paymentMode === 'ONLINE') { if (!e.paymentAccountId) throw new MissingAccountError('payment account for ONLINE sale'); debitAcct = e.paymentAccountId; }
   else debitAcct = r.ar(e.counterparty, e.locationId);
-  lines.push(dr(debitAcct, total));
+  const charged = e.paymentMode === 'CREDIT_CARD' && e.cardAmount != null ? D(e.cardAmount) : total;
+  lines.push(dr(debitAcct, charged));
+  const cardDiff = round2(charged.minus(total));
+  if (!cardDiff.isZero()) lines.push(cardDiff.isPositive() ? cr(r.global('OTHER_INCOME_CARD_ADJUSTMENT'), cardDiff, 'Card surcharge / rounding') : dr(r.global('OTHER_INCOME_CARD_ADJUSTMENT'), cardDiff.abs(), 'Card discount / rounding'));
   lines.push(cr(r.branch(salesTemplateFor(e.channel, e.channelSub, e.paymentMode), e.locationId), e.productTotal));
   if (!D(e.deliveryFee).isZero()) lines.push(cr(r.branch('SALES_DELIVERY_FEE', e.locationId), e.deliveryFee));
   if (!D(e.shippingFee).isZero()) lines.push(cr(r.branch('SALES_SHIPPING_FEE', e.locationId), e.shippingFee));

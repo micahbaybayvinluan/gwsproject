@@ -60,7 +60,7 @@ Each section below starts with a hidden line that says which roles it is for. Th
 ## Online, card, delivery and shipping sales
 <!-- for: sale.create -->
 - **Online payment** (GCash, bank transfer): pick the receiving account and upload a photo or screenshot of the proof of payment. The sale will not save without them.
-- **Credit card:** fill in the MID, slip number, approval code and batch number from the card terminal slip.
+- **Credit card:** fill in the MID, slip number, approval code and batch number from the card terminal slip. **Amount charged on the card:** it starts as the total of the sale. If the terminal charged a different amount (a card surcharge, rounding), type it and give the reason; the difference is booked by itself to *Other Income – Card Surcharge / Rounding* and shows on the Daily Sales Report as *Card surcharge / rounding*.
 - **Delivery:** pick the rider and type the delivery fee and rider incentive.
 - **Shipping / marketplace:** type the shipping fee charged, the shipping expense and marketplace charges.
 
@@ -716,6 +716,18 @@ On **Daily Close & Deposit** the coloured days on the calendar (and the boxes be
 ## E-commerce margin analysis and waybill report
 <!-- for: ecom.analysis, ecom.waybill -->
 **Waybill Report** (E-comm Associate, Head Auditor, Owner): upload the TikTok, Shopee or Lazada shipping labels (PDF). Each label gives the order, tracking number, quantity and weight; choose the product once (the same platform and weight are filled in next time, to confirm). The report shows the SRP from the platform price list, the platform fees at the rates you set (or copy from posted payouts) and the total order income. **E-com Margin Analysis** (Owner): each platform's fees, ads and cost of goods, the margin against the target and the price that keeps it; add ad expenses at the bottom.
+
+## Editable online-platform income (SRP and fees per order)
+<!-- for: ecom.waybill, ecom.manage -->
+- **Waybill Report → Edit price & fees** (E-comm Associate, Head Auditor, Owner): when a platform changes a price or a fee for one order, type the **SRP each**, the **commission**, **transaction fee**, **affiliate**, **shipping** and a **voucher / other deduction** for that order, with a short note. A blank box still uses the price list or the platform rate. The order income, the totals, the per-platform cards and the Excel report follow your figures and the row says *edited by hand*. **Back to the price list and rates** removes the edit. Every change is logged with the old and new values.
+- **Payout files (E-commerce → Payouts):** while a payout is still a **draft** (or was rejected), press **Edit** on an order to correct the gross, discounts, each fee, refunds, withholding tax or the **payout received**. Leave the payout alone and it follows your figures; type the payout and the difference goes to *other fees and adjustments*, so the posted entry always equals the money received. Each order also shows the **expected** income of the Waybill Report and the difference, so a changed fee is spotted. A posted payout cannot be edited.
+
+## Credit card: the exact amount and the bank remittance
+<!-- for: card.remit, sale.card.amount, sale.create -->
+- **The amount charged on the card** can differ from the total of the sale (see *New Sale*). Accounting, the Head Auditor and the Owner can correct it later on the sale page (**Credit card amount → Correct the card amount**) while the card sale is not yet cleared by the bank: the sale entry is reversed and posted again, and the branch is told.
+- **Card Remittances** (Accounting; menu Accounting → Card Remittances) shows the **card sales waiting for the bank**, oldest first, with their MID, slip, approval and batch. When the bank credits our account: tick the card sales the credit is for, choose the **bank account** and the date, and type the **net amount that reached the bank** (from the bank statement). The system works out the **bank charge = gross − net** (and the % it equals) and shares it among the sales in proportion to their amount; you may type the fee of a particular sale. Attach the bank statement if you wish, press **Save the remittance**, then **Send to the Accounting Head**.
+- The **Accounting Head approves** (the Owner may too). It then posts **Dr Bank (net) + Dr MDR – Credit Card (fee) / Cr AR – Credit Card (gross, per branch)**; the sales are marked cleared and cannot be remitted twice. A rejected or draft remittance can be deleted: its sales return to the waiting list.
+- The Accounting dashboard shows **Card sales waiting for the bank** (count, amount, how many are older than 5 days).
 
 ## Selling to a franchise: price, plastic and shipping
 <!-- for: sale.create, sale.create.warehouse, franchise.ar.view, franchise.ar.own, franchise.shipping.fill -->

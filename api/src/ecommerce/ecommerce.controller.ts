@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Post, Query, Res, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
 import { z } from 'zod';
@@ -10,6 +10,8 @@ import type { SessionUser } from '../common/request-context';
 type F = { buffer: Buffer; originalname: string };
 const Up = () => UseInterceptors(FileInterceptor('file', { limits: { fileSize: 25 * 1024 * 1024 } }));
 const SkuMap = z.object({ platformSku: z.string().min(1), productId: z.string().uuid() });
+const Amt = z.number().min(-999999999).max(999999999).optional();
+const SettlementEdit = z.object({ grossSales: Amt, sellerDiscounts: Amt, commission: Amt, transactionFee: Amt, shippingFee: Amt, affiliateFee: Amt, otherFees: Amt, refunds: Amt, withholdingTax: Amt, payout: Amt });
 const Reason = z.object({ reason: z.string().min(1) });
 const ReturnIn = z.object({ ref: z.string().min(1), reason: z.enum(['FAILED_DELIVERY', 'BUYER_RETURN', 'OTHER']).optional(), notes: z.string().optional(), lines: z.array(z.object({ productId: z.string().uuid(), qty: z.number().int().positive() })).optional() });
 const Receive = z.object({ lines: z.array(z.object({ productId: z.string().uuid(), goodQty: z.number().int().min(0), damagedQty: z.number().int().min(0) })) });
@@ -36,6 +38,7 @@ export class EcommerceController {
 
   // payouts
   @Get('settlements/:id') @RequireAnyPermission('ecom.manage', 'ecom.view') settlement(@Param('id') id: string, @CurrentUser() u: SessionUser) { return this.svc.settlement(id, u); }
+  @Patch('settlements/:id/orders/:orderId') @RequirePermission('ecom.manage') editSettlementOrder(@Param('id') id: string, @Param('orderId') orderId: string, @Body(Z(SettlementEdit)) dto: z.infer<typeof SettlementEdit>, @CurrentUser() u: SessionUser) { return this.svc.editSettlementOrder(id, orderId, dto, u); }
   @Post('settlements/:id/submit') @RequirePermission('ecom.manage') @Audited('EcomSettlement', 'SUBMIT') submitSettlement(@Param('id') id: string, @CurrentUser() u: SessionUser) { return this.svc.submitSettlement(id, u); }
   @Delete('settlements/:id') @RequirePermission('ecom.manage') deleteSettlement(@Param('id') id: string) { return this.svc.deleteSettlement(id); }
 

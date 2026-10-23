@@ -20,6 +20,9 @@ export const SETTING_DEFAULTS: Record<string, unknown> = {
   // customer re-order follow-ups (owner request 2026-09-27): messages the Owner can edit; {customer} {product} {store} {storePhone} are filled in
   // e-commerce: shipped orders neither paid nor returned after this many days are overdue; the warehouse the pull-outs come from
   'ecom.overdue_days': 30,
+  // card sales cleared by the bank (owner request 2026-10-23): the usual merchant discount rate is only a suggestion; a card batch waiting longer than this many days is flagged
+  'card.mdr_pct': 3.5,
+  'card.remit_alert_days': 5,
   // the margin the Owner wants to keep on e-commerce sales after platform fees, ads and cost of goods
   'ecom.target_margin_pct': 20,
   // company letterhead as on the company memo (the Owner uploads the logo in Settings)

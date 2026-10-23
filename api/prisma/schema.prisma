@@ -717,6 +717,12 @@ model SalesDoc {
   cardSlipNo                 String?      @map("card_slip_no")
   cardApprovalCode           String?      @map("card_approval_code")
   cardBatchNo                String?      @map("card_batch_no")
+  /// amount really charged on the terminal when it is not the total (surcharge / rounding): owner request 2026-10-23
+  cardAmount                 Decimal?     @map("card_amount") @db.Decimal(14, 2)
+  cardAdjustReason           String?      @map("card_adjust_reason")
+  /// the card remittance (bank credit) that cleared this sale, and its share of the bank's fee
+  cardRemittanceId           String?      @map("card_remittance_id")
+  cardFee                    Decimal?     @map("card_fee") @db.Decimal(14, 2)
   /// stickers given on this sale for the 6-Pack Card (owner request 2026-09-30)
   sixPackStickers            Int          @default(0) @map("six_pack_stickers")
   deliveryFee                Decimal      @default(0) @map("delivery_fee") @db.Decimal(14, 2)
@@ -2560,19 +2566,26 @@ model SixPackRedemption {
 
 /// One shipping label (waybill) uploaded by the E-comm Associate, Head Auditor or Owner: the report works out SRP, fees and order income from it.
 model EcomWaybill {
-  id         String    @id @default(uuid())
-  platform   String // TIKTOK | SHOPEE | LAZADA | UNKNOWN
-  orderId    String    @map("order_id")
-  trackingNo String?   @map("tracking_no")
-  qty        Int       @default(1)
-  weightG    Int?      @map("weight_g")
-  rtsDate    DateTime? @map("rts_date") @db.Date
-  productId  String?   @map("product_id")
+  id                String    @id @default(uuid())
+  platform          String // TIKTOK | SHOPEE | LAZADA | UNKNOWN
+  orderId           String    @map("order_id")
+  trackingNo        String?   @map("tracking_no")
+  qty               Int       @default(1)
+  weightG           Int?      @map("weight_g")
+  rtsDate           DateTime? @map("rts_date") @db.Date
+  productId         String?   @map("product_id")
   /// the product was filled from what was chosen before for the same weight: confirm it
-  guessed    Boolean   @default(false)
-  sourceFile String?   @map("source_file")
-  uploadedBy String?   @map("uploaded_by")
-  createdAt  DateTime  @default(now()) @map("created_at")
+  guessed           Boolean   @default(false)
+  sourceFile        String?   @map("source_file")
+  uploadedBy        String?   @map("uploaded_by")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  /// typed over the price list / fee rates when the platform changed something (owner request 2026-10-23)
+  unitPriceOverride Decimal?  @map("unit_price_override") @db.Decimal(14, 2)
+  /// { commission, transactionFee, affiliateFee, shippingFee, otherFee }: only the fields typed are overridden
+  feeOverrides      Json?     @map("fee_overrides")
+  overrideNote      String?   @map("override_note")
+  overriddenBy      String?   @map("overridden_by")
+  overriddenAt      DateTime? @map("overridden_at")
 
   @@unique([platform, orderId])
   @@index([createdAt])
@@ -3348,4 +3361,28 @@ model FranchiseDrReceipt {
 
   @@index([franchiseLocationId, status])
   @@map("franchise_dr_receipts")
+}
+
+/// Card sales cleared by the bank: Accounting types the NET credited, the fee is gross - net, split per sale (owner request 2026-10-23).
+model CardRemittance {
+  id                String    @id @default(uuid())
+  controlNo         String    @unique @map("control_no")
+  bankAccountId     String    @map("bank_account_id")
+  receivedOn        DateTime  @map("received_on") @db.Date
+  batchRef          String?   @map("batch_ref")
+  notes             String?
+  grossAmount       Decimal   @map("gross_amount") @db.Decimal(14, 2)
+  feeAmount         Decimal   @map("fee_amount") @db.Decimal(14, 2)
+  netAmount         Decimal   @map("net_amount") @db.Decimal(14, 2)
+  proofAttachmentId String?   @map("proof_attachment_id")
+  /// [{ salesDocId, drSiNo, locationId, gross, fee }]
+  lines             Json
+  status            String    @default("DRAFT") // DRAFT | SUBMITTED | POSTED | REJECTED
+  approvalRequestId String?   @map("approval_request_id")
+  postedAt          DateTime? @map("posted_at")
+  createdBy         String?   @map("created_by")
+  createdAt         DateTime  @default(now()) @map("created_at")
+
+  @@index([status])
+  @@map("card_remittances")
 }

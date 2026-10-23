@@ -14,6 +14,7 @@ import { LoginPage } from './pages/Login';
 import { DashboardPage } from './pages/Dashboard';
 import { ApprovalsPage } from './pages/Approvals';
 import { NotificationsPage } from './pages/Notifications';
+import { CardRemittancesPage } from './pages/CardRemittances';
 import { NewSalePage, SaleDetailPage, SalesListPage } from './pages/Sales';
 import { ArPage } from './pages/Ar';
 import { ExpensesPage } from './pages/Expenses';
@@ -138,6 +139,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
               <Route path="/replacements" element={<ReplacementsPage />} />
               <Route path="/replacements/:id" element={<ReplacementDetailPage />} />
               <Route path="/ecom-waybills" element={<EcomWaybillsPage />} />
+              <Route path="/card-remittances" element={<CardRemittancesPage />} />
               <Route path="/price-changes" element={<PriceChangesPage />} />
               <Route path="/price-changes/:id" element={<PriceChangesPage />} />
               <Route path="/suppliers" element={<SuppliersPage />} />

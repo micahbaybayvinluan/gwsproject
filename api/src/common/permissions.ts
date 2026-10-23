@@ -38,6 +38,7 @@ export const APPROVAL_TYPES = [
   'COST_EDIT',
   'ECOM_PULLOUT',
   'ECOM_SETTLEMENT',
+  'CARD_REMITTANCE',
   'TRANSFER_DIFF_REVIEW',
   'TRANSFER_DIFF_SENDER',
   'TRANSFER_DIFF_ADMIN',
@@ -67,7 +68,7 @@ const BASE_KEYS = [
   'location.view.all', 'location.view.own', 'location.edit',
   'receiving.create', 'receiving.approve_cost', 'warehouse.edit_others',
   'transfer.create', 'transfer.confirm', 'transfer.approve.internal', 'transfer.approve.franchise', 'transfer.resolve_discrepancy',
-  'sale.create', 'sale.edit.sameday', 'sale.edit.postclose', 'sale.special_price.approve', 'sale.void',
+  'sale.create', 'sale.edit.sameday', 'sale.edit.postclose', 'sale.special_price.approve', 'sale.void', 'sale.card.amount', 'card.remit',
   'ar.view', 'ar.collect', 'ar.approve', 'ar.opening', 'stock.flavor.set', 'incentive.prepare', 'incentive.view', 'incentive.hr', 'incentive.release',
   'expense.create.branch', 'expense.create.main', 'expense.view',
   'count.create', 'discrepancy.view', 'discrepancy.resolve', 'discrepancy.explain',
@@ -204,7 +205,7 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
     permissions: ['franchise.dr.view', 'fo.view', 'promo.issue', 'po.manage', 'po.view', 'member.view', 'outlet.view.all', 'approval.act.REPLACEMENT_TICKET', 'approval.act.REPLACEMENT_PAYMENT', 'approval.act.SUPPLIER_RETURN', 'replacement.create', 'replacement.view', 'approval.act.MARKETING_PULLOUT', 'marketing.summary', 'sixpack.override', 'ecom.waybill', 'approval.act.CASH_DEPOSIT_AUDIT', 'franchise.ar.view', 'memo.create', 'sixpack.view.all', 'stock.flavor.set', 
       ...READ_ALL, ...COST_BUNDLE, 'product.edit', 'product.create', 'price.edit', 'cost.edit', 'supplier.edit',
       'receiving.create', 'receiving.approve_cost', 'transfer.create', 'transfer.confirm', 'transfer.approve.internal', 'transfer.resolve_discrepancy',
-      'sale.create', 'sale.edit.sameday', 'sale.edit.postclose', 'sale.void', 'ar.collect', 'expense.create.branch',
+      'sale.card.amount', 'sale.create', 'sale.edit.sameday', 'sale.edit.postclose', 'sale.void', 'ar.collect', 'expense.create.branch',
       'count.create', 'discrepancy.resolve', 'writeoff.create', 'writeoff.approve', 'consignment.manage', 'gl.view', 'audit_log.view',
       'cashfund.view.all', 'cashfund.check', 'inspection.view', 'inspection.create', 'charge.assign',
       ...approvals('COST_ON_RECEIVING', 'TRANSFER_INTERNAL', 'POST_CLOSE_EDIT', 'WRITEOFF', 'DISCREPANCY_RESOLUTION', 'EDIT_REQUEST', 'COUNT_REVISION', 'DISCREPANCY_EXPLANATION', 'AUDIT_REVISION', 'CASH_DEPOSIT_EXTENSION', 'CONSIGNMENT_CHECK_BRANCH', 'COST_EDIT', 'TRANSFER_DIFF_REVIEW'),
@@ -283,14 +284,14 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
     permissions: ['franchise.dr.view', 'po.view', 'replacement.view', 'approval.act.PULLOUT_EXPENSE', 'marketing.summary', 'approval.act.CASH_DEPOSIT_ACCOUNTING', 'franchise.ar.view', 'franchise.ar.pay', 'sixpack.view.all', 
       ...READ_ALL, ...COST_BUNDLE, ...ACCOUNTING_BASE, 'gl.period.lock', 'gl.beginning_balance',
       'payroll.view.summary', 'payroll.view.detail', 'payroll.close', 'expense.view', 'cashfund.view.all', 'cashfund.manage', 'contribution.remit',
-      'ar.collect', 'ar.approve', 'ar.opening', 'incentive.view', 'incentive.release', ...approvals('AR_PAYMENT', 'ECOM_SETTLEMENT', 'AGENT_INCENTIVE'), 'gl.voucher.edit', 'bank.entry', 'bs.accounts.view', 'ecom.view',
+      'ar.collect', 'ar.approve', 'ar.opening', 'incentive.view', 'incentive.release', ...approvals('AR_PAYMENT', 'ECOM_SETTLEMENT', 'CARD_REMITTANCE', 'AGENT_INCENTIVE'), 'card.remit', 'sale.card.amount', 'gl.voucher.edit', 'bank.entry', 'bs.accounts.view', 'ecom.view',
     ],
   },
   {
     key: 'ACCOUNTING_ASSOCIATE',
     name: 'Accounting Associate',
     description: 'Ledger, vouchers, main expenses. Payroll totals only.',
-    permissions: ['franchise.dr.view', 'replacement.view', 'approval.act.PULLOUT_EXPENSE', 'marketing.summary', 'approval.act.CASH_DEPOSIT_ACCOUNTING', 'franchise.ar.view', 'franchise.ar.pay', 'sixpack.view.all', ...READ_ALL, ...COST_BUNDLE, ...ACCOUNTING_BASE, 'payroll.view.summary', 'cashfund.view.all', 'ar.collect', 'ar.approve', 'ar.opening', 'incentive.view', 'incentive.release', ...approvals('AGENT_INCENTIVE'), ...approvals('AR_PAYMENT'), 'gl.voucher.edit', 'bank.entry', 'bs.accounts.view', 'ecom.view'],
+    permissions: ['franchise.dr.view', 'replacement.view', 'approval.act.PULLOUT_EXPENSE', 'marketing.summary', 'approval.act.CASH_DEPOSIT_ACCOUNTING', 'franchise.ar.view', 'franchise.ar.pay', 'sixpack.view.all', ...READ_ALL, ...COST_BUNDLE, ...ACCOUNTING_BASE, 'card.remit', 'sale.card.amount', 'payroll.view.summary', 'cashfund.view.all', 'ar.collect', 'ar.approve', 'ar.opening', 'incentive.view', 'incentive.release', ...approvals('AGENT_INCENTIVE'), ...approvals('AR_PAYMENT'), 'gl.voucher.edit', 'bank.entry', 'bs.accounts.view', 'ecom.view'],
   },
   {
     key: 'HR_STAFF',
@@ -400,6 +401,8 @@ export const APPROVAL_ROUTING: Record<ApprovalType, { roles: RoleKey[]; anyOf?: 
   ECOM_PULLOUT: { roles: ['WAREHOUSE_IN_CHARGE'] },
   /** E-commerce payout (settlement) file: the Accounting Head checks the fees and payout before the sale and fees are posted. */
   ECOM_SETTLEMENT: { roles: ['ACCOUNTING_HEAD'] },
+  /** Card sales cleared by the bank (net received, fee split per sale): the Accounting Head approves before it posts. */
+  CARD_REMITTANCE: { roles: ['ACCOUNTING_HEAD'] },
   /** Received quantity differs from the transfer form: the Head Auditor reviews first. */
   TRANSFER_DIFF_REVIEW: { roles: ['HEAD_AUDITOR'] },
   /** Then the sending branch confirms (any one of its staff) within 2 days. */

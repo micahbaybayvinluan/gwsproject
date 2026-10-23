@@ -142,8 +142,8 @@ async function main() {
   // Demo cash funds (₱5,000) at the company branches and the warehouse store — Admin / Accounting Head can change or add funds
   for (const code of ['WESTAVE', 'CSR', 'IMUS', 'LAGUNA', 'DASMA', 'VITOCRUZ', 'WH']) {
     const loc = await prisma.location.findUniqueOrThrow({ where: { code } });
-    if (await prisma.cashFund.findUnique({ where: { locationId: loc.id } })) continue;
-    const f = await prisma.cashFund.create({ data: { locationId: loc.id, imprestAmount: '5000.00', balance: '5000.00' } });
+    if (await prisma.cashFund.findFirst({ where: { locationId: loc.id } })) continue;
+    const f = await prisma.cashFund.create({ data: { locationId: loc.id, purpose: code === 'WH' ? 'OFFICE' : 'GENERAL', name: code === 'WH' ? 'Warehouse – Office' : 'Cash fund', imprestAmount: '5000.00', balance: '5000.00' } });
     await prisma.cashFundTxn.create({ data: { fundId: f.id, locationId: loc.id, businessDate: new Date(new Date().toISOString().slice(0, 10) + 'T00:00:00Z'), kind: 'SETUP', amount: '5000.00', balanceAfter: '5000.00', notes: 'Demo fund (seed)' } });
   }
 

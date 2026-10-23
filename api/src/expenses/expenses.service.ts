@@ -15,6 +15,7 @@ import { DepositVerificationService } from './deposit-verification.service';
 import { toDateOnly, todayManila } from '../common/manila';
 import { D } from '../common/money';
 import type { SessionUser } from '../common/request-context';
+import { requestContext } from '../common/request-context';
 
 /** §8.6 Branch expenses (associates), main expenses (accounting), franchise-local expenses, cash deposits. */
 @Injectable()
@@ -35,7 +36,7 @@ export class ExpensesService {
   }
   async get(id: string, user: SessionUser) { const d = await this.prisma.db.expenseDoc.findUnique({ where: { id }, include: { account: true, paidFromAccount: true, location: true } }); if (!d) throw new NotFoundException(); if (user.locationScoped && !user.locationIds.includes(d.locationId)) throw new ForbiddenException(); return { ...d, attachments: await this.attachments.list('ExpenseDoc', id) }; }
 
-  async create(input: { locationId?: string; docDate?: string; accountId: string; payee?: string; amount: number; paidFrom: PaidFrom; paidFromAccountId?: string | null; notes?: string }, user: SessionUser) {
+  async create(input: { locationId?: string; docDate?: string; accountId: string; payee?: string; amount: number; paidFrom: PaidFrom; paidFromAccountId?: string | null; cashFundId?: string | null; salesDocId?: string | null; notes?: string }, user: SessionUser) {
     const account = await this.accounts.get(input.accountId);
     const isMain = account.entryScope === 'MAIN' || (account.entryScope === 'BOTH' && !account.branchTagId);
     if (isMain && !user.permissions.has('expense.create.main')) throw new ForbiddenException('This is a main/office expense account');
@@ -55,18 +56,30 @@ export class ExpensesService {
       const available = D((await this.cashOnHand.forBranch(locationId)).cashOnHand);
       if (available.lt(input.amount)) throw new BadRequestException({ code: 'NO_CASH_ON_HAND', available: available.toFixed(2), message: available.lte(0) ? `${loc.name} has no cash on hand, so this expense cannot be paid from it. Pay it from the cash fund (petty cash) or ask Accounting to pay it from the bank.` : `${loc.name} has only ₱${available.toFixed(2)} cash on hand, less than this expense (₱${input.amount.toFixed(2)}). Pay it from the cash fund (petty cash) or ask Accounting to pay it from the bank.` });
     }
-    const doc = await this.prisma.db.$transaction((tx) => this.insert(tx, { locationId, docDate, account, isMain, payee: input.payee, amount: input.amount, paidFrom: input.paidFrom, paidFromAccountId: input.paidFromAccountId, notes: input.notes, userId: user.id }));
+    // paid from a cash fund: which fund, and (Warehouse – Franchise) the franchise DR the money was spent for
+    let fund: Awaited<ReturnType<CashFundService['resolveForExpense']>> | null = null;
+    if (input.paidFrom === 'PETTY_CASH' && !isMain) fund = await this.cashFund.resolveForExpense(user, locationId, input.cashFundId);
+    if (input.salesDocId) {
+      if (fund?.purpose !== 'FRANCHISE') throw new BadRequestException('A franchise DR can be tied to an expense only when it is paid from the Warehouse – Franchise cash fund');
+      const dr = await requestContext.runSystem(async () => await this.prisma.db.salesDoc.findUnique({ where: { id: input.salesDocId! }, select: { channel: true, locationId: true, voidedAt: true } }));
+      if (!dr || dr.channel !== 'FRANCHISE' || dr.locationId !== locationId || dr.voidedAt) throw new BadRequestException('Choose a franchise DR sent from this warehouse');
+    }
+    const doc = await this.prisma.db.$transaction((tx) => this.insert(tx, { locationId, docDate, account, isMain, payee: input.payee, amount: input.amount, paidFrom: input.paidFrom, paidFromAccountId: input.paidFromAccountId, notes: input.notes, userId: user.id, cashFundId: fund?.id ?? null, salesDocId: input.salesDocId ?? null }));
     await this.audit.log({ action: 'CREATE', entityType: 'ExpenseDoc', entityId: doc.id, after: doc });
     return doc;
   }
 
   /** Writes the expense, the cash fund spend (when paid from the fund) and its journal entry inside the caller's transaction. */
-  async insert(tx: Tx, e: { locationId: string; docDate: Date; account: { id: string; title: string }; isMain: boolean; payee?: string; amount: number; paidFrom: PaidFrom; paidFromAccountId?: string | null; notes?: string; userId: string }) {
+  async insert(tx: Tx, e: { locationId: string; docDate: Date; account: { id: string; title: string }; isMain: boolean; payee?: string; amount: number; paidFrom: PaidFrom; paidFromAccountId?: string | null; cashFundId?: string | null; salesDocId?: string | null; notes?: string; userId: string }) {
     const controlNo = await this.seq.form(tx, 'EX', e.locationId);
     const d = await tx.expenseDoc.create({ data: { controlNo, docDate: e.docDate, locationId: e.locationId, accountId: e.account.id, payee: e.payee, amount: D(e.amount).toFixed(2), paidFrom: e.paidFrom, paidFromAccountId: e.paidFromAccountId ?? null, notes: e.notes, preparedBy: e.userId, createdBy: e.userId, isMain: e.isMain } });
     // paid from the branch cash fund: the fund balance goes down (it is topped back up from cash sales)
-    if (e.paidFrom === 'PETTY_CASH' && !e.isMain) await this.cashFund.spend(tx, { locationId: e.locationId, amount: e.amount, expenseDocId: d.id, businessDate: e.docDate, createdBy: e.userId, notes: `${e.account.title}${e.payee ? ` – ${e.payee}` : ''}` });
-    await this.posting.post(tx, { type: 'ExpenseDoc', id: d.id, date: e.docDate, name: e.payee, createdBy: e.userId }, (r) => r10Expense(r, { locationId: e.locationId, expenseAccountId: e.account.id, amount: e.amount, paidFrom: e.paidFrom, paidFromAccountId: e.paidFromAccountId, controlNo, payee: e.payee }));
+    let fundAccountId: string | null = null;
+    if (e.paidFrom === 'PETTY_CASH' && !e.isMain) {
+      const f = await this.cashFund.spend(tx, { locationId: e.locationId, fundId: e.cashFundId, salesDocId: e.salesDocId, amount: e.amount, expenseDocId: d.id, businessDate: e.docDate, createdBy: e.userId, notes: `${e.account.title}${e.payee ? ` – ${e.payee}` : ''}` });
+      fundAccountId = f.accountId; await tx.expenseDoc.update({ where: { id: d.id }, data: { cashFundId: f.id, salesDocId: e.salesDocId ?? null } });
+    }
+    await this.posting.post(tx, { type: 'ExpenseDoc', id: d.id, date: e.docDate, name: e.payee, createdBy: e.userId }, (r) => r10Expense(r, { locationId: e.locationId, expenseAccountId: e.account.id, amount: e.amount, paidFrom: e.paidFrom, paidFromAccountId: e.paidFromAccountId, fundAccountId, controlNo, payee: e.payee }));
     return d;
   }
 
@@ -100,7 +113,7 @@ export class ExpensesService {
     if (doc.voidedAt) throw new BadRequestException('Already voided');
     if (await this.closing.isClosed(doc.locationId, doc.docDate) && !user.permissions.has('sale.edit.postclose')) throw new BadRequestException({ message: 'Day is closed', code: 'DAY_CLOSED' });
     await this.posting.assertPeriodOpen(null, doc.docDate);
-    if (await this.prisma.db.salesDoc.findFirst({ where: { incentiveExpenseId: id, voidedAt: null }, select: { id: true } })) throw new BadRequestException('This is the incentive of a sale; void the sale instead');
+    if (await requestContext.runSystem(async () => await this.prisma.db.salesDoc.findFirst({ where: { incentiveExpenseId: id, voidedAt: null }, select: { id: true } }))) throw new BadRequestException('This is the incentive of a sale; void the sale instead');
     await this.prisma.db.$transaction((tx) => this.voidInTx(tx, doc, reason, user.id));
     await this.audit.log({ action: 'VOID', entityType: 'ExpenseDoc', entityId: id, before: doc, after: { reason } });
     return this.get(id, user);

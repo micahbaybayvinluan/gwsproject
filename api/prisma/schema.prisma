@@ -60,7 +60,7 @@ model Location {
   agents            Agent[]
   accounts          Account[]
   dailyCloses       DailyClose[]
-  cashFund          CashFund?
+  cashFunds         CashFund[]
   storeInspections  StoreInspection[]
   franchiseExpenses FranchiseExpense[]
   employees         Employee[]
@@ -885,6 +885,9 @@ model ExpenseDoc {
   notes             String?
   preparedBy        String    @map("prepared_by")
   isMain            Boolean   @default(false) @map("is_main")
+  /// paid from this cash fund (a location may have more than one), and the franchise DR it was paid for
+  cashFundId        String?   @map("cash_fund_id")
+  salesDocId        String?   @map("sales_doc_id")
   voidedAt          DateTime? @map("voided_at")
   voidedBy          String?   @map("voided_by")
   voidReason        String?   @map("void_reason")
@@ -1714,7 +1717,12 @@ model ContributionTable {
 /// Branch cash fund (imprest / revolving fund): small expenses are paid from it and it is topped back up from the day's cash sales.
 model CashFund {
   id            String   @id @default(uuid())
-  locationId    String   @unique @map("location_id")
+  locationId    String   @map("location_id")
+  /// GENERAL = the branch's cash fund; OFFICE / FRANCHISE = the two warehouse funds (owner request 2026-10-23)
+  purpose       String   @default("GENERAL")
+  name          String   @default("Cash fund")
+  /// the fund's own GL petty-cash account; empty = the branch's template account "Petty Cash - {branch}"
+  accountId     String?  @map("account_id")
   imprestAmount Decimal  @map("imprest_amount") @db.Decimal(14, 2)
   balance       Decimal  @db.Decimal(14, 2)
   active        Boolean  @default(true)
@@ -1725,6 +1733,7 @@ model CashFund {
   location Location      @relation(fields: [locationId], references: [id])
   txns     CashFundTxn[]
 
+  @@unique([locationId, purpose])
   @@map("cash_funds")
 }
 
@@ -1738,6 +1747,10 @@ model CashFundTxn {
   amount       Decimal  @db.Decimal(14, 2) // signed: + into the fund, − out of it
   balanceAfter Decimal  @map("balance_after") @db.Decimal(14, 2)
   expenseDocId String?  @map("expense_doc_id")
+  /// Warehouse – Franchise fund: the franchise DR and the franchise payment / shipping invoice this movement belongs to
+  salesDocId         String? @map("sales_doc_id")
+  franchiseInvoiceId String? @map("franchise_invoice_id")
+  franchisePaymentId String? @map("franchise_payment_id")
   notes        String?
   createdBy    String?  @map("created_by")
   createdAt    DateTime @default(now()) @map("created_at")
@@ -1759,6 +1772,8 @@ model CashFundCheck {
   reason        String?
   inspectionId  String?  @map("inspection_id")
   checkedBy     String   @map("checked_by")
+  /// which fund was counted (a location may have several)
+  fundId        String?  @map("fund_id")
 
   @@index([locationId, checkedAt])
   @@map("cash_fund_checks")

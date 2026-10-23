@@ -5,7 +5,7 @@ import { CurrentUser, RequirePermission, RequireAnyPermission, Audited } from '.
 import { Z } from '../common/zod.pipe';
 import type { SessionUser } from '../common/request-context';
 
-const Create = z.object({ locationId: z.string().uuid().optional(), docDate: z.string().optional(), accountId: z.string().uuid(), payee: z.string().optional(), amount: z.number().positive(), paidFrom: z.enum(['CASH_DRAWER', 'PETTY_CASH', 'BANK_ACCOUNT', 'OWNER_ADVANCE']), paidFromAccountId: z.string().uuid().nullable().optional(), notes: z.string().optional() });
+const Create = z.object({ locationId: z.string().uuid().optional(), docDate: z.string().optional(), accountId: z.string().uuid(), payee: z.string().optional(), amount: z.number().positive(), paidFrom: z.enum(['CASH_DRAWER', 'PETTY_CASH', 'BANK_ACCOUNT', 'OWNER_ADVANCE']), paidFromAccountId: z.string().uuid().nullable().optional(), cashFundId: z.string().uuid().nullable().optional(), salesDocId: z.string().uuid().nullable().optional(), notes: z.string().optional() });
 const Void = z.object({ reason: z.string().min(3) });
 const Franchise = z.object({ locationId: z.string().uuid().optional(), docDate: z.string().optional(), category: z.enum(['Rent', 'Utilities', 'Salaries', 'Supplies', 'Delivery', 'Marketing', 'Others']), payee: z.string().optional(), amount: z.number().positive(), notes: z.string().optional() });
 const Resubmit = z.object({ slipAttachmentId: z.string().uuid().nullable().optional(), note: z.string().optional() });

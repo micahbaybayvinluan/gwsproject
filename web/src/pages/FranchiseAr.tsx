@@ -119,7 +119,11 @@ function InvoiceDetail({ id }: { id: string }) {
 function PayModal({ inv, onClose, onDone }: { inv: Inv; onClose: () => void; onDone: () => void }) {
   const [f, setF] = useState({ amount: String(inv.totalDue), mode: 'BANK_TRANSFER', accountId: '', reference: '', date: today(), notes: '' }); const [proofId, setProofId] = useState<string | null>(null);
   const accts = useQuery({ queryKey: ['payment-accounts'], queryFn: () => api.get<{ id: string; title: string }[]>('/api/accounts/payment') });
-  const m = useMutation({ mutationFn: () => api.post(`/api/franchise-ar/${inv.id}/payments`, { amount: Number(f.amount), mode: f.mode, paymentAccountId: f.accountId || null, reference: f.reference || null, paidOn: f.date, notes: f.notes || null, proofAttachmentId: f.mode === 'CASH' ? null : proofId }), onSuccess: onDone });
+  // cash for a shipping charge may go into the warehouse's Franchise cash fund, tied to the DR (owner request 2026-10-23)
+  const isShip = (inv as unknown as { source?: string }).source === 'SHIPPING';
+  const funds = useQuery({ queryKey: ['franchise-funds'], queryFn: () => api.get<{ id: string; name: string; balance: string }[]>('/api/cash-funds?purpose=FRANCHISE'), enabled: isShip });
+  const fundChoice = f.accountId.startsWith('fund:') ? f.accountId.slice(5) : null;
+  const m = useMutation({ mutationFn: () => api.post(`/api/franchise-ar/${inv.id}/payments`, { amount: Number(f.amount), mode: f.mode, paymentAccountId: fundChoice ? null : f.accountId || null, cashFundId: fundChoice && f.mode === 'CASH' ? fundChoice : null, reference: f.reference || null, paidOn: f.date, notes: f.notes || null, proofAttachmentId: f.mode === 'CASH' ? null : proofId }), onSuccess: onDone });
   return <Modal title={`Record payment · ${inv.controlNo}`} onClose={onClose}>
     <div className="space-y-3">
       <p className="text-sm text-slate-600">Total due today <b>{peso(inv.totalDue)}</b> (goods {peso(inv.unpaid)}, penalty and interest {peso(inv.chargesDue)}). The payment settles the penalty first, then the interest, then the goods.</p>
@@ -127,7 +131,7 @@ function PayModal({ inv, onClose, onDone }: { inv: Inv; onClose: () => void; onD
         <Field label="Amount received (₱)"><Input type="number" step="0.01" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} /></Field>
         <Field label="Date received"><Input type="date" max={today()} value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} /></Field>
         <Field label="Paid by"><Select value={f.mode} onChange={(e) => setF({ ...f, mode: e.target.value })}>{MODES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</Select></Field>
-        <Field label="Deposited to"><Select value={f.accountId} onChange={(e) => setF({ ...f, accountId: e.target.value })}><option value="">—</option>{accts.data?.map((a) => <option key={a.id} value={a.id}>{a.title}</option>)}</Select></Field>
+        <Field label="Deposited to"><Select value={f.accountId} onChange={(e) => setF({ ...f, accountId: e.target.value })}><option value="">—</option>{isShip && f.mode === 'CASH' && (funds.data ?? []).map((x) => <option key={x.id} value={`fund:${x.id}`}>Cash fund: {x.name} ({peso(x.balance)})</option>)}{accts.data?.map((a) => <option key={a.id} value={a.id}>{a.title}</option>)}</Select></Field>
         <Field label={f.mode === 'CHEQUE' ? 'Cheque no.' : 'Reference no.'}><Input value={f.reference} onChange={(e) => setF({ ...f, reference: e.target.value })} placeholder={f.mode === 'CASH' ? 'optional' : 'required'} /></Field>
         <Field label="Notes"><Input value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} /></Field>
       </div>

@@ -8,6 +8,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { ApprovalsService } from '../approvals/approvals.service';
 import { PostingService } from '../gl/posting.service';
 import { r4FranchiseCollection } from '../gl/posting-rules';
+import { CashFundService } from '../cashfund/cashfund.service';
 import type { SessionUser } from '../common/request-context';
 import { requestContext } from '../common/request-context';
 import { D } from '../common/money';
@@ -35,7 +36,7 @@ export interface Rules { termsDays: number; penaltyPct: number; dailyPct: number
  */
 @Injectable()
 export class FranchiseArService implements OnModuleInit {
-  constructor(private prisma: PrismaService, private audit: AuditService, private settings: SettingsService, private seq: SequenceService, private notify: NotificationsService, private approvals: ApprovalsService, private posting: PostingService) {}
+  constructor(private prisma: PrismaService, private audit: AuditService, private settings: SettingsService, private seq: SequenceService, private notify: NotificationsService, private approvals: ApprovalsService, private posting: PostingService, private cashFund: CashFundService) {}
 
   onModuleInit() { this.approvals.register('FRANCHISE_AR_EXTENSION', (r, outcome, actor) => this.onExtension(r.documentId, outcome, actor), 'FranchiseArExtension'); }
 
@@ -215,7 +216,7 @@ export class FranchiseArService implements OnModuleInit {
   }
 
   // ── payment ──
-  async recordPayment(user: SessionUser, id: string, input: { amount: number; paidOn?: string; mode: string; paymentAccountId?: string | null; reference?: string | null; proofAttachmentId?: string | null; notes?: string | null }) {
+  async recordPayment(user: SessionUser, id: string, input: { amount: number; paidOn?: string; mode: string; paymentAccountId?: string | null; cashFundId?: string | null; reference?: string | null; proofAttachmentId?: string | null; notes?: string | null }) {
     if (!PAY_MODES.includes(input.mode as never)) throw new BadRequestException('Choose how it was paid');
     if (!(input.amount > 0)) throw new BadRequestException('The amount must be more than zero');
     if (input.mode !== 'CASH' && !input.reference?.trim()) throw new BadRequestException('Enter the reference / cheque number');
@@ -233,12 +234,24 @@ export class FranchiseArService implements OnModuleInit {
       const toPenalty = Prisma.Decimal.min(left, p.penaltyDue); left = left.minus(toPenalty);
       const toInterest = Prisma.Decimal.min(left, p.interestDue); left = left.minus(toInterest);
       const toPrincipal = Prisma.Decimal.min(left, p.unpaid);
+      // cash received for a SHIPPING charge goes into the warehouse's Franchise cash fund, tied to the franchise DR (owner request 2026-10-23)
+      let fund: { id: string; accountId: string | null } | null = null; let shipCharge: { salesDocId: string } | null = null;
+      if (input.cashFundId) {
+        if (input.mode !== 'CASH') throw new BadRequestException('Only a cash payment goes into a cash fund');
+        if (inv.source !== 'SHIPPING') throw new BadRequestException('Only the payment of a shipping charge goes into the Warehouse – Franchise cash fund');
+        const f = await tx.cashFund.findUnique({ where: { id: input.cashFundId } });
+        if (!f || !f.active || f.purpose !== 'FRANCHISE' || f.locationId !== inv.fromLocationId) throw new BadRequestException('Choose the Warehouse – Franchise cash fund of the warehouse that sent the DR');
+        fund = { id: f.id, accountId: f.accountId };
+        shipCharge = await tx.franchiseShippingCharge.findUnique({ where: { invoiceId: id }, select: { salesDocId: true } });
+      }
+      const payAccountId = fund?.accountId ?? input.paymentAccountId ?? null;
       const receiptNo = await this.seq.next(tx, 'FRP', { prefix: 'FRP', pad: 6 });
-      const payment = await tx.franchisePayment.create({ data: { receiptNo, invoiceId: id, amount: pay.toFixed(2), toPenalty: toPenalty.toFixed(2), toInterest: toInterest.toFixed(2), toPrincipal: toPrincipal.toFixed(2), paidOn, mode: input.mode, paymentAccountId: input.paymentAccountId ?? null, reference: input.reference?.trim() || null, proofAttachmentId: input.proofAttachmentId ?? null, notes: input.notes ?? null, recordedBy: user.id } });
+      const payment = await tx.franchisePayment.create({ data: { receiptNo, invoiceId: id, amount: pay.toFixed(2), toPenalty: toPenalty.toFixed(2), toInterest: toInterest.toFixed(2), toPrincipal: toPrincipal.toFixed(2), paidOn, mode: input.mode, paymentAccountId: payAccountId, reference: input.reference?.trim() || null, proofAttachmentId: input.proofAttachmentId ?? null, notes: input.notes ?? null, recordedBy: user.id } });
       const after = { principalPaid: D(inv.principalPaid).plus(toPrincipal), penaltyPaid: D(inv.penaltyPaid).plus(toPenalty), interestPaid: D(inv.interestPaid).plus(toInterest) };
       const closed = D(inv.amount).minus(after.principalPaid).lte(0) && D(inv.penalty).minus(after.penaltyPaid).lte(0) && D(inv.interest).minus(after.interestPaid).lte(0);
       const upd = await tx.franchiseInvoice.update({ where: { id }, data: { principalPaid: after.principalPaid.toFixed(2), penaltyPaid: after.penaltyPaid.toFixed(2), interestPaid: after.interestPaid.toFixed(2), status: closed ? 'PAID' : 'OPEN' } });
-      if (input.paymentAccountId && inv.fromLocationId) await this.posting.post(tx, { type: 'FranchisePayment', id: payment.id, date: paidOn, createdBy: user.id }, (r) => r4FranchiseCollection(r, { fromLocationId: inv.fromLocationId!, franchiseLocationId: inv.franchiseLocationId, principal: toPrincipal, charges: toPenalty.plus(toInterest), paymentAccountId: input.paymentAccountId!, receiptNo }));
+      if (fund) await this.cashFund.receive(tx, { fundId: fund.id, amount: pay, salesDocId: shipCharge?.salesDocId ?? null, franchiseInvoiceId: id, franchisePaymentId: payment.id, businessDate: paidOn, createdBy: user.id, notes: `Shipping paid by the franchise (${receiptNo})` });
+      if (payAccountId && inv.fromLocationId) await this.posting.post(tx, { type: 'FranchisePayment', id: payment.id, date: paidOn, createdBy: user.id }, (r) => r4FranchiseCollection(r, { fromLocationId: inv.fromLocationId!, franchiseLocationId: inv.franchiseLocationId, principal: toPrincipal, charges: toPenalty.plus(toInterest), paymentAccountId: payAccountId!, receiptNo }));
       return { payment, inv: upd, toPenalty, toInterest, toPrincipal, closed };
     });
     await this.audit.log({ action: 'CREATE', entityType: 'FranchisePayment', entityId: out.payment.id, after: out.payment });

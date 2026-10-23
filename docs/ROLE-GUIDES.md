@@ -186,7 +186,7 @@ You enter what comes into and goes out of the warehouse. You never see supplier 
 
 **Your pay:** My Pay & Charges.
 
-**Warehouse expenses** (menu: Expenses): record an expense of the warehouse (choose the account, amount and payee). You may also pay from the warehouse **Cash fund** (the balance is shown; you spend it, Accounting / the cash fund holders replenish it), or choose cash on hand, a bank account or an owner advance.
+**Warehouse expenses** (menu: Expenses): record an expense of the warehouse (choose the account, amount and payee). You may also pay from the warehouse **cash funds** (you keep them: **Warehouse – Office** and **Warehouse – Franchise**; choose *Which cash fund*; for the Franchise fund pick the **franchise DR** the money is for; Accounting tops the funds up), or choose cash on hand, a bank account or an owner advance.
 
 **Franchise availability and branch requests:** you can edit an availability (offer quantity and flavors, remove items) and prepare what a branch requested, the same as the In-Charge; the In-Charge does the final approval of a franchise order. You can pay warehouse expenses from the cash fund (not set it up).
 
@@ -245,7 +245,7 @@ You are responsible for the warehouse stock. You check your associates' entries,
 
 **Franchise availability** (menu: Franchise Orders): when the Franchise Coordinator sends an availability, open it, type the **Offer** (quantity and flavors you can give) for each product, remove what you cannot give, and *Send to the Franchise Coordinator*. After the coordinator prints the picklist and your team prepares the goods, do the **final check** and *Approve* (or send back with a note); the coordinator then makes the DR.
 **Requests from the branches** (Transfers): a branch's request appears with its products already filled in. Edit the quantities (or remove an item) → *Prepare the pull-out*, or *Decline* with a reason.
-**Cash fund:** you and your associates can pay warehouse expenses from the warehouse cash fund (Expenses → Paid from Cash fund).
+**Cash funds:** you and your associates keep the two warehouse funds, **Warehouse – Office** and **Warehouse – Franchise**, and pay warehouse expenses from them (Expenses → Paid from Cash fund → Which cash fund; the Franchise fund can be tied to a franchise DR). Accounting tops them up; the Sales Associate at the warehouse store has no cash fund.
 
 **Charges and NTE:** *My Pay & Charges* shows *Charges at my branch* and any Notice to Explain issued to you (type your explanation there).
 
@@ -413,6 +413,7 @@ You keep the books.
    1. Open the voucher and press **Edit entry**.
    2. Change the lines: they must balance, no negatives, and the period must be open.
    3. Give the reason. The maker, the source document's maker and the Owner are notified, and the change is logged.
+- **Cash funds of the warehouse:** Cash Fund → *Set up or change a cash fund*: choose the warehouse and the kind (**Warehouse – Office**, **Warehouse – Franchise**) and the amount; top a fund up from the bank with *Top up from an account*. When a franchise pays a shipping charge in cash, record it in Franchise AR with *Deposited to* **Cash fund: Warehouse – Franchise**.
 - **Card Remittances:** card sales wait here until the bank credits them. Tick them, choose the bank account, type the **net** the bank credited; the bank charge is worked out and shared per sale. Send it to the Accounting Head, who approves it and it posts Bank + MDR / AR – Credit Card.
    - **Correct a card amount** on the sale page (Credit card amount) until the bank has cleared it.
 3. **Trial Balance**, **Periods & Opening** (request a period lock; the Owner approves) and **Inventory Cost**.

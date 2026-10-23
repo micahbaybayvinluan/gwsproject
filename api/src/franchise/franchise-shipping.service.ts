@@ -50,7 +50,7 @@ export class FranchiseShippingService implements OnModuleInit {
 
   // ── reading ──
   private async scope(user: SessionUser) {
-    if (user.permissions.has('franchise.ar.view') || user.permissions.has('franchise.shipping.fill')) return undefined;
+    if (user.permissions.has('franchise.ar.view') || user.permissions.has('franchise.shipping.fill') || user.permissions.has('cashfund.spend')) return undefined;
     if (user.permissions.has('franchise.ar.own')) { const own = user.locationIds[0]; if (!own) throw new BadRequestException('This account is not assigned to a franchise'); return own; }
     throw new ForbiddenException('You do not have access to franchise shipping charges');
   }
@@ -60,6 +60,28 @@ export class FranchiseShippingService implements OnModuleInit {
     const locs = await this.prisma.db.location.findMany({ where: { id: { in: [...new Set(rows.flatMap((r) => [r.franchiseLocationId, r.fromLocationId]))] } }, select: { id: true, name: true } });
     const today = todayManila();
     return rows.map((r) => ({ id: r.id, saleId: r.salesDocId, drSiNo: r.drSiNo, franchise: locs.find((l) => l.id === r.franchiseLocationId)?.name ?? '', franchiseLocationId: r.franchiseLocationId, from: locs.find((l) => l.id === r.fromLocationId)?.name ?? '', status: r.status, fillBy: dateStr(r.fillBy), daysLate: r.status === 'TO_FOLLOW' ? Math.max(0, daysBetween(r.fillBy, today)) : 0, overdue: r.status === 'TO_FOLLOW' && r.fillBy < today, amount: r.amount, courier: r.courier, reference: r.reference, notes: r.notes, invoiceId: r.invoiceId, filledAt: r.filledAt, pendingEdit: r.pendingEdit, createdAt: r.createdAt }));
+  }
+
+  /**
+   * Everything about the shipping of one franchise DR in one place (owner request 2026-10-23): the charge, what the franchise paid
+   * (and the cash fund it went into), and the courier money the warehouse paid out of the Warehouse – Franchise fund for this DR.
+   */
+  async forSale(user: SessionUser, salesDocId: string) {
+    const loc = await this.scope(user);
+    const charge = await this.prisma.db.franchiseShippingCharge.findUnique({ where: { salesDocId } });
+    if (charge && loc && charge.franchiseLocationId !== loc) throw new ForbiddenException('Not your franchise');
+    const inv = charge?.invoiceId ? await this.prisma.db.franchiseInvoice.findUnique({ where: { id: charge.invoiceId } }) : null;
+    const payments = inv ? await this.prisma.db.franchisePayment.findMany({ where: { invoiceId: inv.id, voidedAt: null }, orderBy: { paidOn: 'asc' } }) : [];
+    const intoFund = await this.prisma.db.cashFundTxn.findMany({ where: { salesDocId, kind: 'FRANCHISE_RECEIPT' }, include: { fund: { select: { name: true } } } });
+    const expenses = await requestContext.runSystem(async () => await this.prisma.db.expenseDoc.findMany({ where: { salesDocId, voidedAt: null }, include: { account: { select: { title: true } } }, orderBy: { docDate: 'asc' } }));
+    const funds = await this.prisma.db.cashFund.findMany({ where: { id: { in: expenses.map((e) => e.cashFundId).filter((x): x is string => !!x) } }, select: { id: true, name: true } });
+    return {
+      charge: charge ? { id: charge.id, status: charge.status, amount: charge.amount, courier: charge.courier, reference: charge.reference, fillBy: charge.fillBy } : null,
+      invoice: inv ? { id: inv.id, controlNo: inv.controlNo, amount: inv.amount, principalPaid: inv.principalPaid, status: inv.status } : null,
+      payments: payments.map((p) => ({ receiptNo: p.receiptNo, amount: p.amount, paidOn: p.paidOn, mode: p.mode, fund: intoFund.find((t) => t.franchisePaymentId === p.id)?.fund.name ?? null })),
+      courierPaid: expenses.map((e) => ({ id: e.id, controlNo: e.controlNo, docDate: e.docDate, amount: e.amount, account: e.account.title, fund: funds.find((f) => f.id === e.cashFundId)?.name ?? null })),
+      courierTotal: expenses.reduce((t, e) => t.plus(e.amount), D(0)).toFixed(2),
+    };
   }
 
   // ── the Franchise Coordinator fills in the amount ──

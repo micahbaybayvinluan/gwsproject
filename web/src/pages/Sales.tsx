@@ -214,6 +214,7 @@ export function SaleDetailPage() {
     <Attachments type="SalesDoc" id={s.id} />
     {!s.voidedAt && s.paymentMode === 'CREDIT_CARD' && <CardAmountCard sale={s} />}
     {!s.voidedAt && s.channel === 'FRANCHISE' && <FranchiseDrCard sale={s} />}
+    {s.channel === 'FRANCHISE' && <FranchiseShippingBlock sale={s} />}
     {!s.voidedAt && !(can('franchise.dr.edit') && s.channel === 'FRANCHISE') && <EditSaleCard sale={s} />}
     {!s.voidedAt && (can('sale.void') || can('sale.edit.sameday')) && <Card title="Void / correct"><div className="flex flex-wrap items-end gap-2"><Field label="Reason" className="flex-1"><Input value={reason} onChange={(e) => setReason(e.target.value)} /></Field><Button variant="danger" disabled={!reason} onClick={() => voidM.mutate()}>Void sale</Button>{closedErr && <Button variant="outline" onClick={() => edit.mutate()}>Request post-close void (needs Head + Asst Auditor)</Button>}</div><ErrorBox error={voidM.error} /><ErrorBox error={edit.error} /></Card>}
     {s.voidedAt && <div className="rounded bg-red-50 p-3 text-sm text-red-800">Voided: {s.voidReason}</div>}
@@ -303,5 +304,21 @@ function CardAmountCard({ sale }: { sale: Sale }) {
     <p className="text-sm text-slate-700">Total of the sale <b>{peso(x.grandTotal)}</b> · charged on the card <b>{peso(x.cardAmount ?? x.grandTotal)}</b>{x.cardAmount ? <span className="text-amber-700"> (difference {peso(Number(x.cardAmount) - Number(x.grandTotal))}: {x.cardAdjustReason})</span> : ''}{cleared && <span className="ml-2 text-emerald-700">Cleared by the bank{can('card.remit') && x.cardFee != null ? ` · bank fee ${peso(x.cardFee)}` : ''}</span>}</p>
     {can('sale.card.amount') && !cleared && <div className="mt-3 flex flex-wrap items-end gap-2"><Field label="Amount really charged"><Input type="number" step="0.01" min={0} value={amount} onChange={(e) => setAmount(e.target.value)} /></Field><Field label="Reason" className="min-w-[16rem] flex-1"><Input value={why} onChange={(e) => setWhy(e.target.value)} placeholder="e.g. card surcharge, rounding on the terminal" /></Field><Button disabled={!why || !Number(amount) || save.isPending} onClick={() => save.mutate()}>Correct the card amount</Button></div>}
     <ErrorBox error={save.error} />
+  </Card>;
+}
+
+/** Shipping of one franchise DR in one place (owner request 2026-10-23): the charge, what the franchise paid and into which cash fund, and the courier paid from the Warehouse – Franchise fund. */
+interface ShipInfo { charge: { status: string; amount: string | null; courier: string | null; reference: string | null } | null; invoice: { controlNo: string; amount: string; principalPaid: string; status: string } | null; payments: { receiptNo: string; amount: string; paidOn: string; mode: string; fund: string | null }[]; courierPaid: { id: string; controlNo: string; docDate: string; amount: string; account: string; fund: string | null }[]; courierTotal: string }
+function FranchiseShippingBlock({ sale }: { sale: Sale }) {
+  const { can } = useAuth();
+  const ok = ['franchise.ar.view', 'franchise.ar.own', 'franchise.shipping.fill', 'cashfund.spend'].some((k) => can(k));
+  const q = useQuery({ queryKey: ['dr-shipping', sale.id], queryFn: () => api.get<ShipInfo>(`/api/franchise-ar/shipping-charges/for-sale/${sale.id}`), enabled: ok, retry: false });
+  const d = q.data; if (!ok || !d || (!d.charge && !d.courierPaid.length)) return null;
+  return <Card title="Shipping of this DR">
+    <div className="grid gap-4 text-sm md:grid-cols-3">
+      <div><div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Charged to the franchise</div>{d.charge ? <p>{d.charge.status === 'FILLED' ? <b>{peso(d.charge.amount ?? 0)}</b> : <Badge tone="amber">to follow</Badge>}{d.charge.courier ? <span className="text-slate-600"> · {d.charge.courier}</span> : null}{d.invoice && <span className="block text-xs text-slate-500">Invoice {d.invoice.controlNo} · paid {peso(d.invoice.principalPaid)} of {peso(d.invoice.amount)} · {d.invoice.status}</span>}</p> : <p className="text-slate-500">No shipping charge on this DR.</p>}</div>
+      <div><div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Paid by the franchise</div>{d.payments.length ? <ul>{d.payments.map((p) => <li key={p.receiptNo}>{peso(p.amount)} · {fmtDate(p.paidOn)} · {p.mode.replace('_', ' ').toLowerCase()}{p.fund ? <span className="text-emerald-700"> → {p.fund}</span> : null}<span className="block text-xs text-slate-500">{p.receiptNo}</span></li>)}</ul> : <p className="text-slate-500">Nothing paid yet.</p>}</div>
+      <div><div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Courier paid from the cash fund</div>{d.courierPaid.length ? <ul>{d.courierPaid.map((e) => <li key={e.id}>{peso(e.amount)} · {fmtDate(e.docDate)}<span className="block text-xs text-slate-500">{e.controlNo} · {e.account}{e.fund ? ` · ${e.fund}` : ''}</span></li>)}<li className="mt-1 font-semibold">Total {peso(d.courierTotal)}</li></ul> : <p className="text-slate-500">None recorded.</p>}</div>
+    </div>
   </Card>;
 }

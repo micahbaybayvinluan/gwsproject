@@ -6,6 +6,7 @@ import { Segmented, RingGauge, CapsuleBars, CalendarCard } from '@/components/ui
 import { api, fmtDate, peso } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { CustomerServiceBoard } from './CustomerService';
+import { DashboardSearch } from '@/components/DashboardSearch';
 import { PromoBanner } from './Promos';
 import { NteNoticeModal } from '@/pages/Nte';
 import { Button, Card, Stat, Empty, ErrorBox, Textarea, Badge, statusTone } from '@/components/ui/primitives';
@@ -40,6 +41,7 @@ export function DashboardPage() {
   const d = q.data;
   if (!d) return <div className="text-slate-500">Loading…</div>;
   return <div className="space-y-6">
+    <DashboardSearch />
     <div className="flex flex-wrap items-end justify-between gap-2"><div><div className="text-xs font-semibold uppercase tracking-[.16em] text-brand">{new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}</div><h1 className="text-2xl font-bold tracking-tight text-navy">Good day, {me?.fullName?.split(/[\s–-]/)[0]}</h1></div></div>
     {d.discrepancyDeadlines?.map((c) => <DeadlineAlert key={c.caseId} c={c} />)}
     {d.weeklyCount && !d.weeklyCount.submitted && <div className="rounded-md border-2 border-red-600 bg-red-50 p-3 text-red-800" data-testid="weekly-count-alarm">

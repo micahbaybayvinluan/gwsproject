@@ -2589,12 +2589,12 @@ describe('Agent field work: outlets, areas, itineraries with photos, consignment
       ok(await as(u).get('/api/expenses'));
     }
     // the warehouse has a cash fund (₱3,000): the warehouse staff pay expenses from it and see its balance, but cannot set it up or replenish it
-    await as('admin').put(`/api/cash-funds/${wh}`).send({ imprestAmount: 3000 }).expect(200);
+    const officeFund = ok(await as('admin').put(`/api/cash-funds/${wh}`).send({ imprestAmount: 3000, purpose: 'OFFICE' }).expect(200)).body.id as string;
     for (const u of ['wh.assoc', 'wh.incharge']) {
       const accts = ok(await as(u).get(`/api/expenses/accounts?locationId=${wh}`)).body as { id: string }[];
-      const before = Number(ok(await as(u).get(`/api/cash-funds/${wh}`)).body.balance);
-      ok(await as(u).post('/api/expenses').send({ locationId: wh, accountId: accts[0].id, amount: 100, paidFrom: 'PETTY_CASH' }).expect(201));
-      expect(Number(ok(await as(u).get(`/api/cash-funds/${wh}`)).body.balance)).toBe(before - 100);
+      const before = Number(ok(await as(u).get(`/api/cash-funds/${officeFund}`)).body.balance);
+      ok(await as(u).post('/api/expenses').send({ locationId: wh, accountId: accts[0].id, amount: 100, paidFrom: 'PETTY_CASH', cashFundId: officeFund }).expect(201));
+      expect(Number(ok(await as(u).get(`/api/cash-funds/${officeFund}`)).body.balance)).toBe(before - 100);
       await as(u).put(`/api/cash-funds/${wh}`).send({ imprestAmount: 9999 }).expect(403);
       await as(u).post(`/api/cash-funds/${wh}/replenish`).send({}).expect(403);
     }
@@ -3820,5 +3820,82 @@ describe('Editable online-platform income, editable card amount and card remitta
     ok(await as('acct.assoc').delete(`/api/card-remittances/${draft.id}`));
     expect(ok(await as('acct.assoc').get(`/api/card-remittances/waiting?locationId=${west}`)).body.rows.some((r: { id: string }) => r.id === s3.id)).toBe(true);
     const dash = ok(await as('acct.assoc').get('/api/dashboard')).body; expect(dash.cardWaiting.count).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe('Warehouse cash funds: Office and Franchise, tied to franchise DRs; the sales associate at the warehouse keeps none (owner request 2026-10-23)', () => {
+  let wh = '', mayon = '', prod = '', frCustomer = '', whOffice = '', whFranchise = '', drId = '', bank = '';
+  const today = () => new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);
+  const day = (n: number) => new Date(Date.now() + 8 * 3600e3 + n * 86400000).toISOString().slice(0, 10);
+  beforeAll(async () => {
+    wh = (await prisma.location.findUniqueOrThrow({ where: { code: 'WH' } })).id; mayon = (await prisma.location.findUniqueOrThrow({ where: { code: 'MAYON' } })).id;
+    const cats = ok(await as('admin').get('/api/categories')).body as { id: string; accountingClass: string }[];
+    prod = ok(await as('admin').post('/api/products').send({ name: `WHF Whey ${run}`, categoryId: cats.find((c) => c.accountingClass === 'SUPPLEMENT')!.id, prices: { RETAIL: 1000, FRANCHISE: 700 }, cost: 500 })).body.id;
+    const batch = await prisma.batch.create({ data: { productId: prod, batchNo: `WF-${run}`, receivedRef: 'TEST', unitCost: '500.00' } });
+    await prisma.stockLedger.create({ data: { locationId: wh, productId: prod, batchId: batch.id, qtyDelta: 20, movementType: 'RECEIVE', documentType: 'OpeningStock', documentId: batch.id, unitCost: '500.00', businessDate: new Date(`${today()}T00:00:00Z`) } });
+    await prisma.stockBalance.create({ data: { locationId: wh, productId: prod, batchId: batch.id, qty: 20 } });
+    frCustomer = (await prisma.customer.findFirst({ where: { type: 'FRANCHISE', locationId: mayon } }))?.id ?? (await prisma.customer.create({ data: { code: `FRW-${run}`, name: 'Franchise Mayon', type: 'FRANCHISE', locationId: mayon } })).id;
+    ok(await as('admin').put('/api/settings').send({ 'gl.auto_posting_enabled': true }));
+    ok(await as('admin').post('/api/accounts/ensure-global'));
+    bank = (await prisma.account.findFirstOrThrow({ where: { paymentAccountType: 'BANK', active: true } })).id;
+  });
+
+  it('Accounting sets up two funds on the warehouse (Office, Franchise); the Franchise fund has its own GL account', async () => {
+    const o = ok(await as('acct.head').put(`/api/cash-funds/${wh}`).send({ imprestAmount: 3000, purpose: 'OFFICE' })).body; whOffice = o.id;
+    const f = ok(await as('acct.head').put(`/api/cash-funds/${wh}`).send({ imprestAmount: 2000, purpose: 'FRANCHISE', fundedFromAccountId: bank })).body; whFranchise = f.id;
+    expect(o.name).toContain('Office'); expect(f.name).toContain('Franchise'); expect(f.accountId).toBeTruthy(); expect(o.id).not.toBe(f.id);
+    const acct = await prisma.account.findUniqueOrThrow({ where: { id: f.accountId } }); expect(acct.title).toContain('(Franchise)');
+    await as('wh.assoc').put(`/api/cash-funds/${wh}`).send({ imprestAmount: 1, purpose: 'FRANCHISE' }).expect(403);
+    // Accounting tops it up from the bank
+    ok(await as('acct.head').post(`/api/cash-funds/${whFranchise}/top-up`).send({ amount: 500, fromAccountId: bank }));
+    expect(Number(ok(await as('acct.head').get(`/api/cash-funds/${whFranchise}`)).body.balance)).toBe(2500);
+    // only a branch fund replenishes from cash sales
+    await as('acct.head').post(`/api/cash-funds/${whFranchise}/replenish`).send({}).expect(400);
+  });
+
+  it('the warehouse associate and in-charge see and use both funds; the sales associate at the warehouse store sees none', async () => {
+    for (const u of ['wh.assoc', 'wh.incharge']) { const l = ok(await as(u).get('/api/cash-funds')).body as { id: string }[]; expect(l.map((x) => x.id)).toEqual(expect.arrayContaining([whOffice, whFranchise])); }
+    expect((ok(await as('sales.wh').get('/api/cash-funds')).body as unknown[]).length).toBe(0);
+    await as('sales.wh').get(`/api/cash-funds/${whOffice}`).expect(403);
+    const accts = ok(await as('sales.wh').get(`/api/expenses/accounts?locationId=${wh}`)).body as { id: string }[];
+    const r = await as('sales.wh').post('/api/expenses').send({ locationId: wh, accountId: accts[0].id, amount: 10, paidFrom: 'PETTY_CASH' }); expect([400, 403]).toContain(r.status);
+  });
+
+  it('an expense from the warehouse needs the fund chosen when there are two; the Franchise fund links it to a franchise DR', async () => {
+    const accts = ok(await as('wh.assoc').get(`/api/expenses/accounts?locationId=${wh}`)).body as { id: string }[];
+    const nochoice = await as('wh.assoc').post('/api/expenses').send({ locationId: wh, accountId: accts[0].id, amount: 100, paidFrom: 'PETTY_CASH' }); expect(nochoice.status).toBe(400); expect(JSON.stringify(nochoice.body)).toContain('CHOOSE_FUND');
+    const before = Number(ok(await as('wh.assoc').get(`/api/cash-funds/${whOffice}`)).body.balance);
+    ok(await as('wh.assoc').post('/api/expenses').send({ locationId: wh, accountId: accts[0].id, amount: 100, paidFrom: 'PETTY_CASH', cashFundId: whOffice }).expect(201));
+    expect(Number(ok(await as('wh.assoc').get(`/api/cash-funds/${whOffice}`)).body.balance)).toBe(before - 100);
+    // a franchise DR from the warehouse with shipping to follow
+    const sale = ok(await as('franchise.coord').post('/api/sales').send({ locationId: wh, channel: 'FRANCHISE', customerId: frCustomer, paymentMode: 'AR_PDC', dueDate: day(30), drSiNo: `FD-${run}`, franchiseShipping: { mode: 'AMOUNT', amount: 350, courier: 'LBC' }, lines: [{ productId: prod, qty: 1 }] }).expect(201)).body; drId = sale.id;
+    const drs = ok(await as('wh.assoc').get(`/api/cash-funds/${whFranchise}/franchise-drs`)).body as { id: string }[]; expect(drs.some((d) => d.id === drId)).toBe(true);
+    // a DR can be tied only to the Franchise fund
+    await as('wh.assoc').post('/api/expenses').send({ locationId: wh, accountId: accts[0].id, amount: 20, paidFrom: 'PETTY_CASH', cashFundId: whOffice, salesDocId: drId }).expect(400);
+    const fb = Number(ok(await as('wh.assoc').get(`/api/cash-funds/${whFranchise}`)).body.balance);
+    const ex = ok(await as('wh.assoc').post('/api/expenses').send({ locationId: wh, accountId: accts[0].id, amount: 120, paidFrom: 'PETTY_CASH', cashFundId: whFranchise, salesDocId: drId, payee: 'LBC' }).expect(201)).body;
+    expect(Number(ok(await as('wh.assoc').get(`/api/cash-funds/${whFranchise}`)).body.balance)).toBe(fb - 120);
+    const info = ok(await as('wh.assoc').get(`/api/franchise-ar/shipping-charges/for-sale/${drId}`)).body;
+    expect(info.courierPaid).toHaveLength(1); expect(info.courierPaid[0].fund).toContain('Franchise'); expect(Number(info.courierTotal)).toBe(120); expect(Number(info.charge.amount)).toBe(350);
+    const det = ok(await as('wh.assoc').get(`/api/cash-funds/${whFranchise}`)).body; expect(det.txns.some((t: { drSiNo: string | null; kind: string }) => t.kind === 'EXPENSE' && t.drSiNo === `FD-${run}`)).toBe(true);
+    // voiding gives the money back to the same fund
+    ok(await as('wh.assoc').post(`/api/expenses/${ex.id}/void`).send({ reason: 'wrong amount typed' }));
+    expect(Number(ok(await as('wh.assoc').get(`/api/cash-funds/${whFranchise}`)).body.balance)).toBe(fb);
+  });
+
+  it('the franchise pays the shipping charge in cash into the Franchise fund, tied to the DR; other payments and other invoices cannot', async () => {
+    const inv = await prisma.franchiseInvoice.findFirstOrThrow({ where: { source: 'SHIPPING', notes: { contains: `FD-${run}` } } }).catch(async () => { const c = await prisma.franchiseShippingCharge.findUniqueOrThrow({ where: { salesDocId: drId } }); return prisma.franchiseInvoice.findUniqueOrThrow({ where: { id: c.invoiceId! } }); });
+    const before = Number(ok(await as('acct.assoc').get(`/api/cash-funds/${whFranchise}`)).body.balance);
+    // bank transfer cannot go into the fund; the Office fund is not the Franchise fund
+    await as('acct.assoc').post(`/api/franchise-ar/${inv.id}/payments`).send({ amount: 100, mode: 'BANK_TRANSFER', cashFundId: whFranchise, reference: 'x', proofAttachmentId: null }).expect(400);
+    await as('acct.assoc').post(`/api/franchise-ar/${inv.id}/payments`).send({ amount: 100, mode: 'CASH', cashFundId: whOffice }).expect(400);
+    ok(await as('acct.assoc').post(`/api/franchise-ar/${inv.id}/payments`).send({ amount: 350, mode: 'CASH', cashFundId: whFranchise }).expect(201));
+    const det = ok(await as('acct.assoc').get(`/api/cash-funds/${whFranchise}`)).body;
+    expect(Number(det.balance)).toBe(before + 350);
+    const t = det.txns.find((x: { kind: string }) => x.kind === 'FRANCHISE_RECEIPT'); expect(t.drSiNo).toBe(`FD-${run}`); expect(t.franchiseInvoiceId).toBe(inv.id);
+    const info = ok(await as('wh.incharge').get(`/api/franchise-ar/shipping-charges/for-sale/${drId}`)).body;
+    expect(info.payments).toHaveLength(1); expect(info.payments[0].fund).toContain('Franchise'); expect(info.invoice.status).toBe('PAID');
+    const jv = await prisma.journalVoucher.findFirst({ where: { sourceDocumentType: 'FranchisePayment' }, orderBy: { postedAt: 'desc' }, include: { lines: { include: { account: { select: { id: true } } } } } });
+    const f = await prisma.cashFund.findUniqueOrThrow({ where: { id: whFranchise } }); expect(jv!.lines.some((l) => l.account.id === f.accountId && Number(l.debit) === 350)).toBe(true);
   });
 });

@@ -109,11 +109,16 @@ const NAV: { group: string; items: NavItem[] }[] = [
 const ROLE_LABEL = (k?: string) => (k ?? '').replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
 const initials = (n?: string) => (n ?? '?').split(/\s+/).filter((w) => /^[A-Za-z]/.test(w)).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
 
+/** The menu groups this person may see; the sidebar and the Dashboard search use the same list so they never disagree. */
+export function navFor(canAny: (...keys: string[]) => boolean, roleKey?: string) {
+  return NAV.map((g) => ({ ...g, items: g.items.map((i) => ({ ...i, label: PAGES[i.to]?.label ?? i.label })).filter((i) => (!i.any || canAny(...i.any)) && !(i.hideFor?.includes(roleKey ?? ''))) })).filter((g) => g.items.length);
+}
+
 export function Layout() {
   const { me, logout, canAny } = useAuth(); const nav = useNavigate(); const { pathname } = useLocation(); const [open, setOpen] = useState(false); const [pwOpen, setPwOpen] = useState(false);
   const unread = useQuery({ queryKey: ['unread'], queryFn: () => api.get<{ count: number }>('/api/notifications/unread-count'), refetchInterval: 30000 });
   const approvals = useQuery({ queryKey: ['approvals-count'], queryFn: () => api.get<{ count: number }>('/api/approvals/inbox').then((r) => ({ count: r.count })), refetchInterval: 30000, enabled: !!me });
-  const groups = NAV.map((g) => ({ ...g, items: g.items.map((i) => ({ ...i, label: PAGES[i.to]?.label ?? i.label })).filter((i) => (!i.any || canAny(...i.any)) && !(i.hideFor?.includes(me?.roleKey ?? ''))) })).filter((g) => g.items.length);
+  const groups = navFor(canAny, me?.roleKey);
   return <div className="flex min-h-full">
     <aside className={cn('fixed inset-y-0 left-0 z-30 flex w-72 transform flex-col bg-white transition-transform duration-200 lg:sticky lg:top-3 lg:m-3 lg:mr-0 lg:h-[calc(100vh-1.5rem)] lg:translate-x-0 lg:rounded-[28px] lg:shadow-card', open ? 'translate-x-0 shadow-2xl' : '-translate-x-full')}>
       <div className="flex items-center justify-between px-5 pb-2 pt-5"><BrandMark size="sm" /><button className="rounded-lg p-1 text-slate-500 hover:bg-slate-100 lg:hidden" onClick={() => setOpen(false)} aria-label="Close menu"><X size={18} /></button></div>

@@ -338,6 +338,12 @@ Waybill Report → **Choose waybill PDF files** (TikTok or Shopee labels) → pi
 157. **Correct a card amount** (`acct.assoc`): open that sale → *Credit card amount* → type the real amount and the reason → *Correct the card amount*. Journal Entries show the reversal and the new entry.
 158. **Card remittance** (`acct.assoc`, then `acct.head`): Card Remittances → tick two card sales → bank account, date → type the net the bank credited (about 4% less) → the bank charge and % appear → Save → *Send to the Accounting Head*. `acct.head`: My Approvals → approve. Journal Entries: Dr bank, Dr MDR – Credit Card, Cr AR – Credit Card.
 159. **Draft remittance deleted** (`acct.assoc`): make a remittance, open it under *Remittances*, press *Delete*: its sales are back in *Card sales waiting for the bank*.
+160. **Two warehouse funds** (`acct.head`): Cash Fund → *Set up or change a cash fund* → Warehouse, kind *Warehouse – Office*, ₱3,000; again with kind *Warehouse – Franchise*, ₱2,000. Open the Franchise fund → *Top up from an account* ₱500 from a bank account.
+161. **Pay from the right fund** (`wh.assoc`): Expenses → Paid from *Cash fund* → *Which cash fund* = Warehouse – Office → ₱100 → Save. Then choose *Warehouse – Franchise*, pick a franchise DR in *Franchise DR this is for* → Save: the fund's movements show the DR number.
+162. **Sales associate has none** (`sales.wh`): Petty Cash Fund → no warehouse fund is listed; paying from the cash fund is refused.
+163. **Franchise pays the shipping in cash** (`franchise.coord` makes a franchise DR with shipping ₱350; then `acct.assoc`): Franchise AR → the shipping invoice → *Record payment* → Cash → Deposited to *Cash fund: Warehouse – Franchise*. The fund goes up ₱350; open the DR: *Shipping of this DR* shows the charge, the payment and the fund.
+164. **Dashboard search** (any user): Dashboard → type *cash* in the search box → Petty Cash Fund and Expenses are listed; Enter opens the first.
+165. **Stock layout** (`wh.assoc`): Stock on Hand → an item with several expiry dates / flavors shows *Quantity per flavor* and *Quantity per expiry date* as labelled rows.
 
 ## Where the files come out
 

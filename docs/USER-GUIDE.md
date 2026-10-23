@@ -13,10 +13,12 @@ Each section below starts with a hidden line that says which roles it is for. Th
 - **Authenticator code.** Admin, the External Auditor, the Head Auditor and the Accounting Head may be asked for a 6-digit code from an authenticator app (Google Authenticator or Microsoft Authenticator). During testing the code is switched off.
 - **Signed out after a while?** Sessions end after a period of no activity (longer for sales and franchise staff). Just sign in again.
 - **Forgot your password?** Ask Admin to set a temporary one under Users & Roles. You will be asked to change it when you sign in.
+- **Nobody can sign in, or the authenticator was lost?** On the office Mac the Owner can run `pnpm reset-password <username>` (add `--totp` to clear the authenticator so it is set up again at the next sign-in; `pnpm reset-password --all-demo` resets every demo account to the demo password).
 
 ## Dashboard and notifications
 <!-- for: all -->
 - **Dashboard** is your home page. It shows what needs your attention for your role: today's sales, open AR, approvals waiting for you, critical stock, expiring stock, cash fund balances, your charges, and alarms.
+- **Search the menu:** the box at the top of the Dashboard finds a screen by part of its name or by what it does (for example *cash fund*, *expense*, *DR*, *payroll*, *stock*). Only the screens your account may open are listed; press Enter to open the first one, or use the arrow keys.
 - **Red boxes need action now.** For example the weekly count sheet alarm, or the number of days left before a discrepancy is charged to you (in bold red).
 - **The bell** (top right) lists your notifications: approvals you need to give, stock requests, charges, revisions of your documents, and so on. Click one to open the document.
 - **Approvals** in the menu shows a badge with how many requests are waiting for you.
@@ -111,6 +113,10 @@ Each section below starts with a hidden line that says which roles it is for. Th
 - **Field Auditor:** open Cash Fund, pick the branch, type the cash actually found and press **Confirm count**. If it differs, type the reason. The difference is shown to Admin and the auditors.
 - **Admin / Accounting Head:** set up or change a branch's fund amount at the bottom of the page.
 - Balances of every branch fund appear on the dashboards of Admin, the auditors and Accounting.
+- **The warehouse has two funds of its own (owner request 2026-10-23):** **Warehouse – Office** (the office and everyday warehouse expenses) and **Warehouse – Franchise** (shipping and other money tied to **franchise DRs**). Each has its own balance and its own petty-cash account. They are kept by the **Warehouse Associate and the Warehouse In-Charge**, who spend from them; the Sales Associate at the warehouse store has no cash fund there. The warehouse has no cash sales, so **Accounting tops the funds up** from a bank account (Cash Fund → *Top up from an account*); the Owner or Accounting Head sets them up under *Set up or change a cash fund* (choose the kind).
+- **Paying an expense from a warehouse fund:** Expenses → Paid from **Cash fund** → *Which cash fund* (Office or Franchise). For the **Franchise** fund you may also choose the **Franchise DR this is for** (for example the courier paid for a franchise delivery): the payment is tied to that DR and shows in the fund's movements and on the DR page. A person who works at more than one branch now has a **Branch** box on Expenses.
+- **When a franchise pays the shipping charge in cash:** Accounting opens Franchise AR → the *shipping charge* invoice → **Record payment** → Paid by **Cash** → *Deposited to* **Cash fund: Warehouse – Franchise**. The fund goes up, the movement carries the DR number, and the DR page shows who paid, when, and which fund received it. Bank or GCash payments still go to the bank or GCash account.
+- **On the DR page** a franchise DR now has a **Shipping of this DR** box: the charge, what the franchise paid (and into which fund) and the courier money paid from the Franchise fund.
 
 ## Daily close, cash count and bank deposit
 <!-- for: sale.create, report.sales.own, report.sales.all -->
@@ -205,7 +211,7 @@ In the **Daily Inventory Report**, every figure is clickable. **Click a Sales qu
 
 ## Stock on hand and expiry dates
 <!-- for: report.inventory.own, report.inventory.all -->
-- **Stock on Hand** shows the quantity per product and location, the nearest expiry, and the **quantity per expiry date**. An item with more than one date is marked, so you can see the difference.
+- **Stock on Hand** shows the quantity per product and location, the nearest expiry, and two small tables with headings: **Quantity per flavor** (one row per flavor with its quantity) and **Quantity per expiry date** (one row per expiry date with its quantity in pcs; the nearest date is marked). Nothing is shown as an unlabelled "2027-08-30: 30" any more.
 - The **Batches** table lists every batch with its expiry, in the order it will be sold (earliest first).
 - **Inventory Reports → Daily Inventory Report** gives beginning, received, transfers in and out, sales, adjustments and ending per day. Staff see quantities only; Admin, the auditors and Accounting also see cost.
 

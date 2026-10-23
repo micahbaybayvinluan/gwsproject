@@ -46,7 +46,7 @@ export class AuthController {
   @Get('me')
   async me(@CurrentUser() user: SessionUser) {
     const locations = user.locationIds.length
-      ? await this.prisma.db.location.findMany({ where: { id: { in: user.locationIds } }, select: { id: true, code: true, name: true, type: true, isSelling: true } })
+      ? await this.prisma.db.location.findMany({ where: { id: { in: user.locationIds } }, select: { id: true, code: true, name: true, type: true, isSelling: true }, orderBy: [{ name: 'asc' }] })
       : [];
     const u = await this.prisma.db.user.findUniqueOrThrow({ where: { id: user.id }, select: { idNumber: true, accountabilityAcceptedAt: true, mustChangePassword: true, lastLoginAt: true, role: { select: { name: true } } } });
     return {

@@ -43,7 +43,8 @@ export class InspectionsService {
     const r = await this.prisma.db.storeInspection.findUnique({ where: { id }, include: { location: { select: { id: true, name: true, shortCode: true } } } });
     if (!r) throw new NotFoundException();
     if (!this.canSeeAll(user) && r.inspectorId !== user.id && r.staffOnDutyEmployeeId !== (await this.myEmployeeId(user))) throw new ForbiddenException();
-    const fund = await this.prisma.db.cashFund.findUnique({ where: { locationId: r.locationId }, select: { balance: true, imprestAmount: true } });
+    const fundRow = await this.cashFund.findFund(r.locationId);
+    const fund = fundRow ? { balance: fundRow.balance, imprestAmount: fundRow.imprestAmount } : null;
     return { ...(await this.withNames([r]))[0], cashFund: fund, checklist: CHECKLIST };
   }
 
@@ -73,7 +74,7 @@ export class InspectionsService {
     if (missing.length) throw new BadRequestException(`Answer every item before submitting: ${missing.slice(0, 5).join('; ')}${missing.length > 5 ? '…' : ''}`);
     if (!r.staffOnDutyEmployeeId && !r.staffOnDutyName) throw new BadRequestException('Name the staff on duty');
     const fundItem = items.find((i) => i.key === 'cash_fund');
-    const fund = await this.prisma.db.cashFund.findUnique({ where: { locationId: r.locationId } });
+    const fund = await this.cashFund.findFund(r.locationId);
     await this.prisma.db.$transaction(async (tx) => {
       if (fund && fundItem?.amount != null) {
         const variance = D(fundItem.amount).minus(fund.balance);

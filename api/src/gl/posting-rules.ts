@@ -212,23 +212,23 @@ export function r9Writeoff(r: AccountResolver, e: { locationId: string; controlN
   assertBalanced(entry.lines); return [entry];
 }
 // ── R10 expense / deposit ──
-export function r10Expense(r: AccountResolver, e: { locationId: string; expenseAccountId: string; amount: Decimal.Value; paidFrom: 'CASH_DRAWER' | 'PETTY_CASH' | 'BANK_ACCOUNT' | 'OWNER_ADVANCE'; paidFromAccountId?: string | null; controlNo: string; payee?: string | null }): Entry[] {
+export function r10Expense(r: AccountResolver, e: { locationId: string; expenseAccountId: string; amount: Decimal.Value; paidFrom: 'CASH_DRAWER' | 'PETTY_CASH' | 'BANK_ACCOUNT' | 'OWNER_ADVANCE'; paidFromAccountId?: string | null; fundAccountId?: string | null; controlNo: string; payee?: string | null }): Entry[] {
   let credit: string;
   if (e.paidFrom === 'CASH_DRAWER') credit = r.branch('CASH_ON_HAND', e.locationId);
-  else if (e.paidFrom === 'PETTY_CASH') credit = r.branch('PETTY_CASH', e.locationId);
+  else if (e.paidFrom === 'PETTY_CASH') credit = e.fundAccountId ?? r.branch('PETTY_CASH', e.locationId);
   else if (e.paidFromAccountId) credit = e.paidFromAccountId;
   else throw new MissingAccountError('paid-from account');
   const entry: Entry = { rule: 'R10', book: 'GASTOS_OPEX', lines: [dr(e.expenseAccountId, e.amount), cr(credit, e.amount)], remarks: `Expense ${e.controlNo}`, name: e.payee ?? undefined };
   assertBalanced(entry.lines); return [entry];
 }
 /** Cash fund (petty cash) funded or topped up from a chosen account. */
-export function r10FundSetup(r: AccountResolver, e: { locationId: string; amount: Decimal.Value; fromAccountId: string; ref: string }): Entry[] {
-  const entry: Entry = { rule: 'R10', book: 'GENERAL', lines: [dr(r.branch('PETTY_CASH', e.locationId), e.amount), cr(e.fromAccountId, e.amount)], remarks: `Cash fund ${e.ref}` };
+export function r10FundSetup(r: AccountResolver, e: { locationId: string; amount: Decimal.Value; fromAccountId: string; ref: string; fundAccountId?: string | null }): Entry[] {
+  const entry: Entry = { rule: 'R10', book: 'GENERAL', lines: [dr(e.fundAccountId ?? r.branch('PETTY_CASH', e.locationId), e.amount), cr(e.fromAccountId, e.amount)], remarks: `Cash fund ${e.ref}` };
   assertBalanced(entry.lines); return [entry];
 }
 /** Cash fund replenished from the day's cash sales: cash leaves the drawer (Cash on Hand) and returns to the fund. */
-export function r10FundReplenish(r: AccountResolver, e: { locationId: string; amount: Decimal.Value; ref: string }): Entry[] {
-  const entry: Entry = { rule: 'R10', book: 'GENERAL', lines: [dr(r.branch('PETTY_CASH', e.locationId), e.amount), cr(r.branch('CASH_ON_HAND', e.locationId), e.amount)], remarks: `Cash fund replenishment ${e.ref}` };
+export function r10FundReplenish(r: AccountResolver, e: { locationId: string; amount: Decimal.Value; ref: string; fundAccountId?: string | null }): Entry[] {
+  const entry: Entry = { rule: 'R10', book: 'GENERAL', lines: [dr(e.fundAccountId ?? r.branch('PETTY_CASH', e.locationId), e.amount), cr(r.branch('CASH_ON_HAND', e.locationId), e.amount)], remarks: `Cash fund replenishment ${e.ref}` };
   assertBalanced(entry.lines); return [entry];
 }
 export function r10Deposit(r: AccountResolver, e: { locationId: string; bankAccountId: string; amount: Decimal.Value; ref: string }): Entry[] {

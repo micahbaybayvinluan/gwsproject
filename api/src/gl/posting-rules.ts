@@ -221,6 +221,11 @@ export function r10Expense(r: AccountResolver, e: { locationId: string; expenseA
   const entry: Entry = { rule: 'R10', book: 'GASTOS_OPEX', lines: [dr(e.expenseAccountId, e.amount), cr(credit, e.amount)], remarks: `Expense ${e.controlNo}`, name: e.payee ?? undefined };
   assertBalanced(entry.lines); return [entry];
 }
+/** Cash fund money given out for liquidation: an advance to the liable person (not yet an expense) until the final amount is known. */
+export function r10ExpenseAdvance(r: AccountResolver, e: { locationId: string; amount: Decimal.Value; advanceAccountId: string; fundAccountId?: string | null; controlNo: string; payee?: string | null }): Entry[] {
+  const entry: Entry = { rule: 'R10', book: 'GENERAL', lines: [dr(e.advanceAccountId, e.amount), cr(e.fundAccountId ?? r.branch('PETTY_CASH', e.locationId), e.amount)], remarks: `For liquidation ${e.controlNo}`, name: e.payee ?? undefined };
+  assertBalanced(entry.lines); return [entry];
+}
 /** Cash fund (petty cash) funded or topped up from a chosen account. */
 export function r10FundSetup(r: AccountResolver, e: { locationId: string; amount: Decimal.Value; fromAccountId: string; ref: string; fundAccountId?: string | null }): Entry[] {
   const entry: Entry = { rule: 'R10', book: 'GENERAL', lines: [dr(e.fundAccountId ?? r.branch('PETTY_CASH', e.locationId), e.amount), cr(e.fromAccountId, e.amount)], remarks: `Cash fund ${e.ref}` };
@@ -229,6 +234,13 @@ export function r10FundSetup(r: AccountResolver, e: { locationId: string; amount
 /** Cash fund replenished from the day's cash sales: cash leaves the drawer (Cash on Hand) and returns to the fund. */
 export function r10FundReplenish(r: AccountResolver, e: { locationId: string; amount: Decimal.Value; ref: string; fundAccountId?: string | null }): Entry[] {
   const entry: Entry = { rule: 'R10', book: 'GENERAL', lines: [dr(e.fundAccountId ?? r.branch('PETTY_CASH', e.locationId), e.amount), cr(r.branch('CASH_ON_HAND', e.locationId), e.amount)], remarks: `Cash fund replenishment ${e.ref}` };
+  assertBalanced(entry.lines); return [entry];
+}
+/** Cash fund: more cash put in from an "Advances from …" account, cash lent out as "Advances to …", or paid back (owner request 2026-10-23). */
+export function r10FundAdvance(r: AccountResolver, e: { locationId: string; amount: Decimal.Value; counterAccountId: string; direction: 'IN' | 'OUT'; ref: string; fundAccountId?: string | null }): Entry[] {
+  const fund = e.fundAccountId ?? r.branch('PETTY_CASH', e.locationId);
+  const lines = e.direction === 'IN' ? [dr(fund, e.amount), cr(e.counterAccountId, e.amount)] : [dr(e.counterAccountId, e.amount), cr(fund, e.amount)];
+  const entry: Entry = { rule: 'R10', book: 'GENERAL', lines, remarks: `Cash fund ${e.ref}` };
   assertBalanced(entry.lines); return [entry];
 }
 export function r10Deposit(r: AccountResolver, e: { locationId: string; bankAccountId: string; amount: Decimal.Value; ref: string }): Entry[] {

@@ -42,7 +42,14 @@ export class MasterService {
   async createLocation(data: Prisma.LocationUncheckedCreateInput, actorId: string) {
     const loc = await this.prisma.db.location.create({ data: { ...data, createdBy: actorId } });
     await this.audit.log({ action: 'CREATE', entityType: 'Location', entityId: loc.id, after: loc });
+    // a franchise is also a customer of the warehouse: the franchisee picked on a DR is what connects the DR to this franchise's owner and associates
+    if (loc.type === 'FRANCHISE') await this.ensureFranchiseCustomer(loc.id, loc.code, loc.name, actorId);
     return loc;
+  }
+  async ensureFranchiseCustomer(locationId: string, code: string, name: string, actorId?: string) {
+    const has = await this.prisma.db.customer.findFirst({ where: { locationId, type: 'FRANCHISE' } });
+    if (has) return has;
+    return this.prisma.db.customer.create({ data: { code: `FR-${code}`, name: `Franchise ${name}`, type: 'FRANCHISE', locationId, createdBy: actorId } });
   }
   async updateLocation(id: string, data: Prisma.LocationUncheckedUpdateInput, actorId: string) {
     const before = await this.prisma.db.location.findUniqueOrThrow({ where: { id } });

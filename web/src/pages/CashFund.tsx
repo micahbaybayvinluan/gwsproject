@@ -7,9 +7,9 @@ import { Badge, Button, Card, Empty, ErrorBox, Field, Input, Select } from '@/co
 import { Searchable } from '@/components/Searchable';
 
 interface Fund { id: string; name: string; purpose: string; locationId: string; imprestAmount: string; balance: string; spent: string; lastReplenishedAt: string | null; location: { id: string; name: string; code: string }; lastCheck: { checkedAt: string; countedAmount: string; systemBalance: string; variance: string; reason: string | null } | null }
-interface FundDetail extends Fund { txns: { id: string; drSiNo?: string | null; salesDocId?: string | null; controlNo: string | null; businessDate: string; kind: string; amount: string; balanceAfter: string; notes: string | null; by: string | null; createdAt: string }[]; checks: { id: string; checkedAt: string; countedAmount: string; systemBalance: string; variance: string; reason: string | null; by: string | null }[] }
+interface FundDetail extends Fund { txns: { id: string; personName?: string | null; reference?: string | null; drSiNo?: string | null; salesDocId?: string | null; controlNo: string | null; businessDate: string; kind: string; amount: string; balanceAfter: string; notes: string | null; by: string | null; createdAt: string }[]; checks: { id: string; checkedAt: string; countedAmount: string; systemBalance: string; variance: string; reason: string | null; by: string | null }[] }
 
-const KIND: Record<string, string> = { SETUP: 'Fund set up', TOP_UP: 'Fund changed', EXPENSE: 'Expense paid from fund', FRANCHISE_RECEIPT: 'Cash received from a franchise (shipping)', EXPENSE_VOID: 'Expense voided (returned)', REPLENISH: 'Replenished from cash sales', ADJUST: 'Adjustment' };
+const KIND: Record<string, string> = { ADVANCE_IN: 'Additional cash fund (advance from)', ADVANCE_OUT: 'Pull-out lent to someone (advance to)', ADVANCE_RETURN: 'Pull-out paid back', SETUP: 'Fund set up', TOP_UP: 'Fund changed', EXPENSE: 'Expense paid from fund', FRANCHISE_RECEIPT: 'Cash received from a franchise (shipping)', EXPENSE_VOID: 'Expense voided (returned)', REPLENISH: 'Replenished from cash sales', ADJUST: 'Adjustment' };
 
 /**
  * Branch cash fund: a fixed amount kept at the branch for small expenses, topped back up from the day's cash sales.
@@ -55,6 +55,8 @@ export function CashFundPage() {
         </Card>}
         <Card title="Store checks">{!d.checks.length ? <Empty>No checks yet.</Empty> : <ul className="divide-y text-xs">{d.checks.map((c) => <li key={c.id} className="py-1">{new Date(c.checkedAt).toLocaleString()} · {c.by} · counted {peso(c.countedAmount)} {Number(c.variance) ? <b className="text-red-700">({peso(c.variance)}{c.reason ? `: ${c.reason}` : ''})</b> : <span className="text-emerald-700">(matched)</span>}</li>)}</ul>}</Card>
       </div>
+      {(can('cashfund.spend') || can('cashfund.manage')) && <AdvanceCard fundId={d.id} onDone={inv} />}
+      <FundReport fundId={d.id} name={d.name} />
       <Card title="Movements"><Searchable><table className="w-full text-sm"><thead className="text-left text-xs text-slate-500"><tr><th>Date</th><th>What</th><th>Voucher</th><th className="num">Amount</th><th className="num">Balance</th><th>By</th></tr></thead>
         <tbody>{d.txns.map((t) => <tr key={t.id} className="border-t"><td className="py-1">{fmtDate(t.businessDate)}</td><td>{KIND[t.kind] ?? t.kind}{t.notes ? <span className="text-xs text-slate-500"> — {t.notes}</span> : null}</td><td>{t.drSiNo ? <span className="mr-1 rounded bg-amber-50 px-1 text-xs text-amber-800">DR {t.drSiNo}</span> : null}{t.controlNo ? <button className="text-brand underline" onClick={() => api.download(`/api/reports/forms/fund-replenishment/${t.id}.pdf`, `${t.controlNo}.pdf`)}>{t.controlNo}</button> : ''}</td><td className={`num ${Number(t.amount) < 0 ? 'text-red-700' : 'text-emerald-700'}`}>{peso(t.amount)}</td><td className="num">{peso(t.balanceAfter)}</td><td className="text-xs">{t.by ?? 'system'}</td></tr>)}</tbody></table></Searchable></Card>
     </>}
@@ -71,4 +73,44 @@ function TopUp({ fundId, onDone }: { fundId: string; onDone: () => void }) {
   const accts = useQuery({ queryKey: ['payment-accounts-all'], queryFn: () => api.get<{ id: string; title: string }[]>('/api/accounts/payment') });
   const m = useMutation({ mutationFn: () => api.post(`/api/cash-funds/${fundId}/top-up`, { amount: Number(amount), fromAccountId: from }), onSuccess: () => { setAmount(''); onDone(); } });
   return <div className="mt-3 border-t pt-3"><div className="text-xs font-semibold text-slate-600">Top up from an account</div><div className="mt-1 flex flex-wrap items-end gap-2"><Field label="From"><Select value={from} onChange={(e) => setFrom(e.target.value)}><option value="">—</option>{(accts.data ?? []).map((a) => <option key={a.id} value={a.id}>{a.title}</option>)}</Select></Field><Field label="Amount ₱"><Input className="w-28" type="number" value={amount} onChange={(e) => setAmount(e.target.value)} /></Field><Button size="sm" disabled={!from || !Number(amount) || m.isPending} onClick={() => m.mutate()}>Top up</Button></div><ErrorBox error={m.error} /></div>;
+}
+
+type Acct = { id: string; code: string; title: string };
+/** More cash into the fund from "Advances from …" (e.g. Advances from AMV), cash lent out as "Advances to …", and its repayment (owner request 2026-10-23). */
+function AdvanceCard({ fundId, onDone }: { fundId: string; onDone: () => void }) {
+  const qc = useQueryClient();
+  const accts = useQuery({ queryKey: ['advance-accounts'], queryFn: () => api.get<{ from: Acct[]; to: Acct[] }>('/api/cash-funds/advance-accounts') });
+  const open = useQuery({ queryKey: ['fund-advances', fundId], queryFn: () => api.get<{ counterAccountId: string; account: string; code: string; personName: string; lent: string; returned: string; outstanding: string; since: string }[]>(`/api/cash-funds/${fundId}/advances`) });
+  const [kind, setKind] = useState<'IN' | 'OUT' | 'RETURN'>('IN'); const [f, setF] = useState({ account: '', person: '', amount: '', reference: '', notes: '', date: new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10) });
+  const list = kind === 'IN' ? accts.data?.from : accts.data?.to;
+  const m = useMutation({ mutationFn: () => api.post(`/api/cash-funds/${fundId}/advance`, { kind, amount: Number(f.amount), counterAccountId: f.account, personName: f.person || null, reference: f.reference || null, notes: f.notes || null, date: f.date }), onSuccess: () => { setF({ ...f, amount: '', person: '', reference: '', notes: '' }); void qc.invalidateQueries({ queryKey: ['fund-advances', fundId] }); onDone(); } });
+  const KINDS: [typeof kind, string, string][] = [['IN', 'Additional cash fund', 'Cash put into the fund from an "Advances from" account (for example Advances from AMV)'], ['OUT', 'Pull-out (to be returned)', 'Cash taken out and borrowed by someone: it is an "Advances to" that must be returned'], ['RETURN', 'Paid back', 'The borrowed cash is returned to the fund: choose the same "Advances to" account']];
+  return <Card title="Additional cash and pull-outs">
+    <div className="mb-3 flex flex-wrap gap-2">{KINDS.map(([k, l]) => <button key={k} type="button" className={`rounded-full px-3 py-1.5 text-sm font-semibold ${kind === k ? 'grad-brand text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`} onClick={() => { setKind(k); setF({ ...f, account: '' }); }}>{l}</button>)}</div>
+    <p className="mb-3 text-xs text-slate-500">{KINDS.find((x) => x[0] === kind)![2]}.</p>
+    <div className="grid gap-3 md:grid-cols-3">
+      <Field label={kind === 'IN' ? 'Advances from (where the cash comes from)' : 'Advances to (account)'}><Select value={f.account} onChange={(e) => setF({ ...f, account: e.target.value })}><option value="">—</option>{(list ?? []).map((a) => <option key={a.id} value={a.id}>{a.code} · {a.title}</option>)}</Select></Field>
+      {kind !== 'IN' && <Field label={kind === 'OUT' ? 'Who borrowed it' : 'Who paid it back'}><Input value={f.person} onChange={(e) => setF({ ...f, person: e.target.value })} list="adv-people" />{kind === 'RETURN' && <datalist id="adv-people">{(open.data ?? []).map((o) => <option key={o.counterAccountId + o.personName} value={o.personName} />)}</datalist>}</Field>}
+      <Field label="Amount ₱"><Input type="number" step="0.01" min={0} value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} /></Field>
+      <Field label="Date"><Input type="date" value={f.date} max={new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10)} onChange={(e) => setF({ ...f, date: e.target.value })} /></Field>
+      <Field label="Reference (e.g. CF #)"><Input value={f.reference} onChange={(e) => setF({ ...f, reference: e.target.value })} /></Field>
+      <Field label="Remarks"><Input value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} placeholder="e.g. CASH FUND PULLOUT TO AMV SALES" /></Field>
+    </div>
+    <ErrorBox error={m.error} />
+    <div className="mt-3"><Button disabled={!f.account || !Number(f.amount) || (kind !== 'IN' && !f.person.trim()) || m.isPending} onClick={() => m.mutate()}>{kind === 'IN' ? 'Add cash to the fund' : kind === 'OUT' ? 'Record the pull-out' : 'Record the payment back'}</Button></div>
+    {(open.data ?? []).length > 0 && <div className="mt-4"><div className="mb-1 text-sm font-semibold text-navy">Pull-outs not yet returned</div>
+      <table className="w-full text-sm"><thead className="text-left text-xs text-slate-500"><tr><th>Who</th><th>Advances to</th><th>Since</th><th className="num">Lent</th><th className="num">Returned</th><th className="num">Still to return</th><th /></tr></thead><tbody>{open.data!.map((o) => <tr key={o.counterAccountId + o.personName} className="border-t"><td className="py-1 font-medium">{o.personName}</td><td>{o.code} · {o.account}</td><td>{fmtDate(o.since)}</td><td className="num">{peso(o.lent)}</td><td className="num">{peso(o.returned)}</td><td className="num font-semibold text-amber-700">{peso(o.outstanding)}</td><td><button className="text-xs font-semibold text-brand underline" onClick={() => { setKind('RETURN'); setF({ ...f, account: o.counterAccountId, person: o.personName, amount: o.outstanding }); }}>Paid back</button></td></tr>)}</tbody></table></div>}
+  </Card>;
+}
+
+/** The cash fund ledger in the company's voucher format, in Excel or PDF (owner request 2026-10-23). */
+function FundReport({ fundId, name }: { fundId: string; name: string }) {
+  const first = new Date(Date.now() + 8 * 3600e3); first.setUTCDate(1);
+  const [from, setFrom] = useState(first.toISOString().slice(0, 10)); const [to, setTo] = useState(new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10)); const [err, setErr] = useState<string | null>(null);
+  const get = (ext: 'xlsx' | 'pdf') => api.download(`/api/cash-funds/${fundId}/report.${ext}?from=${from}&to=${to}`, `${name.replace(/[^A-Za-z0-9]+/g, '-')}-${from}-to-${to}.${ext}`).catch((e: Error) => setErr(e.message));
+  return <Card title="Cash fund report (voucher format)">
+    <div className="flex flex-wrap items-end gap-2"><Field label="From"><Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></Field><Field label="To"><Input type="date" value={to} onChange={(e) => setTo(e.target.value)} /></Field><Button onClick={() => get('xlsx')}>Excel</Button><Button variant="outline" onClick={() => get('pdf')}>PDF</Button></div>
+    <p className="mt-2 text-xs text-slate-500">One voucher number per day; each movement has two lines (the expense or advance account and Petty Cash) with the person, the account code and the debit and credit.</p>
+    {err && <p className="mt-1 text-sm text-red-700">{err}</p>}
+  </Card>;
 }

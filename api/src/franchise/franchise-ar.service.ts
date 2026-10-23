@@ -250,7 +250,9 @@ export class FranchiseArService implements OnModuleInit {
       const after = { principalPaid: D(inv.principalPaid).plus(toPrincipal), penaltyPaid: D(inv.penaltyPaid).plus(toPenalty), interestPaid: D(inv.interestPaid).plus(toInterest) };
       const closed = D(inv.amount).minus(after.principalPaid).lte(0) && D(inv.penalty).minus(after.penaltyPaid).lte(0) && D(inv.interest).minus(after.interestPaid).lte(0);
       const upd = await tx.franchiseInvoice.update({ where: { id }, data: { principalPaid: after.principalPaid.toFixed(2), penaltyPaid: after.penaltyPaid.toFixed(2), interestPaid: after.interestPaid.toFixed(2), status: closed ? 'PAID' : 'OPEN' } });
-      if (fund) await this.cashFund.receive(tx, { fundId: fund.id, amount: pay, salesDocId: shipCharge?.salesDocId ?? null, franchiseInvoiceId: id, franchisePaymentId: payment.id, businessDate: paidOn, createdBy: user.id, notes: `Shipping paid by the franchise (${receiptNo})` });
+      let arId: string | null = null;
+      if (fund && inv.fromLocationId) { try { arId = (await this.posting.resolver(tx)).ar({ type: 'FRANCHISE', locationId: inv.franchiseLocationId }, inv.fromLocationId); } catch { arId = null; } }
+      if (fund) await this.cashFund.receive(tx, { fundId: fund.id, counterAccountId: arId, amount: pay, salesDocId: shipCharge?.salesDocId ?? null, franchiseInvoiceId: id, franchisePaymentId: payment.id, businessDate: paidOn, createdBy: user.id, notes: `Shipping paid by the franchise (${receiptNo})` });
       if (payAccountId && inv.fromLocationId) await this.posting.post(tx, { type: 'FranchisePayment', id: payment.id, date: paidOn, createdBy: user.id }, (r) => r4FranchiseCollection(r, { fromLocationId: inv.fromLocationId!, franchiseLocationId: inv.franchiseLocationId, principal: toPrincipal, charges: toPenalty.plus(toInterest), paymentAccountId: payAccountId!, receiptNo }));
       return { payment, inv: upd, toPenalty, toInterest, toPrincipal, closed };
     });

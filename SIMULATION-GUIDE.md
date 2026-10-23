@@ -344,6 +344,17 @@ Waybill Report → **Choose waybill PDF files** (TikTok or Shopee labels) → pi
 163. **Franchise pays the shipping in cash** (`franchise.coord` makes a franchise DR with shipping ₱350; then `acct.assoc`): Franchise AR → the shipping invoice → *Record payment* → Cash → Deposited to *Cash fund: Warehouse – Franchise*. The fund goes up ₱350; open the DR: *Shipping of this DR* shows the charge, the payment and the fund.
 164. **Dashboard search** (any user): Dashboard → type *cash* in the search box → Petty Cash Fund and Expenses are listed; Enter opens the first.
 165. **Stock layout** (`wh.assoc`): Stock on Hand → an item with several expiry dates / flavors shows *Quantity per flavor* and *Quantity per expiry date* as labelled rows.
+166. **Additional cash from AMV** (`wh.assoc`): Cash Fund → Warehouse – Office → *Additional cash and pull-outs* → *Additional cash fund* → Advances from AMV, ₱30,000, reference *CF #: 59* → Add cash to the fund. The fund goes up; the Dashboard card shows the new balance.
+167. **Pull-out and paid back** (`wh.assoc`): *Pull-out (to be returned)* → Advances to AMV, who borrowed *Arden*, ₱500. It appears under *Pull-outs not yet returned*; press **Paid back**, ₱200 → ₱300 still to return.
+168. **Cash fund report** (`wh.assoc`): Cash Fund → *Cash fund report* → dates → **Excel** and **PDF**: one voucher per day, two lines per movement (account and Petty Cash), debit total = credit total.
+170. **DR to a franchise reaches its owner and associates:** as *sales.wh* or *franchise.coord* make a franchise DR for *Franchise Mayon* (any channel). Log in as *fr.mayon.owner*: notice and Franchise DR with prices. Log in as *fr.mayon.assoc*: notice without amounts; the DR shows goods only, no prices/total.
+171. **Connect an old DR:** open a franchise DR that says *not connected* and press *Connect this DR to the franchise now* (coordinator).
+172. **Asst. Franchise Coordinator:** log in as *asst.franchise.coord* (or *asst.franchise.coord2*): Transfers & Pull-outs → New transfer from the Warehouse to West Ave works; franchise screens as the Coordinator.
+174. **For liquidation:** as *wh.assoc* Expenses → Paid from *Cash fund* → tick *For liquidation* → choose the person liable → Save. The fund balance goes down; the row says *For liquidation: <name>*. Press **Liquidate**, type the final amount: the row becomes final and the fund gets back the difference.
+175. **Same-day change:** on the same day press **Change** on the final expense and save a new amount: applied at once.
+176. **Later change needs the Owner:** after the day (or after the Daily Sales Report is submitted) **Change** or **Void** asks for a reason and goes to the Owner; log in as *admin* → My Approvals → approve → the amount/void is applied and *wh.assoc* is told.
+173. **Fund names:** as *wh.assoc* pay an expense from *Warehouse – Office*; in Expenses the *Paid from* column reads *Warehouse – Office* (not PETTY_CASH). In the Cash Fund report the Books column shows the same name.
+169. **Names beside roles** (any user): the top bar shows e.g. *Head Auditor (Syd)*; open a document's *Who did what* and an approval timeline: roles carry the first name.
 
 ## Where the files come out
 

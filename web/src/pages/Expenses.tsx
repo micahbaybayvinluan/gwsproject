@@ -9,6 +9,7 @@ import { DataTable } from '@/components/ui/table';
 import { Attachments } from '@/components/Attachments';
 
 /** §8.6 Branch expenses (accounts tagged to the branch, exact COA names) and main expenses for accounting roles. */
+type ExpRow = { id: string; controlNo: string; docDate: string; amount: string; payee: string | null; paidFrom: string; paidFromLabel: string; forLiquidation: boolean; liableName: string | null; liquidatedAt: string | null; account: { id: string; title: string }; location: { name: string; type?: string } };
 export function ExpensesPage() {
   const { me, can } = useAuth(); const qc = useQueryClient();
   const [locationId, setLocationId] = useState(me!.locations[0]?.id ?? ''); const [main, setMain] = useState(false);
@@ -20,14 +21,16 @@ export function ExpensesPage() {
   const locations = useQuery({ queryKey: ['locations'], queryFn: () => api.get<{ id: string; name: string; type: string }[]>('/api/locations'), enabled: !me!.locationScoped });
   const accounts = useQuery({ queryKey: ['expense-accounts', locationId, main], queryFn: () => api.get<{ id: string; title: string }[]>(`/api/expenses/accounts${main ? '' : `?locationId=${locationId}`}`), enabled: main || !!locationId });
   const payAccts = useQuery({ queryKey: ['payment-accounts', locationId], queryFn: () => api.get<{ id: string; title: string }[]>(`/api/accounts/payment?locationId=${locationId}`) });
-  const list = useQuery({ queryKey: ['expenses', locationId, main], queryFn: () => api.get<{ id: string; controlNo: string; docDate: string; amount: string; payee: string | null; paidFrom: string; account: { title: string }; location: { name: string } }[]>(`/api/expenses?${main ? 'main=1' : locationId ? `locationId=${locationId}` : ''}`) });
+  const list = useQuery({ queryKey: ['expenses', locationId, main], queryFn: () => api.get<{ id: string; controlNo: string; docDate: string; amount: string; payee: string | null; paidFrom: string; paidFromLabel: string; forLiquidation: boolean; liableName: string | null; liquidatedAt: string | null; account: { id: string; title: string }; location: { name: string } }[]>(`/api/expenses?${main ? 'main=1' : locationId ? `locationId=${locationId}` : ''}`) });
   // the cash funds this person may use at the chosen branch (a warehouse has an Office and a Franchise fund)
   const fundsQ = useQuery({ queryKey: ['cash-funds'], queryFn: () => api.get<{ id: string; locationId: string; name: string; purpose: string; balance: string }[]>('/api/cash-funds'), enabled: f.paidFrom === 'PETTY_CASH' });
   const funds = (fundsQ.data ?? []).filter((x) => x.locationId === locationId);
   const [fundId, setFundId] = useState(''); const [drId, setDrId] = useState('');
+  const [forLiq, setForLiq] = useState(false); const [liable, setLiable] = useState(''); const [act, setAct] = useState<{ kind: 'LIQUIDATE' | 'EDIT' | 'VOID'; row: ExpRow } | null>(null);
+  const people = useQuery({ queryKey: ['liable-people'], queryFn: () => api.get<{ id: string; fullName: string; position: string | null }[]>('/api/expenses/liable-people'), enabled: forLiq && f.paidFrom === 'PETTY_CASH' });
   const fund = funds.find((x) => x.id === fundId) ?? funds[0] ?? null;
   const drs = useQuery({ queryKey: ['fund-drs', fund?.id], queryFn: () => api.get<{ id: string; drSiNo: string; docDate: string; franchise: string | null; shipping: { status: string; amount: string | null } | null; paidFromFund: string }[]>(`/api/cash-funds/${fund!.id}/franchise-drs`), enabled: fund?.purpose === 'FRANCHISE' });
-  const m = useMutation({ mutationFn: () => api.post<{ id: string }>('/api/expenses', { locationId: main ? undefined : locationId, docDate: f.docDate, accountId: f.accountId, payee: f.payee, amount: Number(f.amount), paidFrom: f.paidFrom, paidFromAccountId: f.paidFromAccountId || null, cashFundId: f.paidFrom === 'PETTY_CASH' && fund ? fund.id : null, salesDocId: f.paidFrom === 'PETTY_CASH' && fund?.purpose === 'FRANCHISE' && drId ? drId : null, notes: f.notes }), onError: (e) => { if (e instanceof ApiError && (e.body as { code?: string })?.code === 'NO_CASH_ON_HAND') setNoCash((e.body as { message: string }).message); }, onSuccess: (r) => { setCreated(r.id); setF({ ...f, amount: '', payee: '', notes: '' }); void qc.invalidateQueries({ queryKey: ['expenses'] }); void qc.invalidateQueries({ queryKey: ['cash-funds'] }); void qc.invalidateQueries({ queryKey: ['fund-drs'] }); setDrId(''); } });
+  const m = useMutation({ mutationFn: () => api.post<{ id: string }>('/api/expenses', { locationId: main ? undefined : locationId, docDate: f.docDate, accountId: f.accountId, payee: f.payee, amount: Number(f.amount), paidFrom: f.paidFrom, paidFromAccountId: f.paidFromAccountId || null, cashFundId: f.paidFrom === 'PETTY_CASH' && fund ? fund.id : null, salesDocId: f.paidFrom === 'PETTY_CASH' && fund?.purpose === 'FRANCHISE' && drId ? drId : null, notes: f.notes, forLiquidation: f.paidFrom === 'PETTY_CASH' && forLiq ? true : undefined, liableEmployeeId: f.paidFrom === 'PETTY_CASH' && forLiq ? liable || null : undefined }), onError: (e) => { if (e instanceof ApiError && (e.body as { code?: string })?.code === 'NO_CASH_ON_HAND') setNoCash((e.body as { message: string }).message); }, onSuccess: (r) => { setCreated(r.id); setF({ ...f, amount: '', payee: '', notes: '' }); void qc.invalidateQueries({ queryKey: ['expenses'] }); void qc.invalidateQueries({ queryKey: ['cash-funds'] }); void qc.invalidateQueries({ queryKey: ['fund-drs'] }); setDrId(''); } });
   return <div className="space-y-4">
     <div className="flex flex-wrap items-end gap-2"><h1 className="mr-auto text-2xl font-bold tracking-tight text-navy">Expenses</h1>{(!me!.locationScoped || me!.locations.length > 1) && <Field label="Branch"><Select value={locationId} onChange={(e) => { setLocationId(e.target.value); setMain(false); setFundId(''); }}><option value="">—</option>{(me!.locationScoped ? me!.locations : locations.data ?? []).map((l) => <option key={l.id} value={l.id}>{locLabel(l)}</option>)}</Select></Field>}{can('expense.create.main') && <label className="flex items-center gap-1 text-sm"><input type="checkbox" checked={main} onChange={(e) => setMain(e.target.checked)} /> Main / office expenses</label>}</div>
     <Card title="New expense">
@@ -44,9 +47,11 @@ export function ExpensesPage() {
           {fund?.purpose === 'FRANCHISE' && <Field label="Franchise DR this is for (shipping paid for a franchise)" className="md:col-span-3"><Select value={drId} onChange={(e) => setDrId(e.target.value)}><option value="">— not for a particular DR —</option>{(drs.data ?? []).map((d) => <option key={d.id} value={d.id}>{d.drSiNo} · {d.franchise ?? ''} · {d.docDate}{d.shipping ? ` · shipping ${d.shipping.status === 'FILLED' ? peso(d.shipping.amount ?? 0) : 'to follow'}` : ''}{Number(d.paidFromFund) ? ` · paid from fund ${peso(d.paidFromFund)}` : ''}</option>)}</Select></Field>}
         </>)}
         {(f.paidFrom === 'BANK_ACCOUNT' || f.paidFrom === 'OWNER_ADVANCE') && <Field label="Paid-from account"><Select value={f.paidFromAccountId} onChange={(e) => setF({ ...f, paidFromAccountId: e.target.value })}><option value="">—</option>{payAccts.data?.map((a) => <option key={a.id} value={a.id}>{a.title}</option>)}</Select></Field>}
+        {f.paidFrom === 'PETTY_CASH' && !main && <label className="flex items-center gap-2 self-end pb-2 text-sm md:col-span-3"><input type="checkbox" checked={forLiq} onChange={(e) => setForLiq(e.target.checked)} /> <span><b>For liquidation</b>: the final amount or receipt is not ready yet. The money leaves the fund but is not an expense until it is liquidated (edited with the final amount).</span></label>}
+        {f.paidFrom === 'PETTY_CASH' && !main && forLiq && <Field label="Person liable for this money (required)" className="md:col-span-2"><Select value={liable} onChange={(e) => setLiable(e.target.value)}><option value="">— choose —</option>{people.data?.map((p) => <option key={p.id} value={p.id}>{p.fullName}{p.position ? ` · ${p.position}` : ''}</option>)}</Select></Field>}
         <Field label="Notes" className="md:col-span-3"><Input value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} /></Field>
       </div>
-      <div className="mt-3 flex items-center gap-3"><Button disabled={!f.accountId || !f.amount || m.isPending} onClick={() => {
+      <div className="mt-3 flex items-center gap-3"><Button disabled={!f.accountId || !f.amount || m.isPending || (forLiq && f.paidFrom === 'PETTY_CASH' && !liable)} onClick={() => {
         const avail = coh.data ? Number(coh.data.cashOnHand) : null;
         if (f.paidFrom === 'CASH_DRAWER' && !main && avail != null && Number(f.amount) > avail) { setNoCash(avail <= 0 ? 'There is no cash on hand at this branch, so this expense cannot be paid from it.' : `There is only ${peso(avail)} cash on hand at this branch, less than this expense (${peso(f.amount)}).`); return; }
         m.mutate();
@@ -55,6 +60,39 @@ export function ExpensesPage() {
       {noCash && <Modal title="Not enough cash on hand" onClose={() => setNoCash(null)}><p className="text-sm text-slate-700">{noCash}</p><p className="mt-2 text-sm text-slate-700">Choose <b>Cash fund</b> (petty cash) instead, or ask Accounting to pay it from the bank.</p><div className="mt-4 flex justify-end gap-2"><Button variant="outline" onClick={() => setNoCash(null)}>Close</Button><Button onClick={() => { setF({ ...f, paidFrom: 'PETTY_CASH' }); setNoCash(null); }}>Pay from the cash fund</Button></div></Modal>}
       {created && <div className="mt-3"><Attachments type="ExpenseDoc" id={created} /></div>}
     </Card>
-    <DataTable exportName="Expenses" data={list.data ?? []} columns={[{ header: 'Date', accessorKey: 'docDate', cell: (c) => fmtDate(c.getValue()) }, { header: 'Control #', accessorKey: 'controlNo' }, { header: 'Branch', accessorFn: (r) => r.location.name }, { header: 'Account', accessorFn: (r) => r.account.title }, { header: 'Payee', accessorKey: 'payee' }, { header: 'Paid from', accessorKey: 'paidFrom' }, { header: 'Amount', accessorKey: 'amount', cell: (c) => <span className="num block">{peso(c.getValue())}</span> }]} />
+    <DataTable exportName="Expenses" data={list.data ?? []} columns={[{ header: 'Date', accessorKey: 'docDate', cell: (c) => fmtDate(c.getValue()) }, { header: 'Control #', accessorKey: 'controlNo' }, { header: 'Branch', accessorFn: (r) => r.location.name }, { header: 'Account', accessorFn: (r) => r.account.title }, { header: 'Payee', accessorKey: 'payee' }, { header: 'Paid from', accessorKey: 'paidFromLabel' }, { header: 'Amount', accessorKey: 'amount', cell: (c) => <span className="num block">{peso(c.getValue())}</span> }, { header: 'Status', accessorFn: (r) => (r.forLiquidation ? `For liquidation: ${r.liableName ?? ''}` : r.liquidatedAt ? 'Liquidated' : ''), cell: (c) => <span className={c.row.original.forLiquidation ? 'font-semibold text-amber-700' : 'text-slate-600'}>{c.getValue() as string}</span> }, { header: '', id: 'act', enableSorting: false, cell: (c) => <ExpenseActions row={c.row.original} onAct={(kind) => setAct({ kind, row: c.row.original })} /> }]} />
+    {act && <ExpenseActionModal act={act} accounts={accounts.data ?? []} onClose={() => setAct(null)} onDone={() => { setAct(null); void qc.invalidateQueries({ queryKey: ['expenses'] }); void qc.invalidateQueries({ queryKey: ['cash-funds'] }); void qc.invalidateQueries({ queryKey: ['dashboard'] }); }} />}
   </div>;
+}
+
+/** Warehouse cash fund expenses: liquidate what was given out, change or void it (the associate on the day; later the Owner approves). */
+function ExpenseActions({ row, onAct }: { row: ExpRow; onAct: (k: 'LIQUIDATE' | 'EDIT' | 'VOID') => void }) {
+  if (row.paidFrom !== 'PETTY_CASH' || row.location.type !== 'WAREHOUSE') return null;
+  return <span className="flex gap-2 whitespace-nowrap text-xs font-semibold">{row.forLiquidation ? <button className="text-brand underline" onClick={() => onAct('LIQUIDATE')}>Liquidate</button> : <button className="text-brand underline" onClick={() => onAct('EDIT')}>Change</button>}<button className="text-red-700 underline" onClick={() => onAct('VOID')}>Void</button></span>;
+}
+function ExpenseActionModal({ act, accounts, onClose, onDone }: { act: { kind: 'LIQUIDATE' | 'EDIT' | 'VOID'; row: ExpRow }; accounts: { id: string; title: string }[]; onClose: () => void; onDone: () => void }) {
+  const r = act.row;
+  const [amount, setAmount] = useState(String(Number(r.amount))); const [accountId, setAccountId] = useState(r.account.id); const [payee, setPayee] = useState(r.payee ?? ''); const [reason, setReason] = useState('');
+  const [sent, setSent] = useState<string | null>(null);
+  const m = useMutation({
+    mutationFn: () => act.kind === 'LIQUIDATE' ? api.post<unknown>(`/api/expenses/${r.id}/liquidate`, { amount: Number(amount), accountId, payee: payee || null })
+      : act.kind === 'EDIT' ? api.post<{ applied: boolean; message?: string }>(`/api/expenses/${r.id}/edit`, { amount: Number(amount), accountId, payee: payee || null, reason: reason || undefined })
+      : api.post<{ requested?: boolean; message?: string }>(`/api/expenses/${r.id}/void`, { reason }),
+    onSuccess: (res) => { const x = res as { requested?: boolean; applied?: boolean; message?: string } | null; if (x && (x.requested || x.applied === false)) setSent(x.message ?? 'Sent to the Owner for approval.'); else onDone(); },
+  });
+  const title = act.kind === 'LIQUIDATE' ? `Liquidate ${r.controlNo}` : act.kind === 'EDIT' ? `Change ${r.controlNo}` : `Void ${r.controlNo}`;
+  return <Modal title={title} onClose={sent ? onDone : onClose}>
+    {sent ? <><p className="text-sm text-slate-700">{sent}</p><div className="mt-4 flex justify-end"><Button onClick={onDone}>OK</Button></div></> : <>
+      {act.kind === 'LIQUIDATE' && <p className="mb-3 text-sm text-slate-600">Given to <b>{r.liableName}</b>: {peso(r.amount)}. Type the final amount on the receipt: the expense becomes final and the fund gets back (or pays) the difference.</p>}
+      {act.kind !== 'VOID' && <div className="grid gap-3 md:grid-cols-2">
+        <Field label={act.kind === 'LIQUIDATE' ? 'Final amount' : 'Amount'}><Input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} /></Field>
+        <Field label="Payee"><Input value={payee} onChange={(e) => setPayee(e.target.value)} /></Field>
+        <Field label="Account" className="md:col-span-2"><Select value={accountId} onChange={(e) => setAccountId(e.target.value)}>{accounts.map((a) => <option key={a.id} value={a.id}>{a.title}</option>)}</Select></Field>
+      </div>}
+      {act.kind !== 'LIQUIDATE' && <Field label={act.kind === 'VOID' ? 'Why is it void? (required)' : 'Why change it? (required after the day\'s cut-off)'} className="mt-3"><Input value={reason} onChange={(e) => setReason(e.target.value)} /></Field>}
+      {act.kind !== 'LIQUIDATE' && <p className="mt-2 text-xs text-slate-500">You change it yourself only on the day, before the Daily Sales Report is submitted. Later, the Owner approves the change.</p>}
+      <ErrorBox error={m.error} />
+      <div className="mt-4 flex justify-end gap-2"><Button variant="outline" onClick={onClose}>Close</Button><Button variant={act.kind === 'VOID' ? 'danger' : undefined} disabled={m.isPending || (act.kind === 'VOID' && reason.trim().length < 3) || (act.kind !== 'VOID' && !Number(amount))} onClick={() => m.mutate()}>{act.kind === 'LIQUIDATE' ? 'Liquidate: make it final' : act.kind === 'EDIT' ? 'Save change' : 'Void expense'}</Button></div>
+    </>}
+  </Modal>;
 }

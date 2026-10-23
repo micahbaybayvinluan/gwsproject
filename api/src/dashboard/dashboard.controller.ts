@@ -86,7 +86,7 @@ export class DashboardController {
       out.cardWaiting = { count: open.length, total: open.reduce((t, x) => t + Number(x.cardAmount ?? x.grandTotal), 0).toFixed(2), late: open.filter((x) => x.docDate < cutoff).length, alertDays };
     }
     // branch cash funds: every balance for Admin / auditors / Accounting (and the Field Auditor who checks them); own fund for branch staff
-    if (['cashfund.view.all', 'cashfund.check', 'cashfund.use', 'cashfund.manage'].some((k) => u.permissions.has(k))) out.cashFunds = await this.cashFund.dashboard(u);
+    if (['cashfund.view.all', 'cashfund.check', 'cashfund.use', 'cashfund.manage', 'cashfund.spend'].some((k) => u.permissions.has(k))) out.cashFunds = await this.cashFund.dashboard(u);
     // discrepancy countdown for branch staff: days left before an open case is charged (shown in bold red)
     if (u.permissions.has('discrepancy.explain') && u.locationScoped) {
       const cases = await this.prisma.db.discrepancyCase.findMany({ where: { status: 'OPEN', countDoc: { locationId: { in: u.locationIds } } }, include: { countDoc: { select: { controlNo: true, location: { select: { name: true } }, lines: { where: { variance: { lt: 0 } }, select: { variance: true } } } } }, orderBy: { deadline: 'asc' } });

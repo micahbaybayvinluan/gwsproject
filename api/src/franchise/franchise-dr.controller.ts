@@ -12,6 +12,7 @@ export class FranchiseDrController {
   constructor(private svc: FranchiseDrService) {}
   @Get() @RequirePermission('franchise.dr.view') list(@CurrentUser() u: SessionUser, @Query('status') status?: string) { return this.svc.list(u, { status }); }
   @Get('sale/:saleId') @RequirePermission('franchise.dr.view') forSale(@Param('saleId') saleId: string) { return this.svc.forSale(saleId); }
+  @Post('sale/:saleId/connect') @RequirePermission('franchise.dr.edit') @Audited('FranchiseDrReceipt', 'CONNECT') connect(@Param('saleId') saleId: string, @CurrentUser() u: SessionUser) { return this.svc.connect(saleId, u); }
   @Post(':id/receive') @RequirePermission('franchise.dr.receive') @Audited('FranchiseDrReceipt', 'RECEIVE') receive(@Param('id') id: string, @CurrentUser() u: SessionUser) { return this.svc.receive(u, id); }
   @Post(':id/problem') @RequirePermission('franchise.dr.receive') problem(@Param('id') id: string, @Body(Z(Problem)) dto: z.infer<typeof Problem>, @CurrentUser() u: SessionUser) { return this.svc.dispute(u, id, dto.note); }
 }

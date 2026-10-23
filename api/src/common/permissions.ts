@@ -39,6 +39,7 @@ export const APPROVAL_TYPES = [
   'ECOM_PULLOUT',
   'ECOM_SETTLEMENT',
   'CARD_REMITTANCE',
+  'EXPENSE_EDIT',
   'TRANSFER_DIFF_REVIEW',
   'TRANSFER_DIFF_SENDER',
   'TRANSFER_DIFF_ADMIN',
@@ -332,8 +333,8 @@ export const ROLE_CATALOGUE: RoleDefinition[] = [
   {
     key: 'ASST_FRANCHISE_COORDINATOR',
     name: 'Asst. Franchise Coordinator',
-    description: 'Helps the Franchise Coordinator: same views of franchise receivables and transfers, and may issue memorandums. Never sees cost. May record sales from the warehouse (franchises and every other channel), and fills in the shipping charge billed to a franchise.',
-    permissions: ['franchise.dr.view', 'franchise.dr.edit', 'fo.generate', 'fo.view', 'franchise.ar.view', 'sale.create.warehouse', 'franchise.shipping.fill', 'price.view.AGENT', 'price.view.TIKTOK', 'price.view.SHOPEE', 'price.view.LAZADA', 'memo.create', 'ar.view', 'product.view', 'location.view.all', 'report.sales.all', 'report.inventory.all', 'price.view.RETAIL', 'price.view.FRANCHISE', 'price.view.DEALER', 'price.view.CC', 'dashboard.view', 'notification.view', 'discrepancy.view'],
+    description: 'Helps the Franchise Coordinator and does everything the Franchise Coordinator does (franchise receivables and transfers, memorandums, sales from the warehouse for franchises and every other channel, the shipping charge billed to a franchise). Also works like the warehouse Sales Associate: prepares and confirms stock transfers to branches and franchises, counts, expenses, replacement tickets, same-day sale edits and collections. Never sees cost.',
+    permissions: ['franchise.dr.view', 'franchise.dr.edit', 'fo.generate', 'fo.view', 'franchise.ar.view', 'sale.create.warehouse', 'franchise.shipping.fill', 'price.view.AGENT', 'price.view.TIKTOK', 'price.view.SHOPEE', 'price.view.LAZADA', 'memo.create', 'ar.view', 'product.view', 'location.view.all', 'report.sales.all', 'report.inventory.all', 'price.view.RETAIL', 'price.view.FRANCHISE', 'price.view.DEALER', 'price.view.CC', 'dashboard.view', 'notification.view', 'discrepancy.view', 'transfer.create', 'transfer.confirm', 'replacement.create', 'sixpack.issue', 'stock.flavor.set', 'sale.edit.sameday', 'ar.collect', 'expense.create.branch', 'expense.view', 'count.create', 'discrepancy.explain', 'consignment.request', 'approval.act.TRANSFER_DIFF_SENDER', 'location.view.own', 'report.inventory.own'],
   },
   {
     key: 'AGENT',
@@ -403,6 +404,8 @@ export const APPROVAL_ROUTING: Record<ApprovalType, { roles: RoleKey[]; anyOf?: 
   ECOM_SETTLEMENT: { roles: ['ACCOUNTING_HEAD'] },
   /** Card sales cleared by the bank (net received, fee split per sale): the Accounting Head approves before it posts. */
   CARD_REMITTANCE: { roles: ['ACCOUNTING_HEAD'] },
+  /** A change to a warehouse cash fund expense after the day's cut-off (or to a finalized one the same way): the Owner approves. */
+  EXPENSE_EDIT: { roles: ['ADMIN'] },
   /** Received quantity differs from the transfer form: the Head Auditor reviews first. */
   TRANSFER_DIFF_REVIEW: { roles: ['HEAD_AUDITOR'] },
   /** Then the sending branch confirms (any one of its staff) within 2 days. */

@@ -20,12 +20,20 @@ export class FranchiseDrService {
 
   private headOffice(user: SessionUser) { return user.permissions.has('franchise.dr.view') && !user.permissions.has('franchise.dr.receive'); }
 
+  /** Tell everyone at the franchise: the owner and coordinators see the amounts, the franchise sales associates only the goods (they never see what the franchise pays). */
+  private async tellFranchise(franchiseLocationId: string, n: { type: string; title: string; body?: string; link?: string }, plain: { title: string; body?: string }, extraUserIds: string[] = []) {
+    await this.ar.tell(franchiseLocationId, n, extraUserIds);
+    const assocs = await requestContext.runSystem(async () => await this.prisma.db.user.findMany({ where: { active: true, role: { key: 'FRANCHISE_SALES_ASSOCIATE' }, assignments: { some: { locationId: franchiseLocationId } } }, select: { id: true } }));
+    if (assocs.length) await this.notify.toUsers(assocs.map((u) => u.id), { type: n.type, link: n.link, ...plain });
+  }
+
   /** Called when a franchise DR is saved: the receipt is waiting and everyone concerned is told. */
   async onSale(sale: { id: string; drSiNo: string; locationId: string; grandTotal: unknown; paymentMode: string; dueDate: Date | null }, franchiseLocationId: string, user: SessionUser) {
     await this.prisma.db.franchiseDrReceipt.create({ data: { salesDocId: sale.id, franchiseLocationId, fromLocationId: sale.locationId } });
     const from = await this.prisma.db.location.findUniqueOrThrow({ where: { id: sale.locationId }, select: { name: true } });
     const credit = sale.paymentMode === 'AR_PDC';
-    await this.ar.tell(franchiseLocationId, { type: 'FRANCHISE_DR', title: `New DR ${sale.drSiNo} from ${from.name} for the franchise: ${peso(sale.grandTotal)}${credit ? `, on credit${sale.dueDate ? ` due ${dateStr(sale.dueDate)}` : ''}` : ''}`, body: 'The franchise checks the goods and confirms receipt (or reports a problem) under Franchise DRs.', link: '/franchise-drs' });
+    const body = 'The franchise checks the goods and confirms receipt (or reports a problem) under Franchise DRs.';
+    await this.tellFranchise(franchiseLocationId, { type: 'FRANCHISE_DR', title: `New DR ${sale.drSiNo} from ${from.name} for the franchise: ${peso(sale.grandTotal)}${credit ? `, on credit${sale.dueDate ? ` due ${dateStr(sale.dueDate)}` : ''}` : ''}`, body, link: '/franchise-drs' }, { title: `New DR ${sale.drSiNo} from ${from.name} is waiting: check the goods against it.`, body });
     await this.audit.log({ action: 'FRANCHISE_DR', entityType: 'SalesDoc', entityId: sale.id, after: { franchiseLocationId }, userId: user.id });
   }
 
@@ -33,17 +41,20 @@ export class FranchiseDrService {
   async onAmended(oldSaleId: string, newSale: { id: string; drSiNo: string; locationId: string; grandTotal: unknown; paymentMode: string; dueDate: Date | null }, franchiseLocationId: string, user: SessionUser) {
     await this.prisma.db.franchiseDrReceipt.updateMany({ where: { salesDocId: oldSaleId }, data: { status: 'SUPERSEDED' } });
     await this.onSale(newSale, franchiseLocationId, user);
-    await this.ar.tell(franchiseLocationId, { type: 'FRANCHISE_DR_EDITED', title: `DR ${newSale.drSiNo} was corrected by ${user.fullName}: now ${peso(newSale.grandTotal)}. Please check the goods again and confirm.`, link: '/franchise-drs' });
+    await this.tellFranchise(franchiseLocationId, { type: 'FRANCHISE_DR_EDITED', title: `DR ${newSale.drSiNo} was corrected by ${user.fullName}: now ${peso(newSale.grandTotal)}. Please check the goods again and confirm.`, link: '/franchise-drs' }, { title: `DR ${newSale.drSiNo} was corrected by ${user.fullName}. Please check the goods again and confirm.` });
   }
+
+  /** A franchise sales associate never sees what the franchise pays (prices, totals, credit terms); the owner, coordinators and Accounting do. */
+  private hideCost(user: SessionUser) { return user.roleKey === 'FRANCHISE_SALES_ASSOCIATE'; }
 
   private async rows(where: object, user: SessionUser) {
     const rs = await this.prisma.db.franchiseDrReceipt.findMany({ where, orderBy: { createdAt: 'desc' }, take: 200 });
     const docs = await requestContext.runSystem(async () => await this.prisma.db.salesDoc.findMany({ where: { id: { in: rs.map((r) => r.salesDocId) } }, include: { lines: { include: { product: { select: { name: true, sku: true } }, batch: { select: { flavor: true, expiryDate: true, batchNo: true } } } } } }));
     const locs = new Map((await this.prisma.db.location.findMany({ select: { id: true, name: true } })).map((l) => [l.id, l.name]));
-    void user;
-    return rs.map((r) => { const d = docs.find((x) => x.id === r.salesDocId); const lines = new Map<string, { product: string; sku: string; flavor: string | null; qty: number; unitPrice: number }>();
-      for (const l of d?.lines ?? []) { if (l.qty <= 0) continue; const k = `${l.productId}|${l.batch.flavor ?? ''}|${l.unitPrice}`; const c = lines.get(k) ?? { product: l.product.name, sku: l.product.sku, flavor: l.batch.flavor ?? null, qty: 0, unitPrice: Number(l.unitPrice) }; c.qty += l.qty; lines.set(k, c); }
-      return { id: r.id, saleId: r.salesDocId, drSiNo: d?.drSiNo ?? '', date: d ? dateStr(d.docDate) : '', status: r.status, franchise: locs.get(r.franchiseLocationId) ?? '', franchiseLocationId: r.franchiseLocationId, from: locs.get(r.fromLocationId) ?? '', total: Number(d?.grandTotal ?? 0), paymentMode: d?.paymentMode ?? '', dueDate: d?.dueDate ? dateStr(d.dueDate) : null, voided: !!d?.voidedAt,
+    const hide = this.hideCost(user);
+    return rs.map((r) => { const d = docs.find((x) => x.id === r.salesDocId); const lines = new Map<string, { product: string; sku: string; flavor: string | null; qty: number; unitPrice: number | null }>();
+      for (const l of d?.lines ?? []) { if (l.qty <= 0) continue; const k = `${l.productId}|${l.batch.flavor ?? ''}|${hide ? '' : l.unitPrice}`; const c = lines.get(k) ?? { product: l.product.name, sku: l.product.sku, flavor: l.batch.flavor ?? null, qty: 0, unitPrice: hide ? null : Number(l.unitPrice) }; c.qty += l.qty; lines.set(k, c); }
+      return { id: r.id, saleId: r.salesDocId, drSiNo: d?.drSiNo ?? '', date: d ? dateStr(d.docDate) : '', status: r.status, franchise: locs.get(r.franchiseLocationId) ?? '', franchiseLocationId: r.franchiseLocationId, from: locs.get(r.fromLocationId) ?? '', total: hide ? null : Number(d?.grandTotal ?? 0), paymentMode: hide ? '' : d?.paymentMode ?? '', dueDate: !hide && d?.dueDate ? dateStr(d.dueDate) : null, costHidden: hide, voided: !!d?.voidedAt,
         receivedByName: r.receivedByName, receivedAt: r.receivedAt, disputeNote: r.disputeNote, lines: [...lines.values()] }; });
   }
 
@@ -69,7 +80,7 @@ export class FranchiseDrService {
       return tx.franchiseDrReceipt.update({ where: { id }, data: { status: 'RECEIVED', receivedBy: user.id, receivedByName: user.fullName, receivedAt: new Date(), disputeNote: null } });
     }));
     await this.audit.log({ action: 'FRANCHISE_DR_RECEIVED', entityType: 'SalesDoc', entityId: doc.id, after: { by: user.fullName } });
-    await this.ar.tell(r.franchiseLocationId, { type: 'FRANCHISE_DR_RECEIVED', title: `${loc.name} received DR ${doc.drSiNo} (${user.fullName})`, link: '/franchise-drs' }, [doc.preparedBy]);
+    await this.tellFranchise(r.franchiseLocationId, { type: 'FRANCHISE_DR_RECEIVED', title: `${loc.name} received DR ${doc.drSiNo} (${user.fullName})`, link: '/franchise-drs' }, { title: `${loc.name} received DR ${doc.drSiNo} (${user.fullName})` }, [doc.preparedBy]);
     return out;
   }
 
@@ -81,7 +92,8 @@ export class FranchiseDrService {
     if (!note?.trim() || note.trim().length < 3) throw new BadRequestException('Say what is wrong (item, quantity, flavor …)');
     const doc = await requestContext.runSystem(async () => await this.prisma.db.salesDoc.findUniqueOrThrow({ where: { id: r.salesDocId } }));
     await this.prisma.db.franchiseDrReceipt.update({ where: { id }, data: { status: 'DISPUTED', disputeNote: note.trim(), disputedBy: user.id, disputedAt: new Date() } });
-    await this.ar.tell(r.franchiseLocationId, { type: 'FRANCHISE_DR_PROBLEM', title: `${user.fullName} reports a problem on DR ${doc.drSiNo}: ${note.trim()}`, body: 'The Franchise Coordinator edits the DR; the franchise then checks it again.', link: '/franchise-drs' }, [doc.preparedBy]);
+    const pbody = 'The Franchise Coordinator edits the DR; the franchise then checks it again.';
+    await this.tellFranchise(r.franchiseLocationId, { type: 'FRANCHISE_DR_PROBLEM', title: `${user.fullName} reports a problem on DR ${doc.drSiNo}: ${note.trim()}`, body: pbody, link: '/franchise-drs' }, { title: `${user.fullName} reports a problem on DR ${doc.drSiNo}: ${note.trim()}`, body: pbody }, [doc.preparedBy]);
     await this.audit.log({ action: 'FRANCHISE_DR_PROBLEM', entityType: 'SalesDoc', entityId: doc.id, after: { note } });
     return { id };
   }
@@ -90,6 +102,20 @@ export class FranchiseDrService {
   async forSale(saleId: string) {
     const r = await this.prisma.db.franchiseDrReceipt.findUnique({ where: { salesDocId: saleId } });
     return r ? { id: r.id, status: r.status, receivedByName: r.receivedByName, receivedAt: r.receivedAt, disputeNote: r.disputeNote } : null;
+  }
+
+  /** A DR sold to a franchise before it was connected (or whose franchisee was not linked): connect it now so the franchise sees it and can put the stock in. */
+  async connect(saleId: string, user: SessionUser) {
+    const doc = await requestContext.runSystem(async () => await this.prisma.db.salesDoc.findUnique({ where: { id: saleId }, include: { customer: { select: { type: true, locationId: true } } } }));
+    if (!doc) throw new NotFoundException();
+    if (doc.voidedAt) throw new BadRequestException('This DR was voided');
+    if (doc.customer?.type !== 'FRANCHISE') throw new BadRequestException('This DR is not for a franchise');
+    if (!doc.customer.locationId) throw new BadRequestException('The franchisee is not linked to its franchise branch yet. Ask the Admin to link the customer to the franchise location.');
+    const existing = await this.prisma.db.franchiseDrReceipt.findUnique({ where: { salesDocId: saleId } });
+    if (existing && existing.status !== 'SUPERSEDED') throw new BadRequestException('This DR is already connected to the franchise');
+    if (existing) await this.prisma.db.franchiseDrReceipt.delete({ where: { id: existing.id } });
+    await this.onSale({ id: doc.id, drSiNo: doc.drSiNo ?? '', locationId: doc.locationId, grandTotal: doc.grandTotal, paymentMode: doc.paymentMode, dueDate: doc.dueDate }, doc.customer.locationId, user);
+    return this.forSale(saleId);
   }
 
   async assertEditable(saleId: string) {

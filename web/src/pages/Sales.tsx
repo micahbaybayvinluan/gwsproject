@@ -271,11 +271,12 @@ function SaleEditor({ sale, endpoint, label, note, startOpen = false, canEdit, o
   </>;
 }
 function FranchiseDrCard({ sale }: { sale: Sale }) {
-  const { can } = useAuth();
+  const { can } = useAuth(); const qc = useQueryClient();
+  const connect = useMutation({ mutationFn: () => api.post(`/api/franchise-drs/sale/${sale.id}/connect`), onSuccess: () => { void qc.invalidateQueries({ queryKey: ['franchise-dr-sale', sale.id] }); } });
   const st = useQuery({ queryKey: ['franchise-dr-sale', sale.id], queryFn: () => api.get<{ id: string; status: string; receivedByName: string | null; receivedAt: string | null; disputeNote: string | null } | null>(`/api/franchise-drs/sale/${sale.id}`), enabled: can('franchise.dr.view') });
   const r = st.data; const canEdit = can('franchise.dr.edit') && (!r || r.status !== 'RECEIVED') && !sale.voidedAt;
   return <Card title="For the franchise">
-    {r ? <p className="text-sm">{r.status === 'RECEIVED' ? <><Badge tone="green">received</Badge> by {r.receivedByName} on {r.receivedAt ? fmtDate(r.receivedAt) : ''}: the franchise's stock went up.</> : r.status === 'DISPUTED' ? <><Badge tone="red">problem reported</Badge> {r.disputeNote}. Correct the DR below; the franchise checks it again.</> : <><Badge tone="amber">waiting for the franchise to check</Badge> It was told and confirms under Franchise DRs.</>}</p> : <p className="text-sm text-slate-600">This DR has no franchise receipt (it was made before DRs were connected to the franchise).</p>}
+    {r ? <p className="text-sm">{r.status === 'RECEIVED' ? <><Badge tone="green">received</Badge> by {r.receivedByName} on {r.receivedAt ? fmtDate(r.receivedAt) : ''}: the franchise's stock went up.</> : r.status === 'DISPUTED' ? <><Badge tone="red">problem reported</Badge> {r.disputeNote}. Correct the DR below; the franchise checks it again.</> : <><Badge tone="amber">waiting for the franchise to check</Badge> It was told and confirms under Franchise DRs.</>}</p> : <div className="text-sm text-slate-600"><p>This DR is not connected to the franchise yet, so its owner and associates cannot see it or put the stock in.</p>{can('franchise.dr.edit') && !sale.voidedAt && <Button size="sm" className="mt-2" disabled={connect.isPending} onClick={() => connect.mutate()}>Connect this DR to the franchise now</Button>}<ErrorBox error={connect.error} /></div>}
     <SaleEditor sale={sale} endpoint="amend-franchise-dr" label="Correct this DR (items, quantities, prices)" note={`The corrected DR keeps the number ${sale.drSiNo}; the old one is voided (stock and books follow) and the franchise is told to check it again.`} canEdit={canEdit} />
   </Card>;
 }

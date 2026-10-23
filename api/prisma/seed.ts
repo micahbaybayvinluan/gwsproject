@@ -87,7 +87,8 @@ const TEST_USERS: { username: string; role: string; fullName: string; locations?
   { username: 'sales.manager', role: 'SALES_MANAGER', fullName: 'Sales Manager' },
   { username: 'agent.jerick', role: 'AGENT', fullName: 'Jerick Quinto (Agent)' },
   { username: 'franchise.coord', role: 'FRANCHISE_COORDINATOR', fullName: 'Franchise Coordinator' },
-  { username: 'asst.franchise.coord', role: 'ASST_FRANCHISE_COORDINATOR', fullName: 'Asst. Franchise Coordinator' },
+  { username: 'asst.franchise.coord', role: 'ASST_FRANCHISE_COORDINATOR', fullName: 'Asst. Franchise Coordinator', locations: ['WH'] },
+  { username: 'asst.franchise.coord2', role: 'ASST_FRANCHISE_COORDINATOR', fullName: 'Asst. Franchise Coordinator 2', locations: ['WH'] },
 ];
 
 async function main() {

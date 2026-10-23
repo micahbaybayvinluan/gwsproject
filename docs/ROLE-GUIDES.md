@@ -245,6 +245,8 @@ You are responsible for the warehouse stock. You check your associates' entries,
 
 **Franchise availability** (menu: Franchise Orders): when the Franchise Coordinator sends an availability, open it, type the **Offer** (quantity and flavors you can give) for each product, remove what you cannot give, and *Send to the Franchise Coordinator*. After the coordinator prints the picklist and your team prepares the goods, do the **final check** and *Approve* (or send back with a note); the coordinator then makes the DR.
 **Requests from the branches** (Transfers): a branch's request appears with its products already filled in. Edit the quantities (or remove an item) → *Prepare the pull-out*, or *Decline* with a reason.
+**Additional cash, pull-outs and the report:** on Cash Fund you can add cash from an *Advances from* account (e.g. Advances from AMV), record a pull-out that someone borrowed (*Advances to*) and the payment back, and download the cash fund report in Excel or PDF in the voucher format; your Dashboard shows the balance of each warehouse fund.
+
 **Cash funds:** you and your associates keep the two warehouse funds, **Warehouse – Office** and **Warehouse – Franchise**, and pay warehouse expenses from them (Expenses → Paid from Cash fund → Which cash fund; the Franchise fund can be tied to a franchise DR). Accounting tops them up; the Sales Associate at the warehouse store has no cash fund.
 
 **Charges and NTE:** *My Pay & Charges* shows *Charges at my branch* and any Notice to Explain issued to you (type your explanation there).
@@ -400,7 +402,7 @@ You run your franchise. Everything you see is limited to your own branch (every 
 - Unpaid two months after the due date, the account is flagged and the company may issue a demand, suspend credit, or ask for cash before delivery.
 - Sales paid by credit card are priced at the credit-card price automatically.
 
-**Franchise orders:** when the Franchise Coordinator sends the availability you get a notice. Open *Franchise Orders*, type **I order** (quantity) and choose the flavors, then *Send my order*. **Franchise DRs:** every DR made for your franchise (from the warehouse or any main branch) is listed; check the goods and *Confirm receipt* (your stock goes up) or *Report a problem* with a note; the coordinator corrects the DR. **Franchise AR** shows *Unpaid goods (DRs)* with the DR behind each.
+**Franchise orders:** when the Franchise Coordinator sends the availability you get a notice. Open *Franchise Orders*, type **I order** (quantity) and choose the flavors, then *Send my order*. **Franchise DRs:** every DR made for your franchise (from the warehouse or any main branch) is connected to you automatically and listed (the franchise sales associate sees the goods but never the prices or totals); check the goods and *Confirm receipt* (your stock goes up) or *Report a problem* with a note; the coordinator corrects the DR. **Franchise AR** shows *Unpaid goods (DRs)* with the DR behind each.
 
 ## Accounting Head
 <!-- role: ACCOUNTING_HEAD -->
@@ -579,7 +581,7 @@ You see and can do everything. You are the final approver.
 
 **Restocking:** the Head Auditor sends you purchase orders (My Approvals or Restock & Purchase Orders). Each shows days left per branch, the suggested transfers from existing stock and the suggested order; you may change any number, then Approve or Reject with a note. You may also generate one yourself (approved at once). *Ask the Head Auditor to make the transfers* tells the Head Auditor, the Warehouse In-Charge and the branches. Print the internal copy; the supplier copy shows no branches or prices. Mark as sent with the expected delivery date; a delivery linked to the order shows received against ordered.
 
-**Promos:** the same as the Head Auditor (% off 20–70%, internal quantity, See promo sales). **Franchise DRs:** you can see every franchise DR and whether the franchise has confirmed it. **Cash fund:** set the warehouse and every branch fund under Cash Fund; warehouse staff may spend from theirs.
+**Promos:** the same as the Head Auditor (% off 20–70%, internal quantity, See promo sales). **Warehouse cash fund changes:** a change or void of a warehouse cash fund expense after the day's cut-off reaches you under My Approvals (*EXPENSE_EDIT*) with the reason; approving applies it. **Franchise DRs:** you can see every franchise DR and whether the franchise has confirmed it. **Cash fund:** set the warehouse and every branch fund under Cash Fund; warehouse staff may spend from theirs.
 
 **DRs and Inventory Reports:** the Daily Sales Report lists the DRs of the day (click to open, **Edit** while the branch has not submitted the day). In Inventory Reports, click a **Sales** quantity to see its DRs and open the Daily Sales Report of that date.
 
@@ -722,7 +724,9 @@ You look after the franchise partners. You never see cost.
 <!-- role: ASST_FRANCHISE_COORDINATOR -->
 You help the Franchise Coordinator with the same screens: **New Sale** (from the warehouse), **Shipping charges to franchises** (fill in the amount within 2 days; ask the Owner to change it), **Franchise AR** (invoices, penalty, interest, extension requests, notifications), **Memorandums** (write, sign, track who has read them) and the franchise stock transfers. You never see cost. Change your password with the key icon at the top right.
 
-**Franchise Orders and Franchise DRs:** you can generate availability, send it to the franchises, make the picklist and the DR, and correct a franchise DR, the same as the Franchise Coordinator.
+**Franchise Orders and Franchise DRs:** you can generate availability, send it to the franchises, make the picklist and the DR, and correct a franchise DR, the same as the Franchise Coordinator. If an old DR never reached its franchise, open it and press *Connect this DR to the franchise now*.
+
+**Like the warehouse Sales Associate (added 2026-10-24):** you also prepare and confirm **stock transfers** from the warehouse to branches and franchises (Transfers & Pull-outs), do counts, record expenses, make replacement tickets, correct a sale the same day, collect AR payments and answer discrepancy explanations. Cost stays hidden.
 
 ## Other users (custom permissions)
 <!-- role: CUSTOM -->

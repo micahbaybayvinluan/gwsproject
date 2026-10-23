@@ -7,7 +7,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { PostingService } from '../gl/posting.service';
 import { AccountsService } from '../gl/accounts.service';
 import { ClosingService } from '../closing/closing.service';
-import { r10FundReplenish, r10FundSetup } from '../gl/posting-rules';
+import { MissingAccountError, r10FundAdvance, r10FundReplenish, r10FundSetup } from '../gl/posting-rules';
 import { dateStr, toDateOnly, todayManila } from '../common/manila';
 import { D, sum, ZERO } from '../common/money';
 import type { SessionUser } from '../common/request-context';
@@ -69,7 +69,7 @@ export class CashFundService {
     for (const f of funds.filter((x) => this.canUse(user, x))) {
       const lastRep = await this.prisma.db.cashFundTxn.findFirst({ where: { fundId: f.id, kind: 'REPLENISH' }, orderBy: { createdAt: 'desc' } });
       const lastCheck = await this.prisma.db.cashFundCheck.findFirst({ where: { OR: [{ fundId: f.id }, { fundId: null, locationId: f.locationId }] }, orderBy: { checkedAt: 'desc' } });
-      out.push({ ...f, spent: D(f.imprestAmount).minus(f.balance).toFixed(2), lastReplenishedAt: lastRep?.createdAt ?? null, lastCheck });
+      out.push({ ...f, spent: Prisma.Decimal.max(D(0), D(f.imprestAmount).minus(f.balance)).toFixed(2), lastReplenishedAt: lastRep?.createdAt ?? null, lastCheck });
     }
     return out;
   }
@@ -85,7 +85,7 @@ export class CashFundService {
     const checkers = await this.prisma.db.user.findMany({ where: { id: { in: checks.map((c) => c.checkedBy) } }, select: { id: true, fullName: true } });
     const drIds = [...new Set(txns.map((t) => t.salesDocId).filter((x): x is string => !!x))];
     const drs = await requestContext.runSystem(async () => await this.prisma.db.salesDoc.findMany({ where: { id: { in: drIds } }, select: { id: true, drSiNo: true } }));
-    return { ...f, spent: D(f.imprestAmount).minus(f.balance).toFixed(2), txns: txns.map((t) => ({ ...t, by: users.find((u) => u.id === t.createdBy)?.fullName ?? null, drSiNo: drs.find((d) => d.id === t.salesDocId)?.drSiNo ?? null })), checks: checks.map((c) => ({ ...c, by: checkers.find((u) => u.id === c.checkedBy)?.fullName ?? null })) };
+    return { ...f, spent: Prisma.Decimal.max(D(0), D(f.imprestAmount).minus(f.balance)).toFixed(2), txns: txns.map((t) => ({ ...t, by: users.find((u) => u.id === t.createdBy)?.fullName ?? null, drSiNo: drs.find((d) => d.id === t.salesDocId)?.drSiNo ?? null })), checks: checks.map((c) => ({ ...c, by: checkers.find((u) => u.id === c.checkedBy)?.fullName ?? null })) };
   }
 
   /** The franchise DRs sent from this fund's location, to pick the DR a shipping expense of the Franchise fund is for. */
@@ -101,7 +101,7 @@ export class CashFundService {
 
   private static readonly PURPOSES = ['GENERAL', 'OFFICE', 'FRANCHISE'];
   /** Admin / Accounting Head sets the imprest amount. First time: funded from the chosen account; later: the balance moves by the change. A warehouse has two funds: Office and Franchise. */
-  async setup(idOrLocation: string, input: { imprestAmount: number; fundedFromAccountId?: string | null; purpose?: string; name?: string }, user: SessionUser) {
+  async setup(idOrLocation: string, input: { imprestAmount: number; fundedFromAccountId?: string | null; purpose?: string; name?: string; voucherStart?: number }, user: SessionUser) {
     if (input.imprestAmount <= 0) throw new BadRequestException('Fund amount must be positive');
     const byId = await this.prisma.db.cashFund.findUnique({ where: { id: idOrLocation } });
     const locationId = byId?.locationId ?? idOrLocation;
@@ -120,9 +120,9 @@ export class CashFundService {
         accountId = ((await tx.account.findFirst({ where: { title } })) ?? (await this.accounts.create({ title, class: 'CASH', branchTagId: locationId, entryScope: 'BRANCH', paymentAccountType: 'PETTY_CASH' }, user.id, tx))).id;
       }
       const f = existing
-        ? await tx.cashFund.update({ where: { id: existing.id }, data: { imprestAmount: D(input.imprestAmount).toFixed(2), balance: D(existing.balance).plus(delta).toFixed(2), active: true, name: input.name?.trim() || existing.name } })
-        : await tx.cashFund.create({ data: { locationId, purpose, name: input.name?.trim() || label, accountId, imprestAmount: D(input.imprestAmount).toFixed(2), balance: D(input.imprestAmount).toFixed(2), createdBy: user.id } });
-      if (!delta.isZero()) await tx.cashFundTxn.create({ data: { fundId: f.id, locationId, businessDate: todayManila(), kind: existing ? 'TOP_UP' : 'SETUP', amount: delta.toFixed(2), balanceAfter: f.balance, notes: existing ? `Fund changed ${existing.imprestAmount} → ${D(input.imprestAmount).toFixed(2)}` : 'Fund set up', createdBy: user.id } });
+        ? await tx.cashFund.update({ where: { id: existing.id }, data: { imprestAmount: D(input.imprestAmount).toFixed(2), balance: D(existing.balance).plus(delta).toFixed(2), active: true, name: input.name?.trim() || existing.name, ...(input.voucherStart ? { voucherStart: input.voucherStart } : {}) } })
+        : await tx.cashFund.create({ data: { locationId, purpose, name: input.name?.trim() || label, accountId, voucherStart: input.voucherStart ?? 1, imprestAmount: D(input.imprestAmount).toFixed(2), balance: D(input.imprestAmount).toFixed(2), createdBy: user.id } });
+      if (!delta.isZero()) await tx.cashFundTxn.create({ data: { fundId: f.id, locationId, businessDate: todayManila(), kind: existing ? 'TOP_UP' : 'SETUP', amount: delta.toFixed(2), balanceAfter: f.balance, notes: existing ? `Fund changed ${existing.imprestAmount} → ${D(input.imprestAmount).toFixed(2)}` : 'Fund set up', counterAccountId: input.fundedFromAccountId ?? null, createdBy: user.id } });
       if (input.fundedFromAccountId && delta.gt(0)) await this.posting.post(tx, { type: 'CashFund', id: f.id, date: todayManila(), createdBy: user.id }, (r) => r10FundSetup(r, { locationId, amount: delta, fromAccountId: input.fundedFromAccountId!, ref: `${f.name}`, fundAccountId: f.accountId }));
       return f;
     });
@@ -137,7 +137,7 @@ export class CashFundService {
     if (!(input.amount > 0)) throw new BadRequestException('The amount must be more than zero');
     const t = await this.prisma.db.$transaction(async (tx) => {
       const after = await tx.cashFund.update({ where: { id: f.id }, data: { balance: { increment: D(input.amount).toFixed(2) } } });
-      const row = await tx.cashFundTxn.create({ data: { fundId: f.id, locationId: f.locationId, businessDate: todayManila(), kind: 'TOP_UP', amount: D(input.amount).toFixed(2), balanceAfter: after.balance, notes: input.notes?.trim() || 'Topped up by Accounting', createdBy: user.id } });
+      const row = await tx.cashFundTxn.create({ data: { fundId: f.id, locationId: f.locationId, businessDate: todayManila(), kind: 'TOP_UP', amount: D(input.amount).toFixed(2), balanceAfter: after.balance, notes: input.notes?.trim() || 'Topped up by Accounting', counterAccountId: input.fromAccountId, createdBy: user.id } });
       await this.posting.post(tx, { type: 'CashFundTxn', id: row.id, date: todayManila(), createdBy: user.id }, (r) => r10FundSetup(r, { locationId: f.locationId, amount: input.amount, fromAccountId: input.fromAccountId, ref: `${f.name} top-up`, fundAccountId: f.accountId }));
       return row;
     });
@@ -146,11 +146,64 @@ export class CashFundService {
   }
 
   /** Money in from a franchise's CASH payment of a shipping charge, tied to the franchise DR (Warehouse – Franchise fund). */
-  async receive(tx: Tx, input: { fundId: string; amount: Prisma.Decimal.Value; salesDocId?: string | null; franchiseInvoiceId?: string | null; franchisePaymentId?: string | null; businessDate: Date; createdBy: string; notes?: string }) {
+  async receive(tx: Tx, input: { fundId: string; amount: Prisma.Decimal.Value; salesDocId?: string | null; franchiseInvoiceId?: string | null; franchisePaymentId?: string | null; counterAccountId?: string | null; businessDate: Date; createdBy: string; notes?: string }) {
     const f = await tx.cashFund.findUnique({ where: { id: input.fundId } });
     if (!f || !f.active) throw new BadRequestException('This cash fund is not active');
     const after = await tx.cashFund.update({ where: { id: f.id }, data: { balance: { increment: D(input.amount).toFixed(2) } } });
-    return tx.cashFundTxn.create({ data: { fundId: f.id, locationId: f.locationId, businessDate: input.businessDate, kind: 'FRANCHISE_RECEIPT', amount: D(input.amount).toFixed(2), balanceAfter: after.balance, salesDocId: input.salesDocId ?? null, franchiseInvoiceId: input.franchiseInvoiceId ?? null, franchisePaymentId: input.franchisePaymentId ?? null, notes: input.notes ?? null, createdBy: input.createdBy } });
+    return tx.cashFundTxn.create({ data: { fundId: f.id, locationId: f.locationId, businessDate: input.businessDate, kind: 'FRANCHISE_RECEIPT', amount: D(input.amount).toFixed(2), balanceAfter: after.balance, salesDocId: input.salesDocId ?? null, franchiseInvoiceId: input.franchiseInvoiceId ?? null, franchisePaymentId: input.franchisePaymentId ?? null, counterAccountId: input.counterAccountId ?? null, notes: input.notes ?? null, createdBy: input.createdBy } });
+  }
+
+  // ───────── advances: more cash from "Advances from …", cash lent as "Advances to …", and repayments ─────────
+  private static readonly ADV_KINDS = { IN: 'ADVANCE_IN', OUT: 'ADVANCE_OUT', RETURN: 'ADVANCE_RETURN' } as const;
+
+  /** The accounts the custodian may choose: where extra cash comes from (Advances from …) and who the money is lent to / paid back by (Advances to …). */
+  async advanceAccounts() {
+    const rows = await this.prisma.db.account.findMany({ where: { active: true, class: { in: ['ADVANCES_FROM', 'ADVANCES_TO'] } }, select: { id: true, code: true, title: true, class: true }, orderBy: { code: 'asc' } });
+    return { from: rows.filter((a) => a.class === 'ADVANCES_FROM').map(({ id, code, title }) => ({ id, code, title })), to: rows.filter((a) => a.class === 'ADVANCES_TO' && /^advances to/i.test(a.title)).map(({ id, code, title }) => ({ id, code, title })) };
+  }
+
+  /**
+   * IN = additional cash put into the fund from an "Advances from …" account (for example Advances from AMV);
+   * OUT = a pull-out lent to someone, to be returned ("Advances to …"); RETURN = the money paid back into the fund.
+   */
+  async advance(idOrLocation: string, input: { kind: 'IN' | 'OUT' | 'RETURN'; amount: number; counterAccountId: string; personName?: string | null; reference?: string | null; notes?: string | null; date?: string }, user: SessionUser) {
+    const f = await this.findFund(idOrLocation); if (!f || !f.active) throw new NotFoundException('No cash fund set up for this location');
+    this.assertLocation(user, f.locationId);
+    if (!this.canUse(user, f) || !(user.permissions.has('cashfund.spend') || user.permissions.has('cashfund.manage'))) throw new ForbiddenException('Only the people who keep this cash fund may record advances');
+    if (!(input.amount > 0)) throw new BadRequestException('The amount must be more than zero');
+    const acct = await this.prisma.db.account.findUnique({ where: { id: input.counterAccountId } });
+    const want = input.kind === 'IN' ? 'ADVANCES_FROM' : 'ADVANCES_TO';
+    if (!acct || !acct.active || acct.class !== want) throw new BadRequestException(input.kind === 'IN' ? 'Choose an "Advances from …" account for cash put into the fund' : 'Choose an "Advances to …" account');
+    if (input.kind !== 'IN' && !input.personName?.trim()) throw new BadRequestException(input.kind === 'OUT' ? 'Who borrowed the money?' : 'Who paid it back?');
+    const businessDate = input.date ? toDateOnly(input.date) : todayManila();
+    if (businessDate > todayManila()) throw new BadRequestException('The date cannot be in the future');
+    const signed = input.kind === 'OUT' ? D(input.amount).neg() : D(input.amount);
+    const txn = await this.prisma.db.$transaction(async (tx) => {
+      const cur = await tx.cashFund.findUniqueOrThrow({ where: { id: f.id } });
+      if (input.kind === 'OUT' && D(cur.balance).lt(input.amount)) throw new BadRequestException(`The fund has only ₱${D(cur.balance).toFixed(2)}`);
+      const after = await tx.cashFund.update({ where: { id: f.id }, data: { balance: { increment: signed.toFixed(2) } } });
+      const controlNo = await this.seq.form(tx, 'FR', f.locationId);
+      const t = await tx.cashFundTxn.create({ data: { controlNo, fundId: f.id, locationId: f.locationId, businessDate, kind: CashFundService.ADV_KINDS[input.kind], amount: signed.toFixed(2), balanceAfter: after.balance, counterAccountId: acct.id, personName: input.personName?.trim() || null, reference: input.reference?.trim() || null, notes: input.notes?.trim() || null, createdBy: user.id } });
+      await this.posting.post(tx, { type: 'CashFundTxn', id: t.id, date: businessDate, createdBy: user.id }, (r) => r10FundAdvance(r, { locationId: f.locationId, amount: input.amount, counterAccountId: acct.id, direction: input.kind === 'OUT' ? 'OUT' : 'IN', ref: `${f.name} · ${acct.title}`, fundAccountId: f.accountId }));
+      return t;
+    });
+    await this.audit.log({ action: `CASH_FUND_ADVANCE_${input.kind}`, entityType: 'CashFund', entityId: f.id, after: txn });
+    return txn;
+  }
+
+  /** Money lent out of the fund and not yet paid back: per "Advances to" account and person. */
+  async openAdvances(idOrLocation: string, user: SessionUser) {
+    const f = await this.findFund(idOrLocation); if (!f) throw new NotFoundException('No cash fund set up for this location');
+    this.assertLocation(user, f.locationId);
+    if (!this.canUse(user, f)) throw new ForbiddenException('This cash fund is kept by the warehouse custodians');
+    const rows = await this.prisma.db.cashFundTxn.findMany({ where: { fundId: f.id, kind: { in: ['ADVANCE_OUT', 'ADVANCE_RETURN'] } }, orderBy: { businessDate: 'asc' } });
+    const map = new Map<string, { counterAccountId: string; personName: string; out: ReturnType<typeof D>; back: ReturnType<typeof D>; since: Date }>();
+    for (const t of rows) {
+      const key = `${t.counterAccountId}|${(t.personName ?? '').toLowerCase()}`; const cur = map.get(key) ?? { counterAccountId: t.counterAccountId ?? '', personName: t.personName ?? '', out: D(0), back: D(0), since: t.businessDate };
+      if (t.kind === 'ADVANCE_OUT') cur.out = cur.out.plus(D(t.amount).abs()); else cur.back = cur.back.plus(t.amount); map.set(key, cur);
+    }
+    const accts = new Map((await this.prisma.db.account.findMany({ where: { id: { in: [...new Set([...map.values()].map((v) => v.counterAccountId))] } }, select: { id: true, code: true, title: true } })).map((a) => [a.id, a]));
+    return [...map.values()].map((v) => ({ counterAccountId: v.counterAccountId, account: accts.get(v.counterAccountId)?.title ?? '', code: accts.get(v.counterAccountId)?.code ?? '', personName: v.personName, lent: v.out.toFixed(2), returned: v.back.toFixed(2), outstanding: v.out.minus(v.back).toFixed(2), since: dateStr(v.since) })).filter((v) => Number(v.outstanding) > 0);
   }
 
   /** Expense paid from the fund (called inside the expense transaction). */
@@ -196,7 +249,9 @@ export class CashFundService {
     if (amount.gt(s.expectedCash)) throw new BadRequestException(`Cash from sales available today is only ₱${D(s.expectedCash).toFixed(2)}`);
     const txn = await this.prisma.db.$transaction(async (tx) => {
       const after = await tx.cashFund.update({ where: { id: f.id }, data: { balance: { increment: amount.toFixed(2) } } });
-      const t = await tx.cashFundTxn.create({ data: { controlNo: await this.seq.form(tx, 'FR', locationId), fundId: f.id, locationId, businessDate, kind: 'REPLENISH', amount: amount.toFixed(2), balanceAfter: after.balance, notes: 'Replenished from cash sales', createdBy: user.id } });
+      let cohId: string | null = null;
+      try { cohId = (await this.posting.resolver(tx)).branch('CASH_ON_HAND', locationId); } catch (e) { if (!(e instanceof MissingAccountError)) throw e; }
+      const t = await tx.cashFundTxn.create({ data: { controlNo: await this.seq.form(tx, 'FR', locationId), fundId: f.id, locationId, businessDate, kind: 'REPLENISH', amount: amount.toFixed(2), balanceAfter: after.balance, notes: 'Replenished from cash sales', counterAccountId: cohId, createdBy: user.id } });
       await this.posting.post(tx, { type: 'CashFundTxn', id: t.id, date: businessDate, createdBy: user.id }, (r) => r10FundReplenish(r, { locationId, amount, ref: `${f.location.name} ${dateStr(businessDate)}`, fundAccountId: f.accountId }));
       return t;
     });

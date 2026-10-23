@@ -78,8 +78,11 @@ export class SalesService implements OnModuleInit {
     if (!loc.isSelling) throw new BadRequestException('This location does not sell');
     // Franchise Coordinators (owner requests 2026-10-01 and 2026-10-02) record sales from the warehouse: franchises and every other channel, any payment mode
     const warehouseOnly = !user.permissions.has('sale.create');
-    const franchiseCustomer = input.channel === 'FRANCHISE' && input.customerId ? await this.prisma.db.customer.findUnique({ where: { id: input.customerId }, select: { id: true, type: true, locationId: true, name: true } }) : null;
-    if (franchiseCustomer && franchiseCustomer.type !== 'FRANCHISE') throw new BadRequestException('Choose a franchisee for a franchise sale');
+    const picked = input.customerId ? await this.prisma.db.customer.findUnique({ where: { id: input.customerId }, select: { id: true, type: true, locationId: true, name: true } }) : null;
+    if (input.channel === 'FRANCHISE' && picked && picked.type !== 'FRANCHISE') throw new BadRequestException('Choose a franchisee for a franchise sale');
+    // a DR for a franchisee is connected to that franchise whatever channel was ticked
+    const franchiseCustomer = picked?.type === 'FRANCHISE' ? picked : null;
+    if (franchiseCustomer && !franchiseCustomer.locationId) throw new BadRequestException(`${franchiseCustomer.name} is not linked to its franchise branch yet, so the DR could not reach the franchise. Ask the Admin to link this customer to the franchise location (Branches / Customers).`);
     if (warehouseOnly && loc.type !== 'WAREHOUSE') throw new ForbiddenException('You can record sales from the warehouse only');
     if (warehouseOnly && input.channel === 'FRANCHISE' && !franchiseCustomer) throw new BadRequestException('Choose the franchisee');
     const ship = input.franchiseShipping && input.franchiseShipping.mode !== 'NONE' ? input.franchiseShipping : null;
@@ -252,7 +255,7 @@ export class SalesService implements OnModuleInit {
     // shipping charged to the franchise: "to follow" for the Franchise Coordinator, or typed now; either way its own receivable, separate from the order
     if (ship) await this.franchiseShipping.createForSale({ id: doc.id, controlNo: doc.controlNo, drSiNo: doc.drSiNo, locationId }, franchiseCustomer!.locationId!, { mode: ship.mode as 'TO_FOLLOW' | 'AMOUNT', amount: ship.amount, courier: ship.courier, reference: ship.reference }, user);
     // a DR for a franchise (owner request 2026-10-15): the franchise is told and confirms receipt; a corrected DR replaces the old one
-    if (franchiseCustomer?.locationId && loc.type !== 'FRANCHISE' && input.channel === 'FRANCHISE') {
+    if (franchiseCustomer?.locationId && loc.type !== 'FRANCHISE') {
       const brief = { id: doc.id, drSiNo: doc.drSiNo, locationId, grandTotal: doc.grandTotal, paymentMode: doc.paymentMode, dueDate: doc.dueDate };
       if (opts.amendedFrom) await this.franchiseDr.onAmended(opts.amendedFrom, brief, franchiseCustomer.locationId, user); else await this.franchiseDr.onSale(brief, franchiseCustomer.locationId, user);
     }

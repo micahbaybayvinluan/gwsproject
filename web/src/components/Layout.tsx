@@ -7,7 +7,7 @@ import { BrandMark } from '@/components/Brand';
 import { useAuth } from '@/lib/auth';
 import { api } from '@/lib/api';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
-import { cn } from '@/lib/utils';
+import { cn, roleWithName } from '@/lib/utils';
 import { PAGES, pageInfo } from '@/lib/pages';
 import { Info } from 'lucide-react';
 
@@ -134,7 +134,7 @@ export function Layout() {
     <div className="flex min-w-0 flex-1 flex-col">
       <header className="sticky top-0 z-10 mx-3 mt-3 flex items-center gap-3 rounded-[22px] bg-white/90 px-4 py-2.5 shadow-soft backdrop-blur-md lg:mx-5 lg:px-6">
         <button className="rounded-lg p-1.5 text-navy hover:bg-slate-100 lg:hidden" onClick={() => setOpen(true)} aria-label="Menu"><Menu /></button>
-        <div className="min-w-0 flex-1 truncate text-sm"><span className="font-semibold text-navy">{me?.fullName}</span> <span className="ml-1 hidden rounded-full bg-brand-soft px-2.5 py-0.5 text-[11px] font-bold text-brand-dark sm:inline">{ROLE_LABEL(me?.roleKey)}</span>{me?.locations.length ? <span className="ml-2 hidden text-xs text-slate-500 md:inline">{me.locations.map((l) => l.name).join(', ')}</span> : null}</div>
+        <div className="min-w-0 flex-1 truncate text-sm"><span className="font-semibold text-navy">{me?.fullName}</span> <span className="ml-1 hidden rounded-full bg-brand-soft px-2.5 py-0.5 text-[11px] font-bold text-brand-dark sm:inline">{roleWithName((me as { roleName?: string } | null)?.roleName || ROLE_LABEL(me?.roleKey), me?.fullName)}</span>{me?.locations.length ? <span className="ml-2 hidden text-xs text-slate-500 md:inline">{me.locations.map((l) => l.name).join(', ')}</span> : null}</div>
         <button className="relative rounded-full p-2 text-navy transition hover:bg-slate-100" onClick={() => nav('/notifications')} aria-label="Notifications"><Bell size={20} />{!!unread.data?.count && <span className="absolute right-0.5 top-0.5 min-w-4 rounded-full bg-brand px-1 text-center text-[10px] font-bold leading-4 text-white ring-2 ring-white">{unread.data.count}</span>}</button>
         <div className="hidden size-10 place-items-center rounded-full grad-brand text-xs font-bold text-white shadow-md shadow-brand/30 sm:grid" title={me?.fullName}>{initials(me?.fullName)}</div>
         <button className="rounded-full p-2 text-slate-500 transition hover:bg-slate-100 hover:text-brand" onClick={() => setPwOpen(true)} aria-label="Change my password" title="Change my password"><KeyRound size={19} /></button>

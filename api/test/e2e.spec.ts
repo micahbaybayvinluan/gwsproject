@@ -3875,12 +3875,43 @@ describe('Warehouse cash funds: Office and Franchise, tied to franchise DRs; the
     const fb = Number(ok(await as('wh.assoc').get(`/api/cash-funds/${whFranchise}`)).body.balance);
     const ex = ok(await as('wh.assoc').post('/api/expenses').send({ locationId: wh, accountId: accts[0].id, amount: 120, paidFrom: 'PETTY_CASH', cashFundId: whFranchise, salesDocId: drId, payee: 'LBC' }).expect(201)).body;
     expect(Number(ok(await as('wh.assoc').get(`/api/cash-funds/${whFranchise}`)).body.balance)).toBe(fb - 120);
+    // the expense log names the fund exactly as the fund picker does
+    const fname = ok(await as('wh.assoc').get(`/api/cash-funds/${whFranchise}`)).body.name as string; const logRow = (ok(await as('wh.assoc').get(`/api/expenses?locationId=${wh}`)).body as { id: string; paidFromLabel: string }[]).find((x) => x.id === ex.id)!; expect(logRow.paidFromLabel).toBe(fname);
     const info = ok(await as('wh.assoc').get(`/api/franchise-ar/shipping-charges/for-sale/${drId}`)).body;
     expect(info.courierPaid).toHaveLength(1); expect(info.courierPaid[0].fund).toContain('Franchise'); expect(Number(info.courierTotal)).toBe(120); expect(Number(info.charge.amount)).toBe(350);
     const det = ok(await as('wh.assoc').get(`/api/cash-funds/${whFranchise}`)).body; expect(det.txns.some((t: { drSiNo: string | null; kind: string }) => t.kind === 'EXPENSE' && t.drSiNo === `FD-${run}`)).toBe(true);
     // voiding gives the money back to the same fund
     ok(await as('wh.assoc').post(`/api/expenses/${ex.id}/void`).send({ reason: 'wrong amount typed' }));
     expect(Number(ok(await as('wh.assoc').get(`/api/cash-funds/${whFranchise}`)).body.balance)).toBe(fb);
+  });
+
+  it('additional cash from "Advances from AMV", a pull-out lent as "Advances to", its repayment, and the ledger report in the voucher format', async () => {
+    const accts = ok(await as('wh.assoc').get('/api/cash-funds/advance-accounts')).body as { from: { id: string; title: string }[]; to: { id: string; title: string }[] };
+    const fromAmv = accts.from.find((a) => a.title === 'Advances from AMV')!; const toAmv = accts.to.find((a) => a.title === 'Advances to AMV')!; expect(fromAmv).toBeTruthy(); expect(toAmv).toBeTruthy();
+    const bal = async () => Number(ok(await as('wh.assoc').get(`/api/cash-funds/${whOffice}`)).body.balance); const b0 = await bal();
+    await as('sales.wh').post(`/api/cash-funds/${whOffice}/advance`).send({ kind: 'IN', amount: 100, counterAccountId: fromAmv.id }).expect(403);
+    await as('wh.assoc').post(`/api/cash-funds/${whOffice}/advance`).send({ kind: 'IN', amount: 100, counterAccountId: toAmv.id }).expect(400); // wrong kind of account
+    ok(await as('wh.assoc').post(`/api/cash-funds/${whOffice}/advance`).send({ kind: 'IN', amount: 30000, counterAccountId: fromAmv.id, reference: 'CF #: 59', notes: 'CASH FUND PULLOUT TO AMV SALES' }).expect(201));
+    expect(await bal()).toBe(b0 + 30000);
+    await as('wh.assoc').post(`/api/cash-funds/${whOffice}/advance`).send({ kind: 'OUT', amount: 500, counterAccountId: toAmv.id }).expect(400); // who borrowed it?
+    ok(await as('wh.assoc').post(`/api/cash-funds/${whOffice}/advance`).send({ kind: 'OUT', amount: 500, counterAccountId: toAmv.id, personName: 'Arden' }).expect(201));
+    expect(await bal()).toBe(b0 + 29500);
+    let open = ok(await as('wh.assoc').get(`/api/cash-funds/${whOffice}/advances`)).body as { personName: string; outstanding: string }[]; expect(open.find((o) => o.personName === 'Arden')!.outstanding).toBe('500.00');
+    ok(await as('wh.assoc').post(`/api/cash-funds/${whOffice}/advance`).send({ kind: 'RETURN', amount: 200, counterAccountId: toAmv.id, personName: 'Arden' }).expect(201));
+    open = ok(await as('wh.assoc').get(`/api/cash-funds/${whOffice}/advances`)).body; expect(open.find((o) => o.personName === 'Arden')!.outstanding).toBe('300.00');
+    expect(await bal()).toBe(b0 + 29700);
+    // the journal: Dr Petty Cash / Cr Advances from AMV
+    const jv = await prisma.journalVoucher.findFirst({ where: { sourceDocumentType: 'CashFundTxn', remarks: { contains: 'Advances from AMV' } }, orderBy: { postedAt: 'desc' }, include: { lines: { include: { account: { select: { title: true } } } } } });
+    expect(jv!.lines.some((l) => l.account.title === 'Advances from AMV' && Number(l.credit) === 30000)).toBe(true);
+    // the report: two lines per movement, one voucher per day, debits equal credits
+    const rep = ok(await as('wh.assoc').get(`/api/cash-funds/${whOffice}/report?from=${today()}&to=${today()}`)).body as { lines: { voucher: number; code: string; title: string; debit: number; credit: number; name: string; reference: string }[]; totals: { debit: number; credit: number } };
+    expect(rep.lines.length).toBeGreaterThanOrEqual(8); expect(rep.totals.debit).toBe(rep.totals.credit); expect(new Set(rep.lines.map((l) => l.voucher)).size).toBe(1);
+    expect(rep.lines.some((l) => l.title === 'Advances from AMV' && l.credit === 30000 && l.reference === 'CF #: 59')).toBe(true); expect(rep.lines.some((l) => l.title === 'Advances to AMV' && l.debit === 500 && l.name === 'Arden')).toBe(true);
+    expect(rep.lines.some((l) => l.title.startsWith('Petty Cash'))).toBe(true);
+    const x = await as('wh.assoc').get(`/api/cash-funds/${whOffice}/report.xlsx?from=${today()}&to=${today()}`).expect(200); expect(x.headers['content-type']).toContain('spreadsheetml');
+    await as('wh.assoc').get(`/api/cash-funds/${whOffice}/report.pdf?from=${today()}&to=${today()}`).expect(200);
+    await as('sales.wh').get(`/api/cash-funds/${whOffice}/report`).expect(403);
+    const dash = ok(await as('wh.assoc').get('/api/dashboard')).body; expect(dash.cashFunds.funds.some((f: { id: string }) => f.id === whOffice)).toBe(true);
   });
 
   it('the franchise pays the shipping charge in cash into the Franchise fund, tied to the DR; other payments and other invoices cannot', async () => {
@@ -3897,5 +3928,127 @@ describe('Warehouse cash funds: Office and Franchise, tied to franchise DRs; the
     expect(info.payments).toHaveLength(1); expect(info.payments[0].fund).toContain('Franchise'); expect(info.invoice.status).toBe('PAID');
     const jv = await prisma.journalVoucher.findFirst({ where: { sourceDocumentType: 'FranchisePayment' }, orderBy: { postedAt: 'desc' }, include: { lines: { include: { account: { select: { id: true } } } } } });
     const f = await prisma.cashFund.findUniqueOrThrow({ where: { id: whFranchise } }); expect(jv!.lines.some((l) => l.account.id === f.accountId && Number(l.debit) === 350)).toBe(true);
+  });
+});
+
+describe('DRs sold to a franchise reach its owner and associates (associates never see costs); Asst. Franchise Coordinator works like the Franchise Coordinator plus transfers (owner request 2026-10-24)', () => {
+  const day = (n: number) => new Date(Date.now() + 8 * 3600e3 + n * 86400000).toISOString().slice(0, 10);
+  let wh = ''; let mayon = ''; let item = ''; let fr = '';
+  const notes = async (u: string) => JSON.stringify(ok(await as(u).get('/api/notifications')).body);
+  const give = async (locationId: string, productId: string, qty: number) => { const b = await prisma.batch.create({ data: { productId, batchNo: `FX-${run}`, receivedRef: 'TEST', unitCost: '500', flavor: 'Chocolate' } }); await prisma.stockLedger.create({ data: { locationId, productId, batchId: b.id, qtyDelta: qty, movementType: 'RECEIVE', documentType: 'OpeningStock', documentId: b.id, unitCost: '500', businessDate: new Date(`${day(0)}T00:00:00Z`) } }); await prisma.stockBalance.create({ data: { locationId, productId, batchId: b.id, qty } }); };
+
+  it('setup', async () => {
+    await prisma.salesReportSubmission.deleteMany({});
+    const locs = ok(await as('admin').get('/api/locations')).body as { id: string; code: string }[];
+    wh = locs.find((l) => l.code === 'WH')!.id; mayon = locs.find((l) => l.code === 'MAYON')!.id;
+    const cats = ok(await as('admin').get('/api/categories')).body as { id: string; accountingClass: string }[];
+    item = ok(await as('admin').post('/api/products').send({ name: `FX A ${run}`, categoryId: cats.find((c) => c.accountingClass === 'SUPPLEMENT')!.id, prices: { RETAIL: 1000, FRANCHISE: 700 }, cost: 500 })).body.id;
+    await give(wh, item, 30);
+    fr = (await prisma.customer.findFirstOrThrow({ where: { type: 'FRANCHISE', locationId: mayon } })).id;
+  });
+
+  it('a sales associate at the warehouse store makes a DR for the franchisee: the owner AND the associates are told, see it, and the associate sees no price, total or credit terms', async () => {
+    const dr = ok(await as('sales.wh').post('/api/sales').send({ locationId: wh, channel: 'FRANCHISE', customerId: fr, paymentMode: 'AR_PDC', dueDate: day(30), drSiNo: `FX-${run}-1`, lines: [{ productId: item, qty: 4 }] }).expect(201)).body;
+    expect(await notes('fr.mayon.owner')).toContain(`FX-${run}-1`);
+    const aNote = await notes('fr.mayon.assoc'); expect(aNote).toContain(`FX-${run}-1`); expect(aNote).not.toContain('2,800'); // no amount for the associate
+    expect(await notes('fr.mayon.owner')).toContain('2,800.00');
+    const assocRow = (ok(await as('fr.mayon.assoc').get('/api/franchise-drs')).body as { saleId: string; status: string; total: number | null; paymentMode: string; dueDate: string | null; costHidden: boolean; lines: { qty: number; unitPrice: number | null }[] }[]).find((x) => x.saleId === dr.id)!;
+    expect(assocRow.status).toBe('PENDING'); expect(assocRow.costHidden).toBe(true); expect(assocRow.total).toBeNull(); expect(assocRow.paymentMode).toBe(''); expect(assocRow.dueDate).toBeNull(); expect(assocRow.lines[0]).toMatchObject({ qty: 4, unitPrice: null });
+    const ownerRow = (ok(await as('fr.mayon.owner').get('/api/franchise-drs')).body as { saleId: string; total: number; costHidden: boolean; lines: { unitPrice: number }[] }[]).find((x) => x.saleId === dr.id)!;
+    expect(ownerRow.costHidden).toBe(false); expect(ownerRow.total).toBe(2800); expect(ownerRow.lines[0].unitPrice).toBe(700);
+  });
+
+  it('a franchisee picked under another channel still connects the DR; a franchisee without a franchise branch is refused with a clear message; an old unconnected DR can be connected afterwards', async () => {
+    const other = ok(await as('sales.wh').post('/api/sales').send({ locationId: wh, channel: 'DEALER', customerId: fr, paymentMode: 'CASH', drSiNo: `FX-${run}-2`, lines: [{ productId: item, qty: 1 }] }).expect(201)).body;
+    expect(((ok(await as('fr.mayon.owner').get('/api/franchise-drs')).body) as { saleId: string }[]).some((x) => x.saleId === other.id)).toBe(true);
+    const loose = await prisma.customer.create({ data: { code: `FXL-${run}`, name: `Loose franchisee ${run}`, type: 'FRANCHISE' } });
+    const bad = await as('sales.wh').post('/api/sales').send({ locationId: wh, channel: 'FRANCHISE', customerId: loose.id, paymentMode: 'CASH', drSiNo: `FX-${run}-3`, lines: [{ productId: item, qty: 1 }] });
+    expect(bad.status).toBe(400); expect(JSON.stringify(bad.body)).toContain('not linked to its franchise branch');
+    // an old DR with no receipt
+    await prisma.franchiseDrReceipt.deleteMany({ where: { salesDocId: other.id } });
+    expect(((ok(await as('fr.mayon.owner').get('/api/franchise-drs')).body) as { saleId: string }[]).some((x) => x.saleId === other.id)).toBe(false);
+    await as('fr.mayon.owner').post(`/api/franchise-drs/sale/${other.id}/connect`).expect(403);
+    const c = ok(await as('franchise.coord').post(`/api/franchise-drs/sale/${other.id}/connect`).expect(201)).body; expect(c.status).toBe('PENDING');
+    await as('franchise.coord').post(`/api/franchise-drs/sale/${other.id}/connect`).expect(400); // once
+    expect(((ok(await as('fr.mayon.owner').get('/api/franchise-drs')).body) as { saleId: string }[]).some((x) => x.saleId === other.id)).toBe(true);
+  });
+
+  it('the owner confirms receipt: the franchise stock goes up; the associate cannot while the owner has not allowed it', async () => {
+    const list = ok(await as('fr.mayon.owner').get('/api/franchise-drs')).body as { id: string; saleId: string; status: string }[];
+    const mine = list.find((x) => x.status === 'PENDING')!;
+    await as('fr.mayon.assoc').post(`/api/franchise-drs/${mine.id}/receive`).expect(403);
+    const before = (await prisma.stockBalance.aggregate({ where: { locationId: mayon, productId: item }, _sum: { qty: true } }))._sum.qty ?? 0;
+    ok(await as('fr.mayon.owner').post(`/api/franchise-drs/${mine.id}/receive`));
+    const after = (await prisma.stockBalance.aggregate({ where: { locationId: mayon, productId: item }, _sum: { qty: true } }))._sum.qty ?? 0;
+    expect(after).toBeGreaterThan(before);
+  });
+
+  it('Asst. Franchise Coordinator does what the Franchise Coordinator does and also prepares transfers from the warehouse', async () => {
+    const me = ok(await as('asst.franchise.coord').get('/api/auth/me')).body as { permissions: string[] };
+    const fc = ok(await as('franchise.coord').get('/api/auth/me')).body as { permissions: string[] };
+    for (const p of fc.permissions) expect(me.permissions, p).toContain(p);
+    for (const p of ['transfer.create', 'transfer.confirm', 'expense.create.branch', 'count.create']) expect(me.permissions).toContain(p);
+    const t = await as('asst.franchise.coord').post('/api/transfers').send({ fromLocationId: wh, toLocationId: (await prisma.location.findFirstOrThrow({ where: { code: 'WESTAVE' } })).id, transferType: 'RESTOCK', lines: [{ productId: item, qty: 1 }] });
+    expect([200, 201]).toContain(t.status);
+    // the second Asst. account exists with the same role
+    expect((await prisma.user.findFirstOrThrow({ where: { username: 'asst.franchise.coord2' }, include: { role: true } })).role.key).toBe('ASST_FRANCHISE_COORDINATOR');
+  });
+});
+
+describe('Warehouse cash fund expenses: "for liquidation" with a liable person, same-day edits, later changes approved by the Owner (owner request 2026-10-24)', () => {
+  let wh = ''; let fundId = ''; let acct = ''; let emp = ''; let expId = '';
+  const bal = async () => Number((await prisma.cashFund.findUniqueOrThrow({ where: { id: fundId } })).balance);
+
+  it('setup', async () => {
+    await prisma.salesReportSubmission.deleteMany({});
+    ok(await as('admin').put('/api/settings').send({ 'gl.auto_posting_enabled': true }));
+    wh = (await prisma.location.findFirstOrThrow({ where: { code: 'WH' } })).id;
+    const f = await prisma.cashFund.findFirstOrThrow({ where: { locationId: wh, purpose: 'OFFICE' } }); fundId = f.id;
+    if (Number(f.balance) < 3000) await prisma.cashFund.update({ where: { id: fundId }, data: { balance: '5000' } });
+    acct = ((ok(await as('wh.assoc').get(`/api/expenses/accounts?locationId=${wh}`)).body) as { id: string }[])[0].id;
+    emp = (await prisma.employee.findFirst({ where: { active: true } }))?.id ?? (await prisma.employee.create({ data: { employeeNo: `LQ-${run}`, fullName: `Liable Person ${run}`, locationId: wh } })).id;
+    expect(((ok(await as('wh.assoc').get('/api/expenses/liable-people')).body) as { id: string }[]).some((p) => p.id === emp)).toBe(true);
+  });
+
+  it('"for liquidation" needs a person liable; the money leaves the fund but is an advance, not an expense, until it is edited with the final amount', async () => {
+    const base = { locationId: wh, accountId: acct, amount: 1000, paidFrom: 'PETTY_CASH', cashFundId: fundId, payee: 'Errand', forLiquidation: true };
+    expect((await as('wh.assoc').post('/api/expenses').send(base)).status).toBe(400); // nobody liable
+    const before = await bal();
+    const e = ok(await as('wh.assoc').post('/api/expenses').send({ ...base, liableEmployeeId: emp }).expect(201)).body; expId = e.id;
+    expect(e.forLiquidation).toBe(true); expect(e.liableName).toBeTruthy(); expect(await bal()).toBe(before - 1000);
+    const jv = await prisma.journalVoucher.findFirstOrThrow({ where: { sourceDocumentType: 'ExpenseDoc', sourceDocumentId: expId, voidedAt: null }, include: { lines: { include: { account: true } } } });
+    expect(jv.lines.some((l) => Number(l.debit) === 1000 && /Advances for Liquidation/.test(l.account.title))).toBe(true);
+    const row = (ok(await as('wh.assoc').get(`/api/expenses?locationId=${wh}`)).body as { id: string; forLiquidation: boolean }[]).find((x) => x.id === expId)!; expect(row.forLiquidation).toBe(true);
+    await as('wh.assoc').post(`/api/expenses/${expId}/edit`).send({ amount: 900 }).expect(400); // not final: liquidate it
+  });
+
+  it('editing the for-liquidation expense with the final amount finalizes it as an expense; the fund gets the change back', async () => {
+    const before = await bal();
+    const fin = ok(await as('wh.assoc').post(`/api/expenses/${expId}/liquidate`).send({ amount: 850, payee: 'LBC' }).expect(201)).body;
+    expect(fin.forLiquidation).toBe(false); expect(Number(fin.amount)).toBe(850); expect(fin.liquidatedAt).toBeTruthy(); expect(await bal()).toBe(before + 150);
+    const live = await prisma.journalVoucher.findMany({ where: { sourceDocumentType: 'ExpenseDoc', sourceDocumentId: expId, voidedAt: null }, include: { lines: { include: { account: true } } } });
+    expect(live.some((v) => v.lines.some((l) => Number(l.debit) === 850 && l.accountId === acct))).toBe(true);
+    await as('wh.assoc').post(`/api/expenses/${expId}/liquidate`).send({ amount: 800 }).expect(400); // already final
+  });
+
+  it('the associate edits a final expense on the same day; after the cut-off (or the Daily Sales Report) the Owner has to approve, and the change applies when approved', async () => {
+    const before = await bal();
+    const r = ok(await as('wh.assoc').post(`/api/expenses/${expId}/edit`).send({ amount: 800, reason: 'receipt corrected' }).expect(201)).body; expect(r.applied).toBe(true); expect(await bal()).toBe(before + 50);
+    // the cut-off passes: liquidated two days ago
+    await prisma.expenseDoc.update({ where: { id: expId }, data: { liquidatedAt: new Date(Date.now() - 2 * 86400000), docDate: new Date(Date.now() - 2 * 86400000) } });
+    await as('wh.assoc').post(`/api/expenses/${expId}/edit`).send({ amount: 700 }).expect(400); // a reason is needed
+    const ask = ok(await as('wh.assoc').post(`/api/expenses/${expId}/edit`).send({ amount: 700, reason: 'supplier gave a discount' }).expect(201)).body;
+    expect(ask.applied).toBe(false); expect(ask.requested).toBe(true); expect(await bal()).toBe(before + 50);
+    const req = await prisma.approvalRequest.findFirstOrThrow({ where: { type: 'EXPENSE_EDIT', documentId: expId, status: 'PENDING' } });
+    expect(req.requiredApproverRoles).toEqual(['ADMIN']);
+    await as('wh.incharge').post(`/api/approvals/${req.id}/decide`).send({ decision: 'APPROVE' }).expect(403);
+    ok(await as('admin').post(`/api/approvals/${req.id}/decide`).send({ decision: 'APPROVE' }));
+    expect(Number((await prisma.expenseDoc.findUniqueOrThrow({ where: { id: expId } })).amount)).toBe(700); expect(await bal()).toBe(before + 150);
+    expect(JSON.stringify(ok(await as('wh.assoc').get('/api/notifications')).body)).toContain('approved and applied');
+    // voiding after the cut-off also goes to the Owner
+    const v = ok(await as('wh.assoc').post(`/api/expenses/${expId}/void`).send({ reason: 'cancelled purchase' }).expect(201)).body; expect(v.requested).toBe(true);
+    const vr = await prisma.approvalRequest.findFirstOrThrow({ where: { type: 'EXPENSE_EDIT', documentId: expId, status: 'PENDING' } });
+    ok(await as('admin').post(`/api/approvals/${vr.id}/decide`).send({ decision: 'APPROVE' }));
+    expect((await prisma.expenseDoc.findUniqueOrThrow({ where: { id: expId } })).voidedAt).toBeTruthy(); expect(await bal()).toBe(before + 850);
   });
 });

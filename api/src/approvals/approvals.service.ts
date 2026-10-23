@@ -77,9 +77,9 @@ export class ApprovalsService implements OnApplicationBootstrap {
     const rows = await this.prisma.db.approvalRequest.findMany({ where, include: { decisions: { include: { user: { select: { fullName: true } } } } }, orderBy: { createdAt: 'desc' } });
     const oldest = rows.length ? Math.floor((Date.now() - Math.min(...rows.map((r) => r.createdAt.getTime()))) / 86400000) : 0;
     const requesterIds = [...new Set(rows.map((r) => r.requestedBy))];
-    const requesters = await this.prisma.db.user.findMany({ where: { id: { in: requesterIds } }, select: { id: true, fullName: true } });
-    const byId = new Map(requesters.map((u) => [u.id, u.fullName]));
-    return { count: rows.length, oldestDays: oldest, items: rows.map((r) => ({ ...r, requesterName: byId.get(r.requestedBy) ?? r.requestedBy })) };
+    const requesters = await this.prisma.db.user.findMany({ where: { id: { in: requesterIds } }, select: { id: true, fullName: true, role: { select: { name: true } } } });
+    const byId = new Map(requesters.map((u) => [u.id, u.fullName])); const roleOf = new Map(requesters.map((u) => [u.id, u.role.name]));
+    return { count: rows.length, oldestDays: oldest, items: rows.map((r) => ({ ...r, requesterName: byId.get(r.requestedBy) ?? r.requestedBy, requesterRole: roleOf.get(r.requestedBy) ?? null })) };
   }
   /** The requester's own requests with their progress (dashboard: pending, and decided in the last 3 days). */
   async mine(userId: string) {

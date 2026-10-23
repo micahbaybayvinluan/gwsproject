@@ -39,7 +39,7 @@ export class PdfService {
     return `<div style="display:flex;align-items:center;gap:14px;border-bottom:3px solid #C8102E;padding-bottom:8px;margin-bottom:10px">${logo}<div><div style="font-size:18px;font-weight:800;letter-spacing:.5px;color:#0B1F3A;text-transform:uppercase">${this.esc(name)}</div>${lines}</div></div>`;
   }
 
-  async render(html: string): Promise<{ buffer: Buffer; contentType: string; ext: 'pdf' | 'html' }> {
+  async render(html: string, opts: { landscape?: boolean } = {}): Promise<{ buffer: Buffer; contentType: string; ext: 'pdf' | 'html' }> {
     // every printed form carries the company letterhead
     html = html.replace('<body>', `<body>${await this.letterheadHtml().catch(() => '')}`);
     // tests read the form text, so they can ask for the HTML version
@@ -49,7 +49,7 @@ export class PdfService {
     try {
       const puppeteer = await import('puppeteer-core');
       const browser = await puppeteer.launch({ executablePath: exe, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
-      try { const page = await browser.newPage(); await page.setContent(html, { waitUntil: 'load' }); const pdf = await page.pdf({ format: 'A4', printBackground: true, margin: { top: '12mm', bottom: '12mm', left: '10mm', right: '10mm' } }); return { buffer: Buffer.from(pdf), contentType: 'application/pdf', ext: 'pdf' }; }
+      try { const page = await browser.newPage(); await page.setContent(html, { waitUntil: 'load' }); const pdf = await page.pdf({ format: 'A4', landscape: !!opts.landscape, printBackground: true, margin: { top: '12mm', bottom: '12mm', left: '10mm', right: '10mm' } }); return { buffer: Buffer.from(pdf), contentType: 'application/pdf', ext: 'pdf' }; }
       finally { await browser.close(); }
     } catch (e) { this.log.warn(`PDF render failed (${(e as Error).message}); returning HTML`); return { buffer: Buffer.from(html), contentType: 'text/html', ext: 'html' }; }
   }

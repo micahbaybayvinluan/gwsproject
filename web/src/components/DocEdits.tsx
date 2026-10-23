@@ -1,3 +1,4 @@
+import { roleWithName } from '@/lib/utils';
 import { locLabel } from '@/lib/utils';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
@@ -54,7 +55,7 @@ export function History({ entityType, id }: { entityType: string; id: string }) 
   if (!q.data?.length) return null;
   return <Card title="Who did what">
     <table className="w-full text-sm"><thead className="text-left text-xs text-slate-500"><tr><th>When</th><th>Action</th><th>Person</th><th>Role</th></tr></thead>
-      <tbody>{q.data.map((h, i) => <tr key={i} className="border-t align-top"><td className="whitespace-nowrap py-1 pr-2 text-xs">{new Date(h.at).toLocaleString()}</td><td className="pr-2">{h.action.replace(/_/g, ' ').toLowerCase()}{h.note ? <span className="text-xs text-slate-500"> — "{h.note}"</span> : null}</td><td className="pr-2">{h.by}{h.idNumber ? <span className="text-xs text-slate-500"> · ID {h.idNumber}</span> : null}</td><td className="text-xs text-slate-500">{h.role ?? ''}</td></tr>)}</tbody></table>
+      <tbody>{q.data.map((h, i) => <tr key={i} className="border-t align-top"><td className="whitespace-nowrap py-1 pr-2 text-xs">{new Date(h.at).toLocaleString()}</td><td className="pr-2">{h.action.replace(/_/g, ' ').toLowerCase()}{h.note ? <span className="text-xs text-slate-500"> — "{h.note}"</span> : null}</td><td className="pr-2">{h.by}{h.idNumber ? <span className="text-xs text-slate-500"> · ID {h.idNumber}</span> : null}</td><td className="text-xs text-slate-500">{h.role ? roleWithName(h.role, h.by) : ''}</td></tr>)}</tbody></table>
   </Card>;
 }
 

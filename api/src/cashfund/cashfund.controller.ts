@@ -6,8 +6,9 @@ import { Z } from '../common/zod.pipe';
 import type { SessionUser } from '../common/request-context';
 
 const VIEW = ['cashfund.view.all', 'cashfund.manage', 'cashfund.use', 'cashfund.check', 'cashfund.spend', 'franchise.shipping.fill'] as const;
-const Setup = z.object({ imprestAmount: z.number().positive(), fundedFromAccountId: z.string().uuid().nullable().optional(), purpose: z.enum(['GENERAL', 'OFFICE', 'FRANCHISE']).optional(), name: z.string().trim().min(2).max(80).optional() });
+const Setup = z.object({ imprestAmount: z.number().positive(), fundedFromAccountId: z.string().uuid().nullable().optional(), purpose: z.enum(['GENERAL', 'OFFICE', 'FRANCHISE']).optional(), name: z.string().trim().min(2).max(80).optional(), voucherStart: z.number().int().min(1).max(999999).optional() });
 const TopUp = z.object({ amount: z.number().positive(), fromAccountId: z.string().uuid(), notes: z.string().max(200).optional() });
+const Advance = z.object({ kind: z.enum(['IN', 'OUT', 'RETURN']), amount: z.number().positive().max(999999999), counterAccountId: z.string().uuid(), personName: z.string().trim().max(80).nullable().optional(), reference: z.string().trim().max(80).nullable().optional(), notes: z.string().trim().max(300).nullable().optional(), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() });
 const Replenish = z.object({ amount: z.number().positive().optional(), date: z.string().optional() });
 const Check = z.object({ countedAmount: z.number().nonnegative(), reason: z.string().optional() });
 
@@ -16,8 +17,11 @@ const Check = z.object({ countedAmount: z.number().nonnegative(), reason: z.stri
 export class CashFundController {
   constructor(private svc: CashFundService) {}
   @Get() @RequireAnyPermission(...VIEW) list(@CurrentUser() u: SessionUser, @Query('purpose') purpose?: string) { return this.svc.list(u, { purpose }); }
+  @Get('advance-accounts') @RequireAnyPermission(...VIEW) advanceAccounts() { return this.svc.advanceAccounts(); }
   @Get(':id') @RequireAnyPermission(...VIEW) get(@Param('id') id: string, @CurrentUser() u: SessionUser) { return this.svc.get(id, u); }
   @Get(':id/franchise-drs') @RequireAnyPermission(...VIEW) franchiseDrs(@Param('id') id: string, @CurrentUser() u: SessionUser) { return this.svc.franchiseDrs(id, u); }
+  @Get(':id/advances') @RequireAnyPermission(...VIEW) advances(@Param('id') id: string, @CurrentUser() u: SessionUser) { return this.svc.openAdvances(id, u); }
+  @Post(':id/advance') @RequireAnyPermission('cashfund.spend', 'cashfund.manage') advance(@Param('id') id: string, @Body(Z(Advance)) dto: z.infer<typeof Advance>, @CurrentUser() u: SessionUser) { return this.svc.advance(id, dto, u); }
   @Put(':id') @RequirePermission('cashfund.manage') @Audited('CashFund', 'SETUP') setup(@Param('id') id: string, @Body(Z(Setup)) dto: z.infer<typeof Setup>, @CurrentUser() u: SessionUser) { return this.svc.setup(id, dto, u); }
   @Post(':id/top-up') @RequirePermission('cashfund.manage') @Audited('CashFund', 'TOPUP') topUp(@Param('id') id: string, @Body(Z(TopUp)) dto: z.infer<typeof TopUp>, @CurrentUser() u: SessionUser) { return this.svc.topUp(id, dto, u); }
   @Post(':id/replenish') @RequireAnyPermission('cashfund.use', 'cashfund.manage') @Audited('CashFund', 'REPLENISH') replenish(@Param('id') id: string, @Body(Z(Replenish)) dto: z.infer<typeof Replenish>, @CurrentUser() u: SessionUser) { return this.svc.replenish(id, dto, u); }

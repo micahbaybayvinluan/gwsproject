@@ -887,6 +887,12 @@ model ExpenseDoc {
   isMain            Boolean   @default(false) @map("is_main")
   /// paid from this cash fund (a location may have more than one), and the franchise DR it was paid for
   cashFundId        String?   @map("cash_fund_id")
+  /// Cash fund money given out before the final amount / receipt is known: it is an advance to the liable person until it is liquidated (edited), then it becomes the expense.
+  forLiquidation    Boolean   @default(false) @map("for_liquidation")
+  liableEmployeeId  String?   @map("liable_employee_id")
+  liableName        String?   @map("liable_name")
+  liquidatedAt      DateTime? @map("liquidated_at")
+  liquidatedBy      String?   @map("liquidated_by")
   salesDocId        String?   @map("sales_doc_id")
   voidedAt          DateTime? @map("voided_at")
   voidedBy          String?   @map("voided_by")
@@ -1723,6 +1729,8 @@ model CashFund {
   name          String   @default("Cash fund")
   /// the fund's own GL petty-cash account; empty = the branch's template account "Petty Cash - {branch}"
   accountId     String?  @map("account_id")
+  /// the number of the first daily voucher of this fund in the cash fund report (the next days follow)
+  voucherStart  Int      @default(1) @map("voucher_start")
   imprestAmount Decimal  @map("imprest_amount") @db.Decimal(14, 2)
   balance       Decimal  @db.Decimal(14, 2)
   active        Boolean  @default(true)
@@ -1751,6 +1759,10 @@ model CashFundTxn {
   salesDocId         String? @map("sales_doc_id")
   franchiseInvoiceId String? @map("franchise_invoice_id")
   franchisePaymentId String? @map("franchise_payment_id")
+  /// the other side of the movement: the "Advances from …" / "Advances to …" / funding account, and who borrowed or lent
+  counterAccountId   String? @map("counter_account_id")
+  personName         String? @map("person_name")
+  reference          String?
   notes        String?
   createdBy    String?  @map("created_by")
   createdAt    DateTime @default(now()) @map("created_at")

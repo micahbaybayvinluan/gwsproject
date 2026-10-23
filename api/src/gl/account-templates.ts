@@ -84,6 +84,7 @@ export const GLOBAL_ACCOUNTS: { key: string; code?: string; title: string; class
   { key: 'HDMF_LOAN_PAYABLE', code: '4049B', title: 'HDMF Loan Payable', class: 'CURRENT_LIABILITY' },
   { key: 'THIRTEENTH_MONTH_PAYABLE', title: '13th Month Pay Payable', class: 'CURRENT_LIABILITY' },
   { key: 'OUTPUT_TAX', code: '4030', title: 'Output Tax', class: 'CURRENT_LIABILITY' },
+  { key: 'ADV_LIQUIDATION', title: 'Advances for Liquidation', class: 'ADVANCES_TO' },
   { key: 'ADV_EMPLOYEES', code: '2550', title: 'Advances to Employees (Loans)', class: 'ADVANCES_TO' },
   { key: 'SALES_WAREHOUSE_FRANCHISE', code: '6000', title: 'Sales - Warehouse Franchise', class: 'REVENUE' },
   { key: 'SALES_RETURNS', title: 'Sales - Returns', class: 'REVENUE' },
